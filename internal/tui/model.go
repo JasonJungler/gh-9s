@@ -95,6 +95,8 @@ type model struct {
 	rerunWait    int                       // polls left to wait for a re-run's new attempt to show up
 	logJump      bool                      // the next log to load opens at its first failure
 	pendingRun   *runAct                   // a run action waiting for its confirmation
+	askIcons     bool                      // the first-run question about Nerd Font icons is on screen
+	iconHelp     bool                      // ... with its help text
 	sendingKey   string                    // the PR whose review is being sent right now
 	pendingDraft *pendingDraft             // a comment being written in a dialog
 	pending      *prAction                 // the PR action being collected through dialogs
@@ -180,6 +182,7 @@ func Run() error {
 	if rs, err := recent.Load(recent.DefaultPath()); err == nil {
 		m.recents = rs
 	}
+	m = m.startIcons()
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }

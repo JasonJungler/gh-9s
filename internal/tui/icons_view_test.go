@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -133,5 +134,18 @@ func TestNewMarkAndTheDiffListUseTheIcons(t *testing.T) {
 	}
 	if w := ansi.StringWidth(line); w != 40 {
 		t.Errorf("the list line is %d wide; want exactly 40", w)
+	}
+}
+
+func TestNewRowsGetTheNewIconInNerdMode(t *testing.T) {
+	f := installInbox(t)
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 1, "one", "2026-10-24T10:00:00Z")}
+	useNerd(t)
+	m := openInbox(t)
+	f.now = f.now.Add(2 * time.Minute)
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 2, "two", "2026-10-24T11:00:00Z"), issueItem("github.com", "acme/api", 1, "one", "2026-10-24T10:00:00Z")}
+	m = poll(t, m)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, g(icons.New)+" acme/api") {
+		t.Errorf("the newcomer is marked with the new icon:\n%s", v)
 	}
 }

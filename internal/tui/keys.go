@@ -15,6 +15,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.askIcons {
+		return m.iconAskKey(k)
+	}
 	if m.dlg != nil {
 		return m.dialogKey(k)
 	}
@@ -295,6 +298,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m.goTop(viewIssues)
 	case "inbox", "in":
 		return m.goTop(viewInbox)
+	case "icons":
+		return m.iconsCommand()
 	case "settings":
 		if m.view == viewSettings {
 			return m, nil

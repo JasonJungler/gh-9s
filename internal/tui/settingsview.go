@@ -119,9 +119,11 @@ func settingsKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	case "G", "end":
 		st.sel = n - 1
 	case "enter", " ", "space", "right", "l":
-		return m.cycleSetting(st, 1), nil, true
+		next, cmd := m.cycleSetting(st, 1)
+		return next, cmd, true
 	case "left", "h":
-		return m.cycleSetting(st, -1), nil, true
+		next, cmd := m.cycleSetting(st, -1)
+		return next, cmd, true
 	default:
 		return m, nil, false
 	}
@@ -134,14 +136,18 @@ func settingsKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	return m.withScreenData(viewSettings, st), nil, true
 }
 
-func (m model) cycleSetting(st settingsState, dir int) model {
+func (m model) cycleSetting(st settingsState, dir int) (model, tea.Cmd) {
 	if st.sel >= len(settings.Registry) {
-		return m
+		return m, nil
 	}
 	d := settings.Registry[st.sel]
 	applied, err := m.cfg().Cycle(d.Key, dir)
 	m.status = settingStatus(m.cfg(), d.Key, applied, err)
-	return m.withScreenData(viewSettings, st)
+	m = m.withScreenData(viewSettings, st)
+	if d.Key == "icons" {
+		return m.afterIconsChanged()
+	}
+	return m, nil
 }
 
 // settingStatus words the outcome of a change for the status line.
@@ -173,6 +179,9 @@ func (m model) setCommand(args []string) (tea.Model, tea.Cmd) {
 	case 2:
 		applied, err := m.cfg().Set(args[0], args[1])
 		m.status = settingStatus(m.cfg(), args[0], applied, err)
+		if strings.EqualFold(args[0], "icons") {
+			return m.afterIconsChanged()
+		}
 	default:
 		m.status = styErr.Render("usage: :set key value")
 	}

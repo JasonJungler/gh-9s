@@ -10,7 +10,7 @@ import (
 
 // builtinCommands are the commands the command bar suggests, in the order they are offered.
 // (Short forms such as r, wf and pr keep working; they are just not suggested.)
-var builtinCommands = []string{"runs", "workflows", "pulls", "issues", "inbox", "settings", "set", "fav", "repo", "cpr", "quit"}
+var builtinCommands = []string{"runs", "workflows", "pulls", "issues", "inbox", "icons", "settings", "set", "fav", "repo", "cpr", "quit"}
 
 const maxCompletions = 8
 
@@ -107,7 +107,7 @@ func (m model) resolveCommand(c string) string {
 func (m model) knownCommand(c string) bool {
 	switch strings.ToLower(strings.TrimSpace(c)) {
 	case "runs", "run", "r", "workflows", "workflow", "wf", "w", "pulls", "pull", "prs", "pr",
-		"issues", "issue", "is", "inbox", "in", "settings", "set", "fav", "favs", "favorites", "cpr", "checks", "q", "quit", "exit", "repo":
+		"issues", "issue", "is", "inbox", "in", "icons", "settings", "set", "fav", "favs", "favorites", "cpr", "checks", "q", "quit", "exit", "repo":
 		return true
 	}
 	if m.favs != nil {

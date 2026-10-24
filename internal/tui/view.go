@@ -69,6 +69,9 @@ func (m model) widths() []int {
 
 // View renders the header, the current view, and the footer.
 func (m model) View() string {
+	if m.askIcons {
+		return m.iconAskView()
+	}
 	var b strings.Builder
 	title := fmt.Sprintf(" gh9s  %s@%s  <%s>", m.repo, m.branch, viewNames[m.view])
 	if m.target != (ghcli.RepoRef{}) {
