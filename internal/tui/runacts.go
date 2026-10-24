@@ -11,6 +11,10 @@ import (
 	"github.com/MurabitoB/gh-9s/internal/graph"
 )
 
+// rerunPolls is how many polls (5 s each) to wait for a re-run's new attempt to show up before
+// believing a "completed" status again.
+const rerunPolls = 12
+
 // doRunAction does an action on a run; tests replace it.
 var doRunAction = ghcli.DoRunAction
 
@@ -29,18 +33,21 @@ func runRule(a ghcli.RunAction, status, conclusion string) (ok bool, why string)
 	finished := status == "completed"
 	switch a {
 	case ghcli.RunRerun:
-		if !finished {
+		switch {
+		case !finished:
 			return false, "this run is still in progress"
+		case conclusion == "action_required":
+			return false, "this run is waiting for approval on GitHub"
 		}
 		return true, ""
 	case ghcli.RunRerunFailed:
 		switch {
 		case !finished:
 			return false, "this run is still in progress"
-		case conclusion == "success":
-			return false, "nothing failed to re-run"
+		case conclusion == "failure" || conclusion == "timed_out" || conclusion == "cancelled":
+			return true, ""
 		}
-		return true, ""
+		return false, "nothing failed to re-run"
 	case ghcli.RunCancel:
 		if finished {
 			return false, "this run already finished"
@@ -82,7 +89,8 @@ func init() {
 			return m, nil
 		}
 		if m.view != p.view || m.curTarget() != p.target {
-			return m, nil // the screen moved on while the question was open
+			m.status = styDim.Render("the screen changed while you were answering: nothing was done")
+			return m, nil
 		}
 		return m, func() tea.Msg {
 			return runActDoneMsg{act: *p, err: doRunAction(p.target, p.id, p.action)}
@@ -98,6 +106,10 @@ func (m model) startRunAct(a ghcli.RunAction, id, status, conclusion string) (mo
 		return m, nil
 	}
 	t := m.curTarget()
+	if t.Owner == "" || t.Name == "" {
+		m.status = styErr.Render("don't know which repo this run is in yet: try again in a moment")
+		return m, nil
+	}
 	p := &runAct{action: a, target: t, id: id, view: m.view, label: displayRef(t)}
 	m.pendingRun = p
 	var title, detail string
@@ -117,27 +129,44 @@ func (m model) startRunAct(a ghcli.RunAction, id, status, conclusion string) (mo
 // runActDone shows the outcome. A re-run that GitHub accepted goes to that run's graph and watches
 // it again; cancel and delete reload what is on screen.
 func (m model) runActDone(msg runActDoneMsg) (model, tea.Cmd) {
+	act := msg.act
 	if msg.err != nil {
 		m.status = styErr.Render("✗ " + msg.err.Error())
 		return m, nil
 	}
-	switch msg.act.action {
+	// the user may have moved on while gh was working: only act where the run still is
+	here := m.curTarget() == act.target && (m.view == act.view || (act.view == viewGraph && m.view == viewJobs) || (act.view == viewJobs && m.view == viewGraph))
+	onRunScreen := (act.view == viewGraph || act.view == viewJobs) && here && m.runID == act.id
+	switch act.action {
 	case ghcli.RunRerun, ghcli.RunRerunFailed:
-		m.status = styOK.Render("✓ re-running run " + msg.act.id)
-		m.runID, m.target = msg.act.id, msg.act.target
-		m.graph, m.gsel, m.top, m.expanded, m.runStatus, m.runMeta = graph.Graph{}, 0, 0, nil, "", ghcli.RunMeta{}
-		return m, m.push(viewGraph)
-	case ghcli.RunCancel:
-		m.status = styOK.Render("✓ cancelled run " + msg.act.id)
-	default:
-		m.status = styOK.Render("✓ deleted run " + msg.act.id)
-		if m.view == viewGraph || m.view == viewJobs { // the run being looked at is gone: back to where we came from
-			status := m.status
-			next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
-			nm := next.(model)
-			nm.status = status
-			return nm, cmd
+		m.status = styOK.Render("✓ re-running run " + act.id)
+		if !here || (act.view != viewRuns && !onRunScreen) {
+			return m, nil
 		}
+		m.runID, m.target = act.id, act.target
+		m.graph, m.gsel, m.top, m.expanded, m.runStatus, m.runMeta = graph.Graph{}, 0, 0, nil, "", ghcli.RunMeta{}
+		m.rerunWait = rerunPolls
+		if act.view == viewRuns {
+			return m, m.push(viewGraph)
+		}
+		return m, m.switchTo(viewGraph) // already on this run's screen: refresh it in place, no second copy on the back stack
+	case ghcli.RunCancel:
+		m.status = styOK.Render("✓ cancelled run " + act.id)
+	default:
+		m.status = styOK.Render("✓ deleted run " + act.id)
+		if onRunScreen { // the run being looked at is gone: back to where we came from
+			status := m.status
+			if next, cmd, ok := m.popBack(); ok {
+				next.status = status
+				return next, cmd
+			}
+		}
+		if act.view != viewRuns || !here {
+			return m, nil
+		}
+	}
+	if !here {
+		return m, nil
 	}
 	m.loading = true
 	return m, m.fetch()

@@ -89,6 +89,7 @@ type model struct {
 	pendingMerge *mergeAction              // the merge being collected through dialogs
 	prefsFile    string                    // where small remembered choices live ("" = do not persist)
 	drafts       *drafts.Store             // inline review comments not sent yet, kept on disk
+	rerunWait    int                       // polls left to wait for a re-run's new attempt to show up
 	logJump      bool                      // the next log to load opens at its first failure
 	pendingRun   *runAct                   // a run action waiting for its confirmation
 	sendingKey   string                    // the PR whose review is being sent right now
@@ -122,6 +123,7 @@ type dataMsg struct {
 	graph  *graph.Graph
 	jobs   []graph.Job
 	run    ghcli.RunMeta // the run's own status/conclusion (graph and jobs views)
+	runID  string        // which run this data is of: a late answer for another run is dropped
 	specs  map[string][]workflow.JobSpec
 	err    error
 }

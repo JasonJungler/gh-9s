@@ -65,19 +65,8 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "backspace":
 		if m.filter != "" {
 			m.filter, m.cursor, m.top = "", 0, 0
-		} else if len(m.back) > 0 {
-			prev := m.back[len(m.back)-1]
-			m.back = m.back[:len(m.back)-1]
-			if prev != viewRuns {
-				m.wfID, m.wfName = "", ""
-			}
-			if prev == viewFavs {
-				m.target = m.base
-			}
-			if prev == viewChecks || prev == viewPRDetail {
-				m.target = m.prTarget // a check may have taken us to a run in another repo
-			}
-			return m, m.switchTo(prev)
+		} else if next, cmd, ok := m.popBack(); ok {
+			return next, cmd
 		}
 	case "j", "down":
 		m.cursor = min(m.cursor+1, max(0, n-1))
@@ -182,7 +171,7 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 		return m, m.push(viewRuns)
 	case viewRuns:
 		m.runID = r.id
-		m.graph, m.gsel, m.top, m.expanded, m.runStatus = graph.Graph{}, 0, 0, nil, ""
+		m.graph, m.gsel, m.top, m.expanded, m.runStatus, m.runMeta = graph.Graph{}, 0, 0, nil, "", ghcli.RunMeta{}
 		return m, m.push(viewGraph)
 	case viewJobs:
 		m.jobID, m.jobName, m.jobURL = r.id, r.extra, r.url
@@ -558,4 +547,24 @@ func (m model) walkHistory(older bool) model {
 		m.input = m.history[m.histPos]
 	}
 	return m
+}
+
+// popBack goes back one screen, with the bookkeeping going back needs; ok is false at the first screen.
+func (m model) popBack() (model, tea.Cmd, bool) {
+	if len(m.back) == 0 {
+		return m, nil, false
+	}
+	prev := m.back[len(m.back)-1]
+	m.back = m.back[:len(m.back)-1]
+	if prev != viewRuns {
+		m.wfID, m.wfName = "", ""
+	}
+	if prev == viewFavs {
+		m.target = m.base
+	}
+	if prev == viewChecks || prev == viewPRDetail {
+		m.target = m.prTarget // a check may have taken us to a run in another repo
+	}
+	cmd := m.switchTo(prev)
+	return m, cmd, true
 }

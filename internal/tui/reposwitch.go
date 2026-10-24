@@ -58,7 +58,7 @@ func validRepoName(r ghcli.RepoRef) bool {
 func (m *model) switchRepo(ref ghcli.RepoRef) tea.Cmd {
 	m.base, m.target = ref, ref
 	m.back, m.wfID, m.wfName, m.pr = nil, "", "", ""
-	m.runID, m.graph, m.gsel, m.expanded, m.runStatus = "", graph.Graph{}, 0, nil, ""
+	m.runID, m.graph, m.gsel, m.expanded, m.runStatus, m.runMeta = "", graph.Graph{}, 0, nil, "", ghcli.RunMeta{}
 	v := m.view
 	switch v {
 	case viewRuns, viewWorkflows, viewPRs, viewFavs, viewIssues:

@@ -30,6 +30,6 @@ func (m model) openCheck(r row) (tea.Model, tea.Cmd) {
 		m.target = link.Repo
 	}
 	m.runID = link.RunID
-	m.graph, m.gsel, m.top, m.expanded, m.runStatus = graph.Graph{}, 0, 0, nil, ""
+	m.graph, m.gsel, m.top, m.expanded, m.runStatus, m.runMeta = graph.Graph{}, 0, 0, nil, "", ghcli.RunMeta{}
 	return m, m.push(viewGraph)
 }

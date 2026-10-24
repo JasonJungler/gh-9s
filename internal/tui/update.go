@@ -28,7 +28,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.runID != "":
 			m.runID, m.target = msg.runID, msg.target
-			m.graph, m.gsel, m.top, m.expanded, m.runStatus = graph.Graph{}, 0, 0, nil, ""
+			m.graph, m.gsel, m.top, m.expanded, m.runStatus, m.runMeta = graph.Graph{}, 0, 0, nil, "", ghcli.RunMeta{}
 			m.status = styOK.Render("✓ triggered " + msg.workflow + " → run " + msg.runID)
 			return m, m.push(viewGraph)
 		case msg.dispatched:
@@ -131,6 +131,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.view != m.view {
 			return m, nil
 		}
+		if (msg.view == viewGraph || msg.view == viewJobs || msg.view == viewLogs) && msg.runID != "" && msg.runID != m.runID {
+			return m, nil // a late answer about a run we have left
+		}
 		m.loading = false
 		m.err = msg.err
 		if msg.latest != nil {
@@ -223,6 +226,16 @@ func (m model) observeRun(meta ghcli.RunMeta) (model, tea.Cmd) {
 	if runFinished(m.runStatus, meta.Status) {
 		text := "gh-9s: run " + m.runID + " " + runOutcome(meta.Conclusion)
 		cmd = func() tea.Msg { notifier(text, text); return nil }
+	}
+	if m.rerunWait > 0 { // just re-run: GitHub may still report the old attempt as completed
+		if meta.Status == "completed" {
+			m.rerunWait--
+			if m.rerunWait > 0 {
+				return m, nil
+			}
+		} else {
+			m.rerunWait = 0
+		}
 	}
 	m.runStatus, m.runMeta = meta.Status, meta
 	return m, cmd

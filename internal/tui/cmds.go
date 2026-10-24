@@ -77,7 +77,7 @@ func (m model) fetch() tea.Cmd {
 				t, latest = fetchFavorites(snap, cache, time.Now())
 			}
 		}
-		return dataMsg{view: v, tbl: t, logs: logs, latest: latest, graph: gr, jobs: gjobs, specs: newSpecs, run: meta, err: err}
+		return dataMsg{view: v, runID: run, tbl: t, logs: logs, latest: latest, graph: gr, jobs: gjobs, specs: newSpecs, run: meta, err: err}
 	}
 }
 
