@@ -129,10 +129,10 @@ func readRaw(path string) (map[string]json.RawMessage, error) {
 		return nil, err
 	}
 	if st.IsDir() {
-		return nil, fmt.Errorf("%s is a directory, not a settings file", path)
+		return nil, errors.New("the settings file is a directory")
 	}
 	if st.Size() > maxFile {
-		return nil, fmt.Errorf("%s is too large to be a settings file", path)
+		return nil, errors.New("the settings file is too large")
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -143,7 +143,7 @@ func readRaw(path string) (map[string]json.RawMessage, error) {
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON (%v)", path, err)
+		return nil, fmt.Errorf("the settings file is not valid JSON (%v)", err)
 	}
 	return raw, nil
 }

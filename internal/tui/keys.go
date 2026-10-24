@@ -281,6 +281,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 	c = m.resolveCommand(c)
 	if f := strings.Fields(c); len(f) > 0 && strings.ToLower(f[0]) == "repo" {
 		return m.repoCommand(f[1:])
+	} else if len(f) > 0 && strings.ToLower(f[0]) == "set" {
+		return m.setCommand(f[1:])
 	}
 	switch strings.ToLower(c) {
 	case "runs", "run", "r":
@@ -293,6 +295,9 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m.goTop(viewIssues)
 	case "inbox", "in":
 		return m.goTop(viewInbox)
+	case "settings":
+		cmd := m.push(viewSettings)
+		return m, cmd
 	case "fav", "favs", "favorites":
 		return m.goTop(viewFavs)
 	case "cpr", "checks":
