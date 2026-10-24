@@ -58,6 +58,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form = &f
 		}
 		return m, nil
+	case choicesMsg:
+		return m.choicesLoaded(msg), nil
 	case mergeInfoMsg:
 		return m.mergeInfo(msg), nil
 	case prActionDoneMsg:

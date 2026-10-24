@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,11 @@ var (
 	fetchIssueList = fetchIssues
 	fetchIssue     = ghcli.FetchIssue
 	commentIssue   = ghcli.CommentIssue
+	listLabels     = ghcli.ListLabels
+	listAssignees  = ghcli.ListAssignees
+	editIssue      = ghcli.EditIssue
+	closeIssue     = ghcli.CloseIssue
+	reopenIssue    = ghcli.ReopenIssue
 )
 
 // issueState is what the issue screen keeps in the model.
@@ -60,8 +66,48 @@ func init() {
 		},
 		key:    issueKey,
 		body:   issueBody,
-		footer: "C comment  o open  j/k scroll  g/G top/bottom",
+		footer: "C comment  x close  X reopen  l labels  s assignees  o open  j/k scroll",
 	})
+	dialogHandlers["issue.close"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
+		p := m.pending
+		m.pending = nil
+		if !r.ok || p == nil {
+			return m, nil
+		}
+		return m, func() tea.Msg {
+			return prActionDoneMsg{text: "closed " + p.label, err: closeIssue(p.target, p.number)}
+		}
+	}
+	dialogHandlers["issue.labels"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
+		p := m.pending
+		m.pending = nil
+		if !r.ok || p == nil {
+			return m, nil
+		}
+		add, remove := diffNames(p.current, r.values)
+		if len(add)+len(remove) == 0 {
+			m.status = styDim.Render("no label changes")
+			return m, nil
+		}
+		return m, func() tea.Msg {
+			return prActionDoneMsg{text: "updated labels on " + p.label, err: editIssue(p.target, p.number, add, remove, nil, nil)}
+		}
+	}
+	dialogHandlers["issue.assignees"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
+		p := m.pending
+		m.pending = nil
+		if !r.ok || p == nil {
+			return m, nil
+		}
+		add, remove := diffNames(p.current, r.values)
+		if len(add)+len(remove) == 0 {
+			m.status = styDim.Render("no assignee changes")
+			return m, nil
+		}
+		return m, func() tea.Msg {
+			return prActionDoneMsg{text: "updated assignees on " + p.label, err: editIssue(p.target, p.number, nil, nil, add, remove)}
+		}
+	}
 	dialogHandlers["issue.comment"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		p := m.pending
 		m.pending = nil
@@ -138,9 +184,48 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	case "G", "end":
 		st.scroll = maxScroll
 	case "C":
-		label := displayRef(m.curTarget()) + "#" + m.issue
-		m.pending = &prAction{target: m.target, number: m.issue, label: label}
-		return m.withDialog(newTextDialog("issue.comment", "Comment on "+label, "Your comment")), nil, true
+		m, p := m.startIssueAction(st)
+		return m.withDialog(newTextDialog("issue.comment", "Comment on "+p.label, "Your comment")), nil, true
+	case "x":
+		if st.d.State != "OPEN" {
+			m.status = styDim.Render(stateWord(st.d, "closed") + " — nothing to close")
+			return m, nil, true
+		}
+		m, p := m.startIssueAction(st)
+		return m.withDialog(newConfirmDialog("issue.close", "Close "+p.label+"?", st.d.Title)), nil, true
+	case "X":
+		if st.d.State == "OPEN" {
+			m.status = styDim.Render("already open — nothing to reopen")
+			return m, nil, true
+		}
+		if st.d.State == "" {
+			m.status = styDim.Render("still loading the issue")
+			return m, nil, true
+		}
+		m, p := m.startIssueAction(st)
+		m.pending = nil
+		return m, func() tea.Msg {
+			return prActionDoneMsg{text: "reopened " + p.label, err: reopenIssue(p.target, p.number)}
+		}, true
+	case "l", "s":
+		m, p := m.startIssueAction(st)
+		kind := "labels"
+		p.current = st.d.Labels
+		if k.String() == "s" {
+			kind, p.current = "assignees", st.d.Assignees
+		}
+		m.status = styDim.Render("loading " + kind + "…")
+		tg := p.target
+		return m, func() tea.Msg {
+			var names []string
+			var err error
+			if kind == "labels" {
+				names, err = listLabels(tg)
+			} else {
+				names, err = listAssignees(tg)
+			}
+			return choicesMsg{kind: kind, names: names, err: err}
+		}, true
 	case "o":
 		if st.d.URL != "" {
 			_ = openURL(st.d.URL)
@@ -193,4 +278,77 @@ func issueLines(d ghcli.IssueDetail, width int) []string {
 	}
 	out = append(out, "", "── Discussion ──")
 	return append(out, discussionLines(d.Comments, nil, width)...)
+}
+
+// startIssueAction remembers which issue an action was started for.
+func (m model) startIssueAction(st issueState) (model, *prAction) {
+	p := &prAction{target: m.target, number: m.issue, label: displayRef(m.curTarget()) + "#" + m.issue}
+	m.pending = p
+	return m, p
+}
+
+func stateWord(d ghcli.IssueDetail, word string) string {
+	if d.State == "" {
+		return "still loading the issue"
+	}
+	return "already " + word
+}
+
+// choicesMsg carries the repo's labels or assignable users for a multi-choice dialog.
+type choicesMsg struct {
+	kind  string // "labels" or "assignees"
+	names []string
+	err   error
+}
+
+// choicesLoaded opens the multi-choice dialog. The issue's current values are always on the
+// list, even if the repo no longer offers them, so they can still be removed.
+func (m model) choicesLoaded(msg choicesMsg) model {
+	p := m.pending
+	if p == nil || m.view != viewIssue {
+		return m
+	}
+	if msg.err != nil {
+		m.pending = nil
+		m.status = styErr.Render("✗ " + msg.err.Error())
+		return m
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, n := range append(append([]string(nil), msg.names...), p.current...) {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	sort.SliceStable(names, func(i, j int) bool { return strings.ToLower(names[i]) < strings.ToLower(names[j]) })
+	choices := make([]choice, len(names))
+	for i, n := range names {
+		choices[i] = choice{label: n, value: n}
+	}
+	id, title := "issue.labels", "Labels for "+p.label
+	if msg.kind == "assignees" {
+		id, title = "issue.assignees", "Assignees for "+p.label
+	}
+	return m.withDialog(newChoiceDialog(id, title, choices, true, p.current))
+}
+
+// diffNames reports what to add and what to remove to turn old into want.
+func diffNames(old, want []string) (add, remove []string) {
+	had, wanted := map[string]bool{}, map[string]bool{}
+	for _, n := range old {
+		had[n] = true
+	}
+	for _, n := range want {
+		wanted[n] = true
+		if !had[n] {
+			add = append(add, n)
+		}
+	}
+	for _, n := range old {
+		if !wanted[n] {
+			remove = append(remove, n)
+		}
+	}
+	return add, remove
 }

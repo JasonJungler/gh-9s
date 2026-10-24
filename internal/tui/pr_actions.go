@@ -15,11 +15,12 @@ var (
 // prAction is a PR action being put together through dialogs. It remembers the repo and
 // number it was started for, so the answer always goes to the PR the user was looking at.
 type prAction struct {
-	target ghcli.RepoRef
-	number string
-	label  string // "acme/api#482", shown in every question
-	kind   ghcli.ReviewKind
-	body   string
+	target  ghcli.RepoRef
+	number  string
+	label   string // "acme/api#482", shown in every question
+	kind    ghcli.ReviewKind
+	body    string
+	current []string // labels or assignees the issue has now, for diffing a multi-choice answer
 }
 
 // prActionDoneMsg reports how an action ended.
