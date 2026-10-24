@@ -68,6 +68,11 @@ type model struct {
 
 	mode                          inputMode
 	input                         string
+	compBase                      string   // what was typed when Tab started cycling suggestions ("" = not cycling)
+	compIdx                       int      // which suggestion Tab last inserted
+	history                       []string // commands run before, oldest first
+	histPos                       int      // position while walking history with up/down (-1 = not walking)
+	histDraft                     string   // what was being typed when the history walk started
 	filter                        string
 	runID, jobID, jobName, jobURL string // jobs / logs scope
 	logs                          []string

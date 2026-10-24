@@ -9,6 +9,7 @@ import (
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func (m model) graphLines() ([]string, graph.Style) {
@@ -20,7 +21,8 @@ func (m model) logHeight() int { return m.bodyHeight() + 1 }
 
 func (m model) maxTop() int { return max(0, len(m.logs)-m.logHeight()) }
 
-func (m model) bodyHeight() int { return max(1, m.height-5) }
+// bodyHeight is how many table rows fit; the prompt box, when open, takes three lines of the screen.
+func (m model) bodyHeight() int { return max(1, m.height-5-m.promptRows()) }
 
 func trunc(s string, w int) string {
 	if w <= 0 {
@@ -132,15 +134,18 @@ func (m model) View() string {
 	}
 	b.WriteString(styHeader.Render(strings.TrimSpace(title)) + "\n")
 	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <4>issues <:fav>favorites <:repo> switch repo <P>current-PR <:>cmd </>filter") + "\n")
+	if m.promptActive() {
+		b.WriteString(m.promptBox() + "\n")
+	}
 
 	if m.dlg != nil {
-		return b.String() + "\n" + m.dialogView()
+		return b.String() + m.boxed(m.dialogView())
 	}
 	if m.picker != nil {
-		return b.String() + "\n" + m.pickerView()
+		return b.String() + m.boxed(m.pickerView())
 	}
 	if m.form != nil {
-		return b.String() + "\n" + m.form.view(m.width)
+		return b.String() + m.boxed(m.form.view(m.width))
 	}
 	if s, ok := screens[m.view]; ok && s.body != nil {
 		return b.String() + s.body(m) + m.footer()
@@ -282,18 +287,6 @@ func statusCol(v viewKind) int {
 }
 
 func (m model) footer() string {
-	switch m.mode {
-	case modeFilter:
-		return styKey.Render("/") + m.input + "█"
-	case modeCommand:
-		return styKey.Render(":") + m.input + "█"
-	case modeSearch:
-		return styKey.Render("/") + m.input + "█"
-	case modeAlias:
-		return styKey.Render("alias for "+m.aliasFor.Workflow+" > ") + m.input + "█"
-	case modeConfirm:
-		return styErr.Render(m.confirmMsg)
-	}
 	var keys string
 	switch m.view {
 	case viewRuns:
@@ -325,4 +318,47 @@ func (m model) footer() string {
 		line = styErr.Render(m.banner)
 	}
 	return line + "\n" + styDim.Render(keys)
+}
+
+// promptActive reports whether a one-line prompt (command, filter, search, alias, confirm) is open.
+func (m model) promptActive() bool {
+	switch m.mode {
+	case modeCommand, modeFilter, modeSearch, modeAlias, modeConfirm:
+		return true
+	}
+	return false
+}
+
+func (m model) promptRows() int {
+	if m.promptActive() {
+		return 3
+	}
+	return 0
+}
+
+// boxWidth is the inner width of a bordered box that fills the screen.
+func (m model) boxWidth() int { return max(m.width-2, 20) }
+
+// promptBox draws the open prompt in a rounded box, as k9s does: the text typed so far, the cursor,
+// and (in the command bar) the rest of the best suggestion in grey.
+func (m model) promptBox() string {
+	var content string
+	switch m.mode {
+	case modeConfirm:
+		content = styErr.Render(m.confirmMsg)
+	case modeCommand:
+		content = styKey.Render(":") + m.input + "█" + styDim.Render(m.ghost())
+	case modeAlias:
+		content = styKey.Render("alias for "+m.aliasFor.Workflow+" › ") + m.input + "█"
+	default: // filter and search
+		content = styKey.Render("/") + m.input + "█"
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6")).
+		Width(m.boxWidth()).Render(content)
+}
+
+// boxed puts a dialog, form or picker in the same rounded box, pinned under the header.
+func (m model) boxed(content string) string {
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6")).
+		Padding(0, 1).Width(m.boxWidth()).Render(strings.TrimRight(content, "\n")) + "\n"
 }

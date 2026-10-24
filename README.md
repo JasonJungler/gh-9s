@@ -39,6 +39,8 @@ Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release
 
 Everywhere: `j/k` move, `g/G` top/bottom, `/` filter, `:` command bar, `esc` back, `R` refresh, `o` open in browser, `q` quit.
 
+The `:` command bar, `/` filter, log search and alias entry open in a box under the header, like k9s. The command bar completes as you type: the rest of the best match shows in grey, `Tab` (or `→`) accepts it and `Tab` again cycles through the other matches. Commands complete from the built-ins, your favorite aliases and (after `:repo `) your recent and cached repos. `Enter` on a unique prefix runs it (`:wo` opens workflows), and `↑`/`↓` walk the commands you typed before. Dialogs, forms and the repo picker are boxed at the top too.
+
 **Runs** — `enter` job graph · `l` full log in pager · `L` failed log · `w` watch (`gh run watch`) · `r` rerun · `F` rerun failed · `c` cancel · `d` delete
 
 **Workflows / favorites** — `enter` runs · `t` trigger form · `f` favorite/unfavorite · `a` set alias · `e` enable/disable

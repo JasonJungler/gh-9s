@@ -94,7 +94,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.mode, m.input = modeFilter, m.filter
 	case ":":
-		m.mode, m.input = modeCommand, ""
+		m.mode, m.input, m.histPos = modeCommand, "", -1
 	case "1":
 		return m.goTop(viewRuns)
 	case "2":
@@ -215,6 +215,22 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if k.Type != tea.KeyTab {
+		m.compBase = "" // any other key ends a Tab cycle
+	}
+	if m.mode == modeCommand {
+		switch k.Type {
+		case tea.KeyTab:
+			return m.tabComplete(), nil
+		case tea.KeyRight:
+			if c := m.completions(m.input); len(c) > 0 {
+				m.input = c[0]
+			}
+			return m, nil
+		case tea.KeyUp, tea.KeyDown:
+			return m.walkHistory(k.Type == tea.KeyUp), nil
+		}
+	}
 	switch k.Type {
 	case tea.KeyEsc:
 		if m.mode == modeFilter {
@@ -228,6 +244,10 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		mode, in := m.mode, strings.TrimSpace(m.input)
 		m.mode, m.input = modeNormal, ""
+		if mode == modeCommand && in != "" && (len(m.history) == 0 || m.history[len(m.history)-1] != in) {
+			m.history = append(append([]string(nil), m.history...), in)
+		}
+		m.histPos = -1
 		switch mode {
 		case modeFilter:
 			m.filter, m.cursor, m.top = in, 0, 0
@@ -280,6 +300,7 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) command(c string) (tea.Model, tea.Cmd) {
+	c = m.resolveCommand(c)
 	if f := strings.Fields(c); len(f) > 0 && strings.ToLower(f[0]) == "repo" {
 		return m.repoCommand(f[1:])
 	}
@@ -499,4 +520,44 @@ func prFilterName(f ghcli.PRFilter) string {
 		return "review requested"
 	}
 	return ""
+}
+
+// tabComplete inserts the best suggestion; further Tabs cycle through the others.
+func (m model) tabComplete() model {
+	if m.compBase == "" {
+		m.compBase, m.compIdx = m.input, -1
+	}
+	c := m.completions(m.compBase)
+	if len(c) == 0 {
+		return m
+	}
+	m.compIdx = (m.compIdx + 1) % len(c)
+	m.input = c[m.compIdx]
+	return m
+}
+
+// walkHistory moves through earlier commands; coming back past the newest restores what was typed.
+func (m model) walkHistory(older bool) model {
+	if m.histPos == 0 && m.histDraft == "" && len(m.history) == 0 {
+		return m
+	}
+	if m.histPos == -1 {
+		if !older {
+			return m
+		}
+		m.histDraft, m.histPos = m.input, len(m.history)
+	}
+	if older {
+		m.histPos = max(m.histPos-1, 0)
+	} else {
+		m.histPos++
+	}
+	if m.histPos >= len(m.history) {
+		m.input, m.histPos = m.histDraft, -1
+		return m
+	}
+	if len(m.history) > 0 {
+		m.input = m.history[m.histPos]
+	}
+	return m
 }
