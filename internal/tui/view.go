@@ -107,7 +107,9 @@ func (m model) View() string {
 	if m.view == viewGraph {
 		count = len(m.shown().Nodes)
 	}
-	title += fmt.Sprintf("  [%d]", count)
+	if _, isScreen := screens[m.view]; !isScreen {
+		title += fmt.Sprintf("  [%d]", count)
+	}
 	if m.filter != "" {
 		title += "  /" + m.filter
 	}
@@ -119,6 +121,9 @@ func (m model) View() string {
 
 	if m.form != nil {
 		return b.String() + "\n" + m.form.view(m.width)
+	}
+	if s, ok := screens[m.view]; ok && s.body != nil {
+		return b.String() + s.body(m) + m.footer()
 	}
 	if m.view == viewGraph {
 		return b.String() + m.graphBody() + m.footer()
@@ -266,7 +271,7 @@ func (m model) footer() string {
 	case viewRuns:
 		keys = "enter jobs  l pager-logs  L failed-logs  w watch  r rerun  F rerun-failed  c cancel  d delete  o open"
 	case viewWorkflows:
-		keys = "enter runs  t trigger  f favorites.Favorite  a alias  e enable/disable  o open"
+		keys = "enter runs  t trigger  f favorite  a alias  e enable/disable  o open"
 	case viewPRs:
 		keys = "enter checks  o open"
 	case viewFavs:
@@ -279,6 +284,9 @@ func (m model) footer() string {
 		keys = "hjkl/arrows move  enter logs or expand  x collapse  v style  o open  ctrl-d/u scroll  esc back"
 	case viewLogs:
 		keys = "j/k scroll  space/ctrl-d page  g/G top/bottom  / search  n/N next/prev  f follow  esc back"
+	}
+	if s, ok := screens[m.view]; ok {
+		keys = s.footer
 	}
 	keys += "  R refresh  q quit"
 	line := m.status

@@ -17,6 +17,9 @@ func tick() tea.Cmd {
 }
 
 func (m model) fetch() tea.Cmd {
+	if s, ok := screens[m.view]; ok && s.fetch != nil {
+		return s.fetch(m)
+	}
 	v, wf, pr, br, run, job, tg := m.view, m.wfID, m.pr, m.prBranch(), m.runID, m.jobID, m.target
 	var pinned []favorites.Favorite
 	var snap *favorites.Store

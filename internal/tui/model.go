@@ -67,9 +67,10 @@ type model struct {
 	mi                            int
 	follow                        bool
 
-	note      string // explanation tied to the current view (cleared when the view changes)
-	banner    string // sticky startup problem, always shown
-	runStatus string // last seen status of the watched run, for the finished notification
+	note      string           // explanation tied to the current view (cleared when the view changes)
+	banner    string           // sticky startup problem, always shown
+	runStatus string           // last seen status of the watched run, for the finished notification
+	sdata     map[viewKind]any // per-screen data, see screen.go
 	graph     graph.Graph
 	gstyle    graph.Style
 	gsel      int
@@ -197,6 +198,9 @@ func (m model) shown() graph.Graph { return graph.Expand(m.graph, m.expanded) }
 
 // shouldPoll says whether the 5s tick should refetch the current view.
 func (m model) shouldPoll() bool {
+	if s, ok := screens[m.view]; ok {
+		return s.poll
+	}
 	switch m.view {
 	case viewLogs:
 		return m.follow // logs are static unless following

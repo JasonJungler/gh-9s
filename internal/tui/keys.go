@@ -42,6 +42,11 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 	}
+	if s, ok := screens[m.view]; ok && s.key != nil {
+		if next, cmd, handled := s.key(m, k); handled {
+			return next, cmd
+		}
+	}
 	n := len(m.visible())
 	switch k.String() {
 	case "q":

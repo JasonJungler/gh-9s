@@ -56,6 +56,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form = &f
 		}
 		return m, nil
+	case screenMsg:
+		if msg.view != m.view {
+			return m, nil // a late result for a view we have left
+		}
+		m.loading, m.err = false, msg.err
+		if s := screens[msg.view]; msg.err == nil && s.apply != nil {
+			m = s.apply(m, msg)
+		}
+		return m, nil
 	case tickMsg:
 		cmds := []tea.Cmd{tick()}
 		if m.shouldPoll() {
