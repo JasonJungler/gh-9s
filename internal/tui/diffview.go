@@ -43,6 +43,7 @@ type diffPayload struct {
 	d         diff.Diff
 	threads   []ghcli.Thread
 	threadErr error
+	hl        []*highlight.File
 }
 
 type dkind int
@@ -84,7 +85,8 @@ func init() {
 				if err != nil {
 					return screenMsg{view: viewDiff, id: id, err: err}
 				}
-				return screenMsg{view: viewDiff, id: id, data: diffPayload{d: diff.Parse(text, limit), threads: th.ts, threadErr: th.err}}
+				d := diff.Parse(text, limit)
+				return screenMsg{view: viewDiff, id: id, data: diffPayload{d: d, threads: th.ts, threadErr: th.err, hl: highlightFiles(d)}}
 			}
 		},
 		apply: func(m model, msg screenMsg) model {
@@ -99,7 +101,7 @@ func init() {
 			}
 			lines, starts, src := diffDisplaySrc(st.d)
 			st.lines, st.starts, st.usrc = lines, starts, src
-			st.hl = highlightFiles(st.d)
+			st.hl = p.hl
 			if old.sb != nil && m.top < len(old.sb.src) { // keep the line on top across the refetch
 				m.top = firstAtLeast(src, old.sb.src[m.top])
 			} else if old.sb == nil && m.top < len(old.usrc) {

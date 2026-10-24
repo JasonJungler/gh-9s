@@ -6,12 +6,14 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 )
 
@@ -413,5 +415,41 @@ func TestSyntaxColoursAreComputedOncePerFetch(t *testing.T) {
 	st := m.screenData(viewDiff).(diffState)
 	if len(st.hl) != 1 || st.hl[0] == nil {
 		t.Fatalf("the highlighting should be kept in the state: %+v", st.hl)
+	}
+}
+
+func TestNarrowRowsCarryNoEmptyColourCodes(t *testing.T) {
+	withColours(t)
+	long := "var s = " + strings.Repeat("\"abc\" + ", 40) + "1"
+	text := strings.ReplaceAll(goDiff, "var x = 2", long)
+	for _, width := range []int{100, 140} {
+		v := reviewModelH(t, width, 12, text, nil).View()
+		for _, l := range strings.Split(v, "\n")[2 : 2+12-4] {
+			if w := ansi.StringWidth(l); w > width {
+				t.Errorf("width %d: a body row is %d wide", width, w)
+			}
+		}
+		if regexp.MustCompile(`\x1b\[[0-9;]*m\x1b\[0m`).MatchString(v) {
+			t.Errorf("width %d: a cut line left empty colour codes behind: %q", width, v)
+		}
+	}
+}
+
+func TestHighlightingIsBudgeted(t *testing.T) {
+	old := maxHighlightBytes
+	maxHighlightBytes = 10
+	t.Cleanup(func() { maxHighlightBytes = old })
+	d := diff.Parse(goDiff, 100)
+	if hl := highlightFiles(d); hl[0] != nil {
+		t.Error("a diff over the byte budget stays plain")
+	}
+}
+
+func TestADiffWithAHangingLexerStillLoads(t *testing.T) {
+	text := "diff --git a/m.jungle b/m.jungle\n--- a/m.jungle\n+++ b/m.jungle\n@@ -0,0 +1,2 @@\n+project.manifest = manifest.xml\n+base.sourcePath = \"source\"\n"
+	start := time.Now()
+	m := reviewModel(t, 100, text, nil)
+	if time.Since(start) > 3*time.Second || !strings.Contains(ansi.Strip(m.View()), "manifest") {
+		t.Errorf("took %v or did not show the diff", time.Since(start))
 	}
 }

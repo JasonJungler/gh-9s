@@ -7,6 +7,7 @@ package highlight
 
 import (
 	"strings"
+	"time"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	maxLineLen  = 2000
+	maxLineLen  = 400 // some lexers are far slower than linear on long lines
 	maxFileLine = 20000
 )
 
@@ -46,17 +47,52 @@ func (f *File) Right(i int) []Seg {
 	return f.right[i]
 }
 
-// ForFile highlights a file's diff, or returns nil when its language is unknown, it is binary or
-// it is too big.
-func ForFile(f diff.File) *File {
+// denied lists lexers that are known to loop forever on ordinary text (chroma v2.14.0).
+var denied = map[string]bool{"Jungle": true}
+
+// ForFile highlights a file's diff within a second; see ForFileWithin.
+func ForFile(f diff.File) *File { return ForFileWithin(f, time.Second) }
+
+// Size is how many bytes of text ForFile would hand to the lexer.
+func Size(f diff.File) int {
+	n := 0
+	for _, l := range f.Lines {
+		if l.Kind != diff.Hunk && l.Kind != diff.Meta {
+			n += len(l.Text)
+		}
+	}
+	return n
+}
+
+// ForFileWithin highlights a file's diff, or returns nil when its language is unknown, it is binary
+// or too big, the lexer fails or panics, or it takes longer than limit. Lexers are third-party code
+// run on hostile text: a lexer that does not finish is abandoned and the file stays plain.
+func ForFileWithin(f diff.File, limit time.Duration) *File {
 	if f.Binary || len(f.Lines) > maxFileLine {
 		return nil
 	}
 	lexer := lexers.Match(f.Path)
-	if lexer == nil {
+	if lexer == nil || denied[lexer.Config().Name] {
 		return nil
 	}
-	lexer = chroma.Coalesce(lexer)
+	done := make(chan *File, 1)
+	go func() {
+		defer func() {
+			if recover() != nil {
+				done <- nil
+			}
+		}()
+		done <- build(f, chroma.Coalesce(lexer))
+	}()
+	select {
+	case h := <-done:
+		return h
+	case <-time.After(limit):
+		return nil
+	}
+}
+
+func build(f diff.File, lexer chroma.Lexer) *File {
 	style := styles.Get("monokai")
 	out := &File{left: map[int][]Seg{}, right: map[int][]Seg{}}
 	var oldIdx, newIdx []int
@@ -94,6 +130,7 @@ func side(f diff.File, lexer chroma.Lexer, style *chroma.Style, idx []int, into 
 			texts[n] = t
 		}
 	}
+	plain := style.Get(chroma.Text)
 	it, err := lexer.Tokenise(nil, strings.Join(texts, "\n")+"\n")
 	if err != nil {
 		return
@@ -102,7 +139,7 @@ func side(f diff.File, lexer chroma.Lexer, style *chroma.Style, idx []int, into 
 	for _, tok := range it.Tokens() {
 		entry := style.Get(tok.Type)
 		fg := ""
-		if entry.Colour.IsSet() {
+		if entry.Colour.IsSet() && entry.Colour != plain.Colour { // plain text keeps the terminal's own colour
 			fg = entry.Colour.String()
 		}
 		for k, piece := range strings.Split(tok.Value, "\n") {

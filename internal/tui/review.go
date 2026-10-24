@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -46,19 +47,26 @@ func (m model) sideMode(st diffState) bool {
 	return st.sbs == 1 || (st.sbs == 0 && m.width >= sideMinWidth)
 }
 
-// maxHighlightLines bounds how much of a diff is coloured by language; the rest stays plain.
-const maxHighlightLines = 20000
+// What may be coloured by language; the rest of a diff stays plain.
+var (
+	maxHighlightBytes = 2 << 20
+	highlightTime     = 3 * time.Second
+)
 
-// highlightFiles colours every file of the diff, once per fetched diff.
+// highlightFiles colours the files of the diff within a byte and time budget. It runs while the diff
+// is fetched, never on the UI goroutine: lexers are third-party code and can be slow on odd text.
 func highlightFiles(d diff.Diff) []*highlight.File {
 	out := make([]*highlight.File, len(d.Files))
-	budget := maxHighlightLines
+	bytes, deadline := maxHighlightBytes, time.Now().Add(highlightTime)
 	for i, f := range d.Files {
-		if len(f.Lines) > budget {
-			continue
+		left := time.Until(deadline)
+		if left <= 0 {
+			break
 		}
-		if out[i] = highlight.ForFile(f); out[i] != nil {
-			budget -= len(f.Lines)
+		if size := highlight.Size(f); size > bytes {
+			continue
+		} else if out[i] = highlight.ForFileWithin(f, min(left, time.Second)); out[i] != nil {
+			bytes -= size
 		}
 	}
 	return out

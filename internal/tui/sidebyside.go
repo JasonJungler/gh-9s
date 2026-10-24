@@ -228,6 +228,7 @@ func syntaxText(segs []highlight.Seg, spans []diff.Span, kind diff.Kind, cw int)
 		}
 		return false
 	}
+	segs = trimSegs(segs, cw)
 	var b strings.Builder
 	pos := 0
 	for _, sg := range segs {
@@ -244,12 +245,37 @@ func syntaxText(segs []highlight.Seg, spans []diff.Span, kind diff.Kind, cw int)
 		pos += len(r)
 	}
 	s := b.String()
-	if ansi.StringWidth(s) > cw {
-		s = ansi.Truncate(s, cw, "…")
-	}
 	pad := strings.Repeat(" ", max(cw-ansi.StringWidth(s), 0))
-	if bg := tint(kind, false); bg != "" {
+	if bg := tint(kind, false); bg != "" && pad != "" {
 		pad = lipgloss.NewStyle().Background(bg).Render(pad)
 	}
 	return s + pad
+}
+
+// trimSegs cuts segments to cw columns, ending in … when something was cut, before any styling
+// is applied (cutting styled text afterwards leaves empty colour codes behind).
+func trimSegs(segs []highlight.Seg, cw int) []highlight.Seg {
+	total := 0
+	for _, s := range segs {
+		total += ansi.StringWidth(s.Text)
+	}
+	if total <= cw {
+		return segs
+	}
+	var out []highlight.Seg
+	room := max(cw-1, 0)
+	for _, s := range segs {
+		w := ansi.StringWidth(s.Text)
+		if w <= room {
+			out = append(out, s)
+			room -= w
+			continue
+		}
+		if room > 0 {
+			s.Text = ansi.Truncate(s.Text, room, "")
+			out = append(out, s)
+		}
+		break
+	}
+	return append(out, highlight.Seg{Text: "…"})
 }

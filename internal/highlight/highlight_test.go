@@ -3,6 +3,7 @@ package highlight
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MurabitoB/gh-9s/internal/diff"
 )
@@ -78,10 +79,10 @@ func TestUnknownLanguageAndLimits(t *testing.T) {
 	if ForFile(fileOf(t, "notes.zzzz", "@@ -1,1 +1,1 @@\n-a\n+b\n")) != nil {
 		t.Error("an unknown language gets no highlighting")
 	}
-	long := strings.Repeat("x", 3000)
+	long := strings.Repeat("x", 500)
 	h := ForFile(fileOf(t, "a.go", "@@ -1,1 +1,1 @@\n-"+long+"\n+short := 1\n"))
 	if h.Left(1) != nil {
-		t.Error("a line over 2,000 characters is left plain")
+		t.Error("a line over 400 characters is left plain")
 	}
 	if h.Right(2) == nil {
 		t.Error("its neighbours are still coloured")
@@ -99,5 +100,56 @@ func TestOutOfRangeAndHeaderLinesAreNil(t *testing.T) {
 	var none *File
 	if none.Left(1) != nil {
 		t.Error("a nil File answers nil")
+	}
+}
+
+func TestHostileFilesNeitherPanicNorHang(t *testing.T) {
+	cases := map[string]string{
+		"a.yang":     "@@ -0,0 +1,2 @@\n+/* a\n+/* b */\n",
+		"m.jungle":   "@@ -0,0 +1,2 @@\n+project.manifest = manifest.xml\n+base.sourcePath = \"source\"\n",
+		"p.pas":      "@@ -0,0 +1,1 @@\n+" + strings.Repeat("1", 1999) + "\n",
+		"big.go":     "@@ -0,0 +1,1 @@\n+" + strings.Repeat("a+", 999) + "\n",
+		"empty.go":   "@@ -0,0 +1,1 @@\n+\n",
+		"quote.js":   "@@ -0,0 +1,1 @@\n+\"\\'\n",
+		"weird.go":   "@@ -0,0 +1,1 @@\n+\x00\xff\xfe\n",
+		"unicode.go": "@@ -0,0 +1,1 @@\n+变量 := \"你好\"\n",
+	}
+	for name, patch := range cases {
+		start := time.Now()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ForFileWithin(fileOf(t, name, patch), 300*time.Millisecond)
+		}()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Errorf("%s: ForFile did not return in 3s", name)
+		}
+		_ = start
+	}
+}
+
+func TestKnownBadLexersAreSkippedNotWaitedFor(t *testing.T) {
+	start := time.Now()
+	h := ForFileWithin(fileOf(t, "m.jungle", "@@ -0,0 +1,1 @@\n+project.manifest = manifest.xml\n"), 10*time.Second)
+	if h != nil || time.Since(start) > 2*time.Second {
+		t.Errorf("a lexer that loops forever must be skipped outright (took %v)", time.Since(start))
+	}
+}
+
+func TestPlainTextKeepsTheTerminalsOwnColour(t *testing.T) {
+	h := ForFile(fileOf(t, "a.go", "@@ -1,1 +1,1 @@\n x := 1\n"))
+	for _, s := range h.Right(1) {
+		if strings.TrimSpace(s.Text) == "" && s.FG != "" {
+			t.Errorf("whitespace should use the default colour, got %q", s.FG)
+		}
+	}
+}
+
+func TestSizeCountsTheTextToColour(t *testing.T) {
+	f := fileOf(t, "a.go", "@@ -1,1 +1,1 @@\n-abc\n+defg\n")
+	if got := Size(f); got != 7 {
+		t.Errorf("Size = %d; want 7", got)
 	}
 }
