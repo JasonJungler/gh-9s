@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/icons"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
 
@@ -274,22 +275,47 @@ func issueLines(d ghcli.IssueDetail, width int) detailDoc {
 	}
 	var out detailDoc
 	out.add(fmt.Sprintf("#%d  %s", d.Number, d.Title), fmt.Sprintf("%s   %s", d.Author, d.State))
-	labels, assignees := "no labels", "unassigned"
+	split := width >= detailSplitMin
+	mainW := width
+	if split {
+		mainW = width - detailSideWidth - 1
+	} else {
+		labels, assignees := "no labels", "unassigned"
+		if len(d.Labels) > 0 {
+			labels = "Labels: " + strings.Join(d.Labels, ", ")
+		}
+		if len(d.Assignees) > 0 {
+			assignees = "Assignees: " + strings.Join(d.Assignees, ", ")
+		}
+		out.add(labels + "   " + assignees)
+	}
+	var body detailDoc
+	body.add("", "── Description ──")
+	if strings.TrimSpace(d.Body) == "" {
+		body.add("(no description)")
+	} else {
+		body.addMarkdown(d.Body, mainW, "")
+	}
+	body.add("", "── Discussion ──")
+	body.addDoc(discussionLines(d.Comments, nil, mainW))
+	if !split {
+		out.addDoc(body)
+		return out
+	}
+	out.addDoc(columns(body, append([]string{""}, issueSidebarColumn(d, detailSideWidth)...), mainW))
+	return out
+}
+
+// issueSidebarColumn is the issue's labels and assignees as a column, like the right side of its page.
+func issueSidebarColumn(d ghcli.IssueDetail, width int) []string {
+	var labels, assignees []string
 	if len(d.Labels) > 0 {
-		labels = "Labels: " + strings.Join(d.Labels, ", ")
+		labels = []string{withIcon(icons.Label, strings.Join(d.Labels, ", "))}
 	}
 	if len(d.Assignees) > 0 {
-		assignees = "Assignees: " + strings.Join(d.Assignees, ", ")
+		assignees = []string{withIcon(icons.User, strings.Join(d.Assignees, ", "))}
 	}
-	out.add(labels+"   "+assignees, "", "── Description ──")
-	if strings.TrimSpace(d.Body) == "" {
-		out.add("(no description)")
-	} else {
-		out.addMarkdown(d.Body, width, "")
-	}
-	out.add("", "── Discussion ──")
-	out.addDoc(discussionLines(d.Comments, nil, width))
-	return out
+	return sidebarColumn([]sidebarSection{{"Assignees", assignees}, {"Labels", labels}}, width)
 }
 
 // startIssueAction remembers which issue an action was started for.

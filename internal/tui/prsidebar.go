@@ -60,8 +60,12 @@ func prSidebar(p ghcli.PRDetail, width int) []string {
 // prSidebarColumn lays the sections out for a narrow column on the right: each name on its own line,
 // its values below, indented.
 func prSidebarColumn(p ghcli.PRDetail, width int) []string {
+	return sidebarColumn(prSections(p), width)
+}
+
+func sidebarColumn(sections []sidebarSection, width int) []string {
 	var out []string
-	for i, sec := range prSections(p) {
+	for i, sec := range sections {
 		if i > 0 {
 			out = append(out, "")
 		}

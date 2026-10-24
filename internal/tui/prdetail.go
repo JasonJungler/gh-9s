@@ -113,6 +113,12 @@ func prDetailKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 
 func (m model) contentWidth() int { return max(m.width-2, 20) }
 
+// The detail screens put the sidebar in a column beside the text from this width (of the text) on.
+const (
+	detailSplitMin  = 100
+	detailSideWidth = 32
+)
+
 func prDetailBody(m model) string {
 	st, _ := m.screenData(viewPRDetail).(prDetailState)
 	h := m.logHeight()
@@ -146,16 +152,30 @@ func prDetailLines(d ghcli.PRDetail, width int) detailDoc {
 		orDash(d.ReviewDecision), orDash(d.MergeState),
 		icons.Get(icons.CheckPass), d.ChecksPassed, icons.Get(icons.CheckFail), d.ChecksFailed, icons.Get(icons.CheckPending), d.ChecksPending,
 		d.Additions, d.Deletions, d.ChangedFiles))
-	out.add("")
-	out.add(prSidebar(d, width)...)
-	out.add("", "── Description ──")
-	if strings.TrimSpace(d.Body) == "" {
-		out.add("(no description)")
+	split := width >= detailSplitMin
+	mainW := width
+	if split {
+		mainW = width - detailSideWidth - 1
 	} else {
-		out.addMarkdown(d.Body, width, "")
+		out.add("")
+		out.add(prSidebar(d, width)...)
 	}
-	out.add("", "── Discussion ──")
-	out.addDoc(discussionLines(d.Comments, d.Reviews, width))
+	var body detailDoc // the description and the discussion; beside the sidebar when the screen is wide
+	body.add("", "── Description ──")
+	if strings.TrimSpace(d.Body) == "" {
+		body.add("(no description)")
+	} else {
+		body.addMarkdown(d.Body, mainW, "")
+	}
+	body.add("", "── Discussion ──")
+	body.addDoc(discussionLines(d.Comments, d.Reviews, mainW))
+	if !split {
+		out.addDoc(body)
+		return out
+	}
+	// the first row of the sidebar lines up with the description's heading row
+	side := append([]string{""}, prSidebarColumn(d, detailSideWidth)...)
+	out.addDoc(columns(body, side, mainW))
 	return out
 }
 

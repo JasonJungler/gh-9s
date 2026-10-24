@@ -154,6 +154,7 @@ func TestEnterOpensTheIssueDetailWithEverythingOnIt(t *testing.T) {
 func TestIssueDetailWithNothingRenders(t *testing.T) {
 	installIssues(t, ghcli.IssueDetail{Number: 5, Title: "Bare", Author: "ghost", State: "CLOSED"})
 	m := issuesLoaded(t)
+	m.width = 90 // narrow: one column
 	m = keyAll(m, "enter")
 	v := m.View()
 	for _, want := range []string{"Bare", "CLOSED", "no description", "no comments", "no labels", "unassigned"} {
