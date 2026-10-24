@@ -49,8 +49,9 @@ type model struct {
 	status        string
 
 	// scope for the current view
-	wfID, wfName string // runs filtered by workflow
-	pr           string // checks for a PR ("" = current branch)
+	target       repoRef // zero value: repo of the current directory
+	wfID, wfName string  // runs filtered by workflow
+	pr           string  // checks for a PR ("" = current branch)
 
 	mode                          inputMode
 	input                         string
@@ -113,24 +114,24 @@ func tick() tea.Cmd {
 }
 
 func (m model) fetch() tea.Cmd {
-	v, wf, pr, br, run, job := m.view, m.wfID, m.pr, m.branch, m.runID, m.jobID
+	v, wf, pr, br, run, job, tg := m.view, m.wfID, m.pr, m.branch, m.runID, m.jobID, m.target
 	return func() tea.Msg {
 		var t table
 		var logs []string
 		var err error
 		switch v {
 		case viewRuns:
-			t, err = fetchRuns(wf)
+			t, err = fetchRuns(tg, wf)
 		case viewWorkflows:
-			t, err = fetchWorkflows()
+			t, err = fetchWorkflows(tg)
 		case viewPRs:
-			t, err = fetchPRs(br)
+			t, err = fetchPRs(tg, br)
 		case viewChecks:
-			t, err = fetchChecks(pr)
+			t, err = fetchChecks(tg, pr)
 		case viewJobs:
-			t, err = fetchJobs(run)
+			t, err = fetchJobs(tg, run)
 		case viewLogs:
-			logs, err = fetchJobLog(run, job)
+			logs, err = fetchJobLog(tg, run, job)
 		}
 		return dataMsg{v, t, logs, err}
 	}

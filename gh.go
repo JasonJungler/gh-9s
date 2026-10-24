@@ -100,7 +100,7 @@ func runState(status, conclusion string) (string, state) {
 	}
 }
 
-func fetchRuns(workflowID string) (table, error) {
+func fetchRuns(r repoRef, workflowID string) (table, error) {
 	var runs []struct {
 		ID         int64  `json:"databaseId"`
 		Title      string `json:"displayTitle"`
@@ -117,7 +117,7 @@ func fetchRuns(workflowID string) (table, error) {
 	if workflowID != "" {
 		args = append(args, "-w", workflowID)
 	}
-	if err := ghJSON(&runs, args...); err != nil {
+	if err := ghJSON(&runs, scoped(r, args...)...); err != nil {
 		return table{}, err
 	}
 	t := table{cols: []string{"ID", "STATUS", "WORKFLOW", "TITLE", "BRANCH", "EVENT", "AGE"}}
@@ -130,14 +130,14 @@ func fetchRuns(workflowID string) (table, error) {
 	return t, nil
 }
 
-func fetchWorkflows() (table, error) {
+func fetchWorkflows(r repoRef) (table, error) {
 	var wfs []struct {
 		ID    int64  `json:"id"`
 		Name  string `json:"name"`
 		State string `json:"state"`
 		Path  string `json:"path"`
 	}
-	if err := ghJSON(&wfs, "workflow", "list", "--all", "--json", "id,name,state,path"); err != nil {
+	if err := ghJSON(&wfs, scoped(r, "workflow", "list", "--all", "--json", "id,name,state,path")...); err != nil {
 		return table{}, err
 	}
 	t := table{cols: []string{"ID", "NAME", "STATE", "PATH"}}
@@ -180,7 +180,7 @@ func rollupState(checks []struct {
 	return fmt.Sprintf("✓ %d/%d", ok, len(checks)), stOK
 }
 
-func fetchPRs(currentBranch string) (table, error) {
+func fetchPRs(r repoRef, currentBranch string) (table, error) {
 	var prs []struct {
 		Number       int                    `json:"number"`
 		Title        string                 `json:"title"`
@@ -196,8 +196,8 @@ func fetchPRs(currentBranch string) (table, error) {
 			State      string `json:"state"`
 		} `json:"statusCheckRollup"`
 	}
-	if err := ghJSON(&prs, "pr", "list", "-L", "50", "--json",
-		"number,title,author,headRefName,isDraft,reviewDecision,updatedAt,url,statusCheckRollup"); err != nil {
+	if err := ghJSON(&prs, scoped(r, "pr", "list", "-L", "50", "--json",
+		"number,title,author,headRefName,isDraft,reviewDecision,updatedAt,url,statusCheckRollup")...); err != nil {
 		return table{}, err
 	}
 	t := table{cols: []string{"#", "CHECKS", "TITLE", "AUTHOR", "BRANCH", "REVIEW", "UPDATED"}}
@@ -221,7 +221,7 @@ func fetchPRs(currentBranch string) (table, error) {
 	return t, nil
 }
 
-func fetchChecks(pr string) (table, error) {
+func fetchChecks(r repoRef, pr string) (table, error) {
 	var checks []struct {
 		Name     string `json:"name"`
 		State    string `json:"state"`
@@ -234,7 +234,7 @@ func fetchChecks(pr string) (table, error) {
 	if pr != "" {
 		args = append(args[:2], append([]string{pr}, args[2:]...)...)
 	}
-	if err := ghJSON(&checks, args...); err != nil {
+	if err := ghJSON(&checks, scoped(r, args...)...); err != nil {
 		return table{}, err
 	}
 	t := table{cols: []string{"STATUS", "NAME", "WORKFLOW", "STATE", "AGE"}}
@@ -275,7 +275,7 @@ func openURL(url string) error {
 	}
 }
 
-func fetchJobs(runID string) (table, error) {
+func fetchJobs(r repoRef, runID string) (table, error) {
 	var v struct {
 		Jobs []struct {
 			ID          int64  `json:"databaseId"`
@@ -292,7 +292,7 @@ func fetchJobs(runID string) (table, error) {
 			} `json:"steps"`
 		} `json:"jobs"`
 	}
-	if err := ghJSON(&v, "run", "view", runID, "--json", "jobs"); err != nil {
+	if err := ghJSON(&v, scoped(r, "run", "view", runID, "--json", "jobs")...); err != nil {
 		return table{}, err
 	}
 	t := table{cols: []string{"ID", "STATUS", "JOB", "STEP", "DURATION"}}
@@ -331,8 +331,8 @@ func duration(start, end string) string {
 
 // fetchJobLog returns the log of one job as display lines, dropping the
 // job-name column and timestamps that `gh run view --log` prefixes.
-func fetchJobLog(runID, jobID string) ([]string, error) {
-	out, err := gh("run", "view", runID, "--job", jobID, "--log")
+func fetchJobLog(r repoRef, runID, jobID string) ([]string, error) {
+	out, err := gh(scoped(r, "run", "view", runID, "--job", jobID, "--log")...)
 	if err != nil {
 		return nil, err
 	}
