@@ -5,8 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MurabitoB/gh-9s/internal/icons"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -261,24 +259,15 @@ func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return m.withScreenData(viewDiff, st).syncDiffLayout(), nil, true
 	case key == "tab" && side, key == "f" && side:
 		st.focusList = !st.focusList
-		st.sel = fileAt(starts, m.top)
+		st.sel = treeRowOf(st.treeRows(), st, fileAt(starts, m.top))
 		return m.withScreenData(viewDiff, st), nil, true
 	case key == "v":
-		fi := fileAt(starts, m.top)
 		if side && st.focusList {
-			fi = st.sel
+			st, _, _ = treeNav(st, "v")
+			return m.withScreenData(viewDiff, st), nil, true
 		}
-		path := st.d.Files[fi].Path
-		nv := map[string]bool{}
-		for p, v := range st.viewed {
-			nv[p] = v
-		}
-		if nv[path] {
-			delete(nv, path)
-		} else {
-			nv[path] = true
-		}
-		st.viewed = nv
+		fi := fileAt(starts, m.top)
+		st = st.toggleViewed(treeRow{path: st.d.Files[fi].Path})
 		return m.withScreenData(viewDiff, st), nil, true
 	case key == "}" || key == "{":
 		isHunk := func(i int) bool {
@@ -305,62 +294,28 @@ func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case side && st.focusList:
-		switch key {
-		case "j", "down", "k", "up", "g", "G", "home", "end":
-			switch key {
-			case "j", "down":
-				st.sel = min(st.sel+1, len(starts)-1)
-			case "k", "up":
-				st.sel = max(st.sel-1, 0)
-			case "g", "home":
-				st.sel = 0
-			default:
-				st.sel = len(starts) - 1
-			}
-			m.top = min(starts[st.sel], m.maxTop())
-			return m.withScreenData(viewDiff, st), nil, true
-		case "enter", "esc":
+		if key == "esc" {
 			st.focusList = false
 			return m.withScreenData(viewDiff, st), nil, true
 		}
+		rows := st.treeRows()
+		if key == "enter" && len(rows) > 0 {
+			if r := rows[min(max(st.sel, 0), len(rows)-1)]; !r.dir {
+				m.top = min(starts[r.file], m.maxTop())
+				st.focusList = false
+				return m.withScreenData(viewDiff, st), nil, true
+			}
+		}
+		nst, file, ok := treeNav(st, key)
+		if !ok {
+			return m, nil, false
+		}
+		if file >= 0 {
+			m.top = min(starts[file], m.maxTop())
+		}
+		return m.withScreenData(viewDiff, nst), nil, true
 	}
 	return m, nil, false
-}
-
-// listLine draws one entry of the file list column.
-func listLine(f diff.File, threads []ghcli.Thread, nDrafts int, selected, viewed bool, w int) string {
-	mark := " "
-	if selected {
-		mark = icons.Get(icons.Selected)
-	}
-	seen := " "
-	if viewed {
-		seen = icons.Get(icons.Viewed)
-	}
-	stats := " " + plusMinus(f)
-	if n := threadCount(threads, f.Path); n > 0 {
-		stats += fmt.Sprintf(" ◆%d", n)
-	}
-	if nDrafts > 0 {
-		stats += fmt.Sprintf(" ✎%d", nDrafts)
-	}
-	name := f.Path
-	avail := w - 3 - ansi.StringWidth(stats)
-	if ansi.StringWidth(name) > avail && avail > 1 {
-		r := []rune(name)
-		for ansi.StringWidth("…"+string(r)) > avail && len(r) > 0 {
-			r = r[1:]
-		}
-		name = "…" + string(r)
-	}
-	line := mark + seen + " " + fit(name, max(avail, 1)) + stats
-	if selected {
-		return ui.Sel.Render(fit(line, w))
-	}
-	if viewed {
-		return styDim.Render(fit(line, w))
-	}
-	return fit(line, w)
 }
 
 func threadCount(ts []ghcli.Thread, path string) int {
@@ -377,27 +332,17 @@ func threadCount(ts []ghcli.Thread, path string) int {
 func sideBody(m model, st diffState) string {
 	h := m.logHeight()
 	l := st.sb
-	cur := fileAt(l.starts, m.top)
-	sel := cur
+	rows := st.treeRows()
+	sel := treeRowOf(rows, st, fileAt(l.starts, m.top))
 	if st.focusList {
-		sel = st.sel
+		sel = min(max(st.sel, 0), max(len(rows)-1, 0))
 	}
-	listTop := 0
-	if len(st.d.Files) > h {
-		listTop = max(0, min(sel-h/2, len(st.d.Files)-h))
-	}
+	listTop := treeWindow(len(rows), sel, h)
 	var b strings.Builder
 	for n := 0; n < h; n++ {
 		list := strings.Repeat(" ", l.lw)
-		if fi := listTop + n; fi < len(st.d.Files) {
-			f := st.d.Files[fi]
-			nd := 0
-			for _, d := range st.drafts {
-				if d.Path == f.Path {
-					nd++
-				}
-			}
-			list = listLine(f, st.threads, nd, fi == sel, st.viewed[f.Path], l.lw)
+		if ri := listTop + n; ri < len(rows) {
+			list = treeLine(rows[ri], st.folded[rows[ri].path], ri == sel, l.lw)
 		}
 		row := ""
 		if i := m.top + n; i < len(l.lines) {

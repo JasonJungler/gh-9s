@@ -25,10 +25,11 @@ var (
 // the plain text of every display line is in m.logs so the log viewer's search works unchanged.
 type diffState struct {
 	d        diff.Diff
-	lines    []dline // the laid-out diff, built once when it loads
-	starts   []int   // where each file starts in lines
-	listMode bool    // showing the file list instead of the diff
-	sel      int     // selected file in the list
+	lines    []dline         // the laid-out diff, built once when it loads
+	starts   []int           // where each file starts in lines
+	listMode bool            // showing the file list instead of the diff
+	sel      int             // selected row of the file tree
+	folded   map[string]bool // directories folded in the file tree, by full path
 
 	usrc      []int          // source key of every unified row, to keep the place when the layout changes
 	sb        *sbLayout      // the side-by-side layout for the current width; nil while unified
@@ -252,20 +253,25 @@ func diffKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		starts = st.sb.starts
 	}
 	if st.listMode {
-		switch k.String() {
-		case "j", "down":
-			st.sel = min(st.sel+1, max(len(starts)-1, 0))
-		case "k", "up":
-			st.sel = max(st.sel-1, 0)
-		case "enter":
-			if st.sel < len(starts) {
-				m.top = starts[st.sel]
-			}
-			st.listMode = false
+		switch key := k.String(); key {
 		case "esc", "f":
 			st.listMode = false
 		default:
-			return m, nil, false
+			rows := st.treeRows()
+			if key == "enter" && len(rows) > 0 {
+				if r := rows[min(max(st.sel, 0), len(rows)-1)]; !r.dir {
+					if r.file < len(starts) {
+						m.top = starts[r.file]
+					}
+					st.listMode = false
+					return m.withScreenData(viewDiff, st), nil, true
+				}
+			}
+			nst, _, ok := treeNav(st, key)
+			if !ok {
+				return m, nil, false
+			}
+			st = nst
 		}
 		return m.withScreenData(viewDiff, st), nil, true
 	}
@@ -299,12 +305,8 @@ func diffKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		}
 		m.top = prev
 	case "f":
-		st.listMode, st.sel = true, 0
-		for i, s := range starts {
-			if s <= m.top {
-				st.sel = i
-			}
-		}
+		st.listMode = true
+		st.sel = treeRowOf(st.treeRows(), st, fileAt(starts, m.top))
 	case "/":
 		m.mode, m.input = modeSearch, m.query
 	case "n", "N":
@@ -357,13 +359,11 @@ func diffBody(m model) string {
 		emit(ui.Dim.Render(" loading diff…"))
 	case st.listMode:
 		emit(ui.Cols.Render(fmt.Sprintf(" files (%d)", len(st.d.Files))))
-		for i, f := range st.d.Files {
-			line := fmt.Sprintf("%s  %s", f.Path, plusMinus(f))
-			if i == st.sel {
-				emit(ui.Sel.Render(" ▸ " + strings.TrimRight(trunc(line, w-3), " ")))
-			} else {
-				emit("   " + strings.TrimRight(trunc(line, w-3), " "))
-			}
+		rows := st.treeRows()
+		sel := min(max(st.sel, 0), max(len(rows)-1, 0))
+		top := treeWindow(len(rows), sel, max(h-1, 1))
+		for i := top; i < len(rows) && n < h; i++ {
+			emit(treeLine(rows[i], st.folded[rows[i].path], i == sel, w))
 		}
 	default:
 		for i := m.top; i < len(st.lines) && n < h; i++ {

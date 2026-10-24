@@ -130,7 +130,7 @@ func TestInboxUsesTheIconsAndStaysAligned(t *testing.T) {
 func TestNewMarkAndTheDiffListUseTheIcons(t *testing.T) {
 	useNerd(t)
 	st := diffState{d: diff.Diff{Files: []diff.File{{Path: "a.go", Added: 1}}}}
-	line := listLine(st.d.Files[0], nil, 0, true, true, 40)
+	line := treeLine(buildTree(st.d.Files, map[string]bool{"a.go": true}, nil, nil, nil)[0], false, true, 40)
 	if !strings.Contains(line, g(icons.Selected)) || !strings.Contains(line, g(icons.Viewed)) {
 		t.Errorf("selected and viewed marks: %q", line)
 	}
