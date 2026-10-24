@@ -109,6 +109,55 @@ func prListArgs(r ghcli.RepoRef, f ghcli.PRFilter) []string {
 	return ghcli.Scoped(r, args...)
 }
 
+// issueListArgs is the `gh issue list` command for r, narrowed by f.
+func issueListArgs(r ghcli.RepoRef, f ghcli.IssueFilter) []string {
+	args := append([]string{"issue", "list", "-L", "50", "--json",
+		"number,title,author,state,labels,assignees,updatedAt,url"}, ghcli.IssueFilterArgs(f)...)
+	return ghcli.Scoped(r, args...)
+}
+
+func fetchIssues(r ghcli.RepoRef, f ghcli.IssueFilter) (table, error) {
+	var issues []struct {
+		Number    int                     `json:"number"`
+		Title     string                  `json:"title"`
+		Author    *struct{ Login string } `json:"author"`
+		State     string                  `json:"state"`
+		UpdatedAt string                  `json:"updatedAt"`
+		URL       string                  `json:"url"`
+		Labels    []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		Assignees []struct {
+			Login string `json:"login"`
+		} `json:"assignees"`
+	}
+	if err := ghcli.JSON(&issues, issueListArgs(r, f)...); err != nil {
+		return table{}, err
+	}
+	t := table{cols: []string{"#", "STATE", "TITLE", "AUTHOR", "LABELS", "ASSIGNEES", "UPDATED"}}
+	for _, i := range issues {
+		author := "ghost"
+		if i.Author != nil && i.Author.Login != "" {
+			author = i.Author.Login
+		}
+		var labels, assignees []string
+		for _, l := range i.Labels {
+			labels = append(labels, l.Name)
+		}
+		for _, a := range i.Assignees {
+			assignees = append(assignees, a.Login)
+		}
+		st := stOK
+		if i.State != "OPEN" {
+			st = stOther
+		}
+		t.rows = append(t.rows, row{id: fmt.Sprint(i.Number), state: st, url: i.URL,
+			cells: []string{fmt.Sprint(i.Number), i.State, i.Title, author,
+				orDash(strings.Join(labels, ",")), orDash(strings.Join(assignees, ",")), age(i.UpdatedAt)}})
+	}
+	return t, nil
+}
+
 func fetchPRs(r ghcli.RepoRef, currentBranch string, f ghcli.PRFilter) (table, error) {
 	var prs []struct {
 		Number       int                    `json:"number"`

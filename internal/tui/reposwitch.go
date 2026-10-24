@@ -61,7 +61,7 @@ func (m *model) switchRepo(ref ghcli.RepoRef) tea.Cmd {
 	m.runID, m.graph, m.gsel, m.expanded, m.runStatus = "", graph.Graph{}, 0, nil, ""
 	v := m.view
 	switch v {
-	case viewRuns, viewWorkflows, viewPRs, viewFavs:
+	case viewRuns, viewWorkflows, viewPRs, viewFavs, viewIssues:
 	default:
 		v = viewRuns
 	}

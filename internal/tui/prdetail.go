@@ -137,31 +137,7 @@ func prDetailLines(d ghcli.PRDetail, width int) []string {
 		out = append(out, wrap(d.Body, width)...)
 	}
 	out = append(out, "", "── Discussion ──")
-
-	type entry struct{ when, head, body string }
-	var entries []entry
-	for _, c := range d.Comments {
-		entries = append(entries, entry{c.CreatedAt, c.Author + " commented", c.Body})
-	}
-	for _, r := range d.Reviews {
-		label := reviewLabels[r.State]
-		if label == "" {
-			label = strings.ToLower(r.State)
-		}
-		entries = append(entries, entry{r.CreatedAt, r.Author + " " + label, r.Body})
-	}
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].when < entries[j].when })
-	if len(entries) == 0 {
-		out = append(out, "(no comments)")
-	}
-	for _, e := range entries {
-		out = append(out, "", fmt.Sprintf("%s · %s", e.head, ui.Age(e.when)))
-		if strings.TrimSpace(e.body) != "" {
-			for _, l := range wrap(e.body, width-2) {
-				out = append(out, "  "+l)
-			}
-		}
-	}
+	out = append(out, discussionLines(d.Comments, d.Reviews, width)...)
 	return out
 }
 
@@ -212,6 +188,36 @@ func wrap(s string, w int) []string {
 	}
 	if len(out) == 0 {
 		out = []string{""}
+	}
+	return out
+}
+
+// discussionLines lists comments and reviews in time order, each under a "who did what · age" line.
+func discussionLines(comments []ghcli.Comment, reviews []ghcli.Review, width int) []string {
+	type entry struct{ when, head, body string }
+	var entries []entry
+	for _, c := range comments {
+		entries = append(entries, entry{c.CreatedAt, c.Author + " commented", c.Body})
+	}
+	for _, r := range reviews {
+		label := reviewLabels[r.State]
+		if label == "" {
+			label = strings.ToLower(r.State)
+		}
+		entries = append(entries, entry{r.CreatedAt, r.Author + " " + label, r.Body})
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].when < entries[j].when })
+	if len(entries) == 0 {
+		return []string{"(no comments)"}
+	}
+	var out []string
+	for _, e := range entries {
+		out = append(out, "", fmt.Sprintf("%s · %s", e.head, ui.Age(e.when)))
+		if strings.TrimSpace(e.body) != "" {
+			for _, l := range wrap(e.body, width-2) {
+				out = append(out, "  "+l)
+			}
+		}
 	}
 	return out
 }

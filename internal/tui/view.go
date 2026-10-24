@@ -85,6 +85,12 @@ func (m model) View() string {
 			title += " filter=" + name
 		}
 	}
+	if m.view == viewIssues {
+		title += " filter=" + issueFilterName(m.issueFilter)
+	}
+	if m.view == viewIssue {
+		title += " issue=#" + m.issue
+	}
 	if m.view == viewJobs || m.view == viewLogs || m.view == viewGraph {
 		title += " run=" + m.runID
 	}
@@ -125,7 +131,7 @@ func (m model) View() string {
 		title += "  loading…"
 	}
 	b.WriteString(styHeader.Render(strings.TrimSpace(title)) + "\n")
-	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <:fav>favorites <:repo> switch repo <P>current-PR <:>cmd </>filter") + "\n")
+	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <4>issues <:fav>favorites <:repo> switch repo <P>current-PR <:>cmd </>filter") + "\n")
 
 	if m.dlg != nil {
 		return b.String() + "\n" + m.dialogView()
@@ -146,39 +152,7 @@ func (m model) View() string {
 		return b.String() + m.logBody() + m.footer()
 	}
 
-	w := m.widths()
-	var hdr strings.Builder
-	for i, c := range m.tbl.cols {
-		hdr.WriteString(trunc(c, w[i]) + "  ")
-	}
-	b.WriteString(styCols.Render(hdr.String()) + "\n")
-
-	h := m.bodyHeight()
-	if m.err != nil {
-		b.WriteString(styErr.Render(m.err.Error()) + "\n")
-	}
-	end := min(len(vis), m.top+h)
-	lines := 0
-	for i := m.top; i < end; i++ {
-		r := vis[i]
-		var line strings.Builder
-		for j, c := range r.cells {
-			s := trunc(c, w[j]) + "  "
-			if j == statusCol(m.view) && i != m.cursor {
-				s = stateStyle(r.state).Render(s)
-			}
-			line.WriteString(s)
-		}
-		if i == m.cursor {
-			b.WriteString(stySel.Render(line.String()) + "\n")
-		} else {
-			b.WriteString(line.String() + "\n")
-		}
-		lines++
-	}
-	for ; lines < h-boolToInt(m.err != nil); lines++ {
-		b.WriteString("\n")
-	}
+	b.WriteString(m.tableBody())
 	b.WriteString(m.footer())
 	return b.String()
 }
@@ -255,9 +229,49 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+// tableBody draws the column header and the rows of m.tbl (filtered, scrolled, with the cursor).
+func (m model) tableBody() string {
+	vis := m.visible()
+	var b strings.Builder
+	w := m.widths()
+	var hdr strings.Builder
+	for i, c := range m.tbl.cols {
+		hdr.WriteString(trunc(c, w[i]) + "  ")
+	}
+	b.WriteString(styCols.Render(hdr.String()) + "\n")
+
+	h := m.bodyHeight()
+	if m.err != nil {
+		b.WriteString(styErr.Render(m.err.Error()) + "\n")
+	}
+	end := min(len(vis), m.top+h)
+	lines := 0
+	for i := m.top; i < end; i++ {
+		r := vis[i]
+		var line strings.Builder
+		for j, c := range r.cells {
+			s := trunc(c, w[j]) + "  "
+			if j == statusCol(m.view) && i != m.cursor {
+				s = stateStyle(r.state).Render(s)
+			}
+			line.WriteString(s)
+		}
+		if i == m.cursor {
+			b.WriteString(stySel.Render(line.String()) + "\n")
+		} else {
+			b.WriteString(line.String() + "\n")
+		}
+		lines++
+	}
+	for ; lines < h-boolToInt(m.err != nil); lines++ {
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func statusCol(v viewKind) int {
 	switch v {
-	case viewRuns, viewPRs, viewJobs:
+	case viewRuns, viewPRs, viewJobs, viewIssues:
 		return 1
 	case viewFavs:
 		return 3

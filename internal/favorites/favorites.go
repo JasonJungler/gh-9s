@@ -18,7 +18,7 @@ import (
 // aliases may not shadow them.
 var ReservedCommands = []string{
 	"runs", "run", "r", "workflows", "workflow", "wf", "w", "pulls", "pull",
-	"prs", "pr", "cpr", "checks", "fav", "favs", "favorites", "q", "quit", "exit",
+	"prs", "pr", "cpr", "checks", "fav", "favs", "favorites", "issues", "issue", "is", "repo", "q", "quit", "exit",
 }
 
 // Favorite is a workflow in a specific host and repo, optionally with an alias.

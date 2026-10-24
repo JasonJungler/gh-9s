@@ -101,6 +101,8 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.goTop(viewWorkflows)
 	case "3":
 		return m.goTop(viewPRs)
+	case "4":
+		return m.goTop(viewIssues)
 	case "P":
 		return m.currentPR()
 	case "R", "ctrl+r":
@@ -287,6 +289,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m.goTop(viewWorkflows)
 	case "pulls", "pull", "prs", "pr":
 		return m.goTop(viewPRs)
+	case "issues", "issue", "is":
+		return m.goTop(viewIssues)
 	case "fav", "favs", "favorites":
 		return m.goTop(viewFavs)
 	case "cpr", "checks":
@@ -353,7 +357,7 @@ func (m model) graphKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			step = -step
 		}
 		m.top = min(max(m.top+step, 0), max(0, len(lines)-m.logHeight()))
-	case "esc", "backspace", "q", "ctrl+c", "R", "ctrl+r", "1", "2", "3", ":", "P":
+	case "esc", "backspace", "q", "ctrl+c", "R", "ctrl+r", "1", "2", "3", "4", ":", "P":
 		return m, nil, false
 	}
 	return m, nil, true
