@@ -5,13 +5,13 @@ A [k9s](https://k9scli.io)-style terminal UI for GitHub Actions and pull request
 ## Install / develop
 
 ```sh
-mise install                 # pins go + gh (see mise.toml)
-mise exec -- go build -o gh9s .
-gh extension install .       # run as `gh 9s`... see note below
+mise install                          # pins go + gh (see mise.toml)
+mise exec -- go build -o gh-9s .      # binary must be named after the repo: gh-9s
+gh extension install .                # then run: gh 9s
 ```
 
-`gh` extensions must be named `gh-<name>`; for `gh gh9s`, build the binary as `gh-gh9s`
-or publish the repo as `gh-9s`. Run inside any git repo that has a GitHub remote.
+Publish the repo as `gh-9s` (tag `v*` triggers the precompiled release workflow).
+Run inside any git repo with a GitHub remote.
 
 ## Views
 
