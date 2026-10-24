@@ -195,6 +195,7 @@ func (m model) syncDiffLayout() model {
 		st.listMode = false // the unified file list has no place in this layout
 		m.logs = st.sb.logs
 		m.top = st.sb.rowFor(key)
+		st.cur = st.sb.rowFor(st.curKey)
 	} else {
 		st.sb = nil
 		m.logs = make([]string, len(st.lines))
@@ -202,8 +203,12 @@ func (m model) syncDiffLayout() model {
 			m.logs[i] = l.text
 		}
 		m.top = firstAtLeast(st.usrc, key)
+		st.cur = firstAtLeast(st.usrc, st.curKey)
 	}
 	m.top = min(m.top, m.maxTop())
+	if h := m.logHeight(); st.cur < m.top || st.cur >= m.top+h { // the same lines take more rows now: the view stays, the cursor is pulled in
+		st = setCursor(st, min(max(st.cur, m.top), min(m.top+h-1, len(m.logs)-1)))
+	}
 	if m.query != "" {
 		m.matches = searchMatches(m.logs, m.query)
 		m.mi = min(m.mi, max(0, len(m.matches)-1))
@@ -231,6 +236,11 @@ func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	starts := st.starts
 	if side {
 		starts = st.sb.starts
+	}
+	if !(side && st.focusList) {
+		if nm, nst, ok := moveCursor(m, st, k.String()); ok {
+			return nm.withScreenData(viewDiff, nst), nil, true
+		}
 	}
 	switch key := k.String(); {
 	case key == "s":
@@ -378,7 +388,11 @@ func sideBody(m model, st diffState) string {
 		row := ""
 		if i := m.top + n; i < len(l.lines) {
 			r := l.lines[i]
-			row = r.left + styDim.Render("│") + r.right
+			sep := styDim.Render("│")
+			if i == st.cur {
+				sep = ui.Key.Render("▶")
+			}
+			row = r.left + sep + r.right
 			switch {
 			case m.isMatch(i) && m.matches[m.mi] == i:
 				row = ui.Sel.Render(ansi.Strip(row))

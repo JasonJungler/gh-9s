@@ -30,6 +30,8 @@ type diffState struct {
 
 	usrc      []int             // source key of every unified row, to keep the place when the layout changes
 	sb        *sbLayout         // the side-by-side layout for the current width; nil while unified
+	cur       int               // the cursor's display row
+	curKey    int               // the source line the cursor is on, to find it again in the other layout
 	sbs       int               // 0 by width, 1 always side-by-side, 2 always unified
 	focusList bool              // side-by-side: j/k move through the file list
 	threads   []ghcli.Thread    // review comments other people left
@@ -102,6 +104,8 @@ func init() {
 			lines, starts, src := diffDisplaySrc(st.d)
 			st.lines, st.starts, st.usrc = lines, starts, src
 			st.hl = p.hl
+			st.curKey = old.curKey
+			st.cur = firstAtLeast(src, old.curKey)
 			if old.sb != nil && m.top < len(old.sb.src) { // keep the line on top across the refetch
 				m.top = firstAtLeast(src, old.sb.src[m.top])
 			} else if old.sb == nil && m.top < len(old.usrc) {
@@ -318,7 +322,11 @@ func diffBody(m model) string {
 		}
 	default:
 		for i := m.top; i < len(st.lines) && n < h; i++ {
-			emit(m.styledDiffLine(i, st.lines[i], w))
+			mark := " "
+			if i == st.cur {
+				mark = ui.Key.Render("▶")
+			}
+			emit(mark + m.styledDiffLine(i, st.lines[i], w-1))
 		}
 	}
 	for ; n < h; n++ {

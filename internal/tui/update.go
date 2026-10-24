@@ -198,7 +198,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pr, m.prTarget = msg.pr, m.target
 		return m, m.push(msg.view)
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		next, cmd := m.handleKey(msg)
+		if nm, ok := next.(model); ok && nm.view == viewDiff {
+			next = nm.keepCursorVisible()
+		}
+		return next, cmd
 	}
 	return m, nil
 }
