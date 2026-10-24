@@ -72,24 +72,26 @@ type model struct {
 	mi                            int
 	follow                        bool
 
-	note      string           // explanation tied to the current view (cleared when the view changes)
-	banner    string           // sticky startup problem, always shown
-	runStatus string           // last seen status of the watched run, for the finished notification
-	pending   *prAction        // the PR action being collected through dialogs
-	dlg       *dialog          // a question being asked (text, choice or yes/no)
-	picker    *picker          // the repo picker overlay, when open
-	recents   *recent.Store    // repos chosen before; nil if the file could not be read
-	sdata     map[viewKind]any // per-screen data, see screen.go
-	graph     graph.Graph
-	gstyle    graph.Style
-	gsel      int
-	expanded  map[string]bool
-	specs     map[string][]workflow.JobSpec // workflow job specs, by run ID
-	form      *triggerForm                  // non-nil while the trigger form is open
-	favs      *favorites.Store              // nil when the favorites file could not be loaded
-	curRepo   ghcli.RepoRef                 // repo of the current directory, host included
-	latest    map[string]latestEntry
-	aliasFor  favorites.Favorite
+	note         string           // explanation tied to the current view (cleared when the view changes)
+	banner       string           // sticky startup problem, always shown
+	runStatus    string           // last seen status of the watched run, for the finished notification
+	pendingMerge *mergeAction     // the merge being collected through dialogs
+	prefsFile    string           // where small remembered choices live ("" = do not persist)
+	pending      *prAction        // the PR action being collected through dialogs
+	dlg          *dialog          // a question being asked (text, choice or yes/no)
+	picker       *picker          // the repo picker overlay, when open
+	recents      *recent.Store    // repos chosen before; nil if the file could not be read
+	sdata        map[viewKind]any // per-screen data, see screen.go
+	graph        graph.Graph
+	gstyle       graph.Style
+	gsel         int
+	expanded     map[string]bool
+	specs        map[string][]workflow.JobSpec // workflow job specs, by run ID
+	form         *triggerForm                  // non-nil while the trigger form is open
+	favs         *favorites.Store              // nil when the favorites file could not be loaded
+	curRepo      ghcli.RepoRef                 // repo of the current directory, host included
+	latest       map[string]latestEntry
+	aliasFor     favorites.Favorite
 
 	confirm    func() tea.Cmd
 	confirmMsg string
@@ -145,6 +147,7 @@ func Run() error {
 	} else {
 		m.favs = fs
 	}
+	m.prefsFile = prefsPath()
 	if rs, err := recent.Load(recent.DefaultPath()); err == nil {
 		m.recents = rs
 	}

@@ -177,3 +177,49 @@ func TestDialogResultWithoutAHandlerIsHarmless(t *testing.T) {
 		t.Error("an unknown dialog id should be ignored")
 	}
 }
+
+func TestConfirmToggleKeyFlipsAndReportsTheFinalState(t *testing.T) {
+	d := newConfirmDialog("k", "Merge?", "detail")
+	d.toggleLabel, d.toggleKey = "Delete the branch", "d"
+	m, got := dlgModel(t, d)
+	m = drive(m, "d")
+	if m.dlg == nil || !m.dlg.toggleOn || !strings.Contains(m.View(), "[x] Delete the branch") {
+		t.Fatalf("d should switch the option on and keep the dialog open:\n%s", m.View())
+	}
+	m = drive(m, "d", "d") // off, on
+	m = drive(m, "y")
+	if len(*got) != 1 || !(*got)[0].ok || !(*got)[0].toggled {
+		t.Errorf("results = %+v; want ok with the option on", *got)
+	}
+	// declining reports the state too but ok is false
+	m, got = dlgModel(t, d)
+	m = drive(m, "n")
+	if len(*got) != 1 || (*got)[0].ok {
+		t.Errorf("declined results = %+v", *got)
+	}
+}
+
+func TestNeedBangRequiresTheDeliberateKey(t *testing.T) {
+	d := newChoiceDialog("b", "Merge", []choice{{label: "Squash and merge", value: "squash"}}, false, nil)
+	d.needBang, d.bangHint = true, "press ! to merge anyway"
+	m, got := dlgModel(t, d)
+	m = drive(m, "enter")
+	if m.dlg == nil || len(*got) != 0 || !strings.Contains(m.dlg.err, "press !") {
+		t.Fatalf("enter must be refused with the hint: open=%v results=%v err=%q", m.dlg != nil, *got, m.dlg.err)
+	}
+	if m.dlg.filter != "" {
+		t.Errorf("! must not be typed into the filter, filter=%q", m.dlg.filter)
+	}
+	m = drive(m, "!")
+	if m.dlg != nil || len(*got) != 1 || !reflect.DeepEqual((*got)[0].values, []string{"squash"}) {
+		t.Errorf("! should accept the choice: open=%v results=%+v", m.dlg != nil, *got)
+	}
+}
+
+func TestBangIsJustACharacterWhenNotRequired(t *testing.T) {
+	m, got := dlgModel(t, newChoiceDialog("b", "Pick", fruit, false, nil))
+	m = drive(m, "!")
+	if m.dlg == nil || len(*got) != 0 || m.dlg.filter != "!" {
+		t.Errorf("open=%v results=%v filter=%q; ! is an ordinary character here", m.dlg != nil, *got, m.dlg.filter)
+	}
+}

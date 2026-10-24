@@ -40,14 +40,19 @@ type dialog struct {
 	filter                    string          // dialogChoice: typed filter
 	sel                       int             // dialogChoice: position among the visible choices
 	err                       string
+	needBang                  bool   // dialogChoice: enter is refused; only "!" accepts (a deliberate override)
+	bangHint                  string // what enter says when needBang
+	toggleLabel, toggleKey    string // dialogConfirm: an optional yes/no setting flipped with toggleKey
+	toggleOn                  bool
 }
 
 // dialogResultMsg is a dialog's answer. ok is false when it was cancelled.
 type dialogResultMsg struct {
-	id     string
-	ok     bool
-	text   string   // dialogText
-	values []string // dialogChoice: the picked values
+	id      string
+	ok      bool
+	text    string   // dialogText
+	values  []string // dialogChoice: the picked values
+	toggled bool     // dialogConfirm: the state of the toggle when answered
 }
 
 // dialogHandlers receive dialog answers by id. Features register theirs in init.
@@ -136,7 +141,8 @@ func (m model) dialogKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	finish := func(ok bool, text string, values []string) (tea.Model, tea.Cmd) {
 		m.dlg = nil
 		id := d.id
-		return m, func() tea.Msg { return dialogResultMsg{id: id, ok: ok, text: text, values: values} }
+		toggled := d.toggleOn
+		return m, func() tea.Msg { return dialogResultMsg{id: id, ok: ok, text: text, values: values, toggled: toggled} }
 	}
 	keep := func() (tea.Model, tea.Cmd) { m.dlg = &d; return m, nil }
 	if k.Type == tea.KeyEsc {
@@ -144,6 +150,10 @@ func (m model) dialogKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch d.kind {
 	case dialogConfirm:
+		if d.toggleKey != "" && k.String() == d.toggleKey {
+			d.toggleOn = !d.toggleOn
+			return keep()
+		}
 		return finish(k.String() == "y", "", nil)
 	case dialogText:
 		d.err = ""
@@ -188,9 +198,19 @@ func (m model) dialogKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			d.sel = 0
 		}
 	case tea.KeyRunes:
+		if d.needBang && string(k.Runes) == "!" {
+			if d.sel < len(vis) && !d.choices[vis[d.sel]].disabled {
+				return finish(true, "", []string{d.choices[vis[d.sel]].value})
+			}
+			return keep()
+		}
 		d.filter += string(k.Runes)
 		d.sel = 0
 	case tea.KeyEnter:
+		if d.needBang {
+			d.err = d.bangHint
+			return keep()
+		}
 		if d.multi {
 			var values []string
 			for _, c := range d.choices {
@@ -242,6 +262,14 @@ func (m model) dialogView() string {
 			b.WriteString(" " + d.detail + "\n\n")
 		}
 		hint = "y confirm   any other key cancels"
+		if d.toggleKey != "" {
+			box := "[ ] "
+			if d.toggleOn {
+				box = "[x] "
+			}
+			b.WriteString(" " + box + d.toggleLabel + ui.Dim.Render("   ("+d.toggleKey+" to change)") + "\n\n")
+			hint = "y confirm   " + d.toggleKey + " toggle   any other key cancels"
+		}
 	default:
 		b.WriteString(" filter: " + d.filter + "█\n")
 		vis := d.visible()
@@ -274,6 +302,9 @@ func (m model) dialogView() string {
 		hint = "↑↓ move   enter accept   esc cancel"
 		if d.multi {
 			hint = "↑↓ move   space tick   enter accept   esc cancel"
+		}
+		if d.needBang {
+			hint = "↑↓ move   ! accept anyway   esc cancel"
 		}
 	}
 	if d.err != "" {

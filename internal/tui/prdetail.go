@@ -40,7 +40,7 @@ func init() {
 		},
 		key:    prDetailKey,
 		body:   prDetailBody,
-		footer: "c checks  d diff  C comment  r review  o open  j/k scroll",
+		footer: "c checks  d diff  C comment  r review  m merge  o open  j/k scroll",
 	})
 }
 
@@ -67,6 +67,9 @@ func prDetailKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	case "d":
 		cmd := m.push(viewDiff)
 		return m, cmd, true
+	case "m":
+		next, cmd := m.startMerge()
+		return next, cmd, true
 	case "C":
 		return m.startPRComment(), nil, true
 	case "r":
