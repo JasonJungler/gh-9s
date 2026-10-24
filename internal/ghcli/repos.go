@@ -47,12 +47,12 @@ func ParseRepoInfos(b []byte, host string) ([]RepoInfo, error) {
 			continue
 		}
 		ref.Host = host
-		info := RepoInfo{Ref: ref, Language: r.Language, Stars: max(r.StargazerCount, r.StargazersCount), UpdatedAt: r.UpdatedAt}
+		info := RepoInfo{Ref: ref, Language: CleanText(r.Language), Stars: max(r.StargazerCount, r.StargazersCount), UpdatedAt: r.UpdatedAt}
 		if r.PrimaryLanguage != nil {
-			info.Language = r.PrimaryLanguage.Name
+			info.Language = CleanText(r.PrimaryLanguage.Name)
 		}
 		if r.Description != nil {
-			info.Description = *r.Description
+			info.Description = CleanText(*r.Description)
 		}
 		out = append(out, info)
 	}

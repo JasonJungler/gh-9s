@@ -115,9 +115,10 @@ func AllowedMergeMethods(r RepoRef) ([]MergeMethod, error) {
 	return ParseAllowedMethods(out)
 }
 
-// MergeArgs is the `gh pr merge` command. It never passes --admin or --auto. An unknown method
-// yields nil so nothing unintended can be built from a bad value.
-func MergeArgs(r RepoRef, number string, m MergeMethod, deleteBranch bool) []string {
+// MergeArgs is the `gh pr merge` command. It never passes --admin or --auto. headSHA, when
+// given, makes GitHub refuse the merge if the PR has moved on since the user looked at it. An
+// unknown method yields nil so nothing unintended can be built from a bad value.
+func MergeArgs(r RepoRef, number string, m MergeMethod, deleteBranch bool, headSHA string) []string {
 	var flag string
 	switch m {
 	case MergeCommit:
@@ -133,12 +134,15 @@ func MergeArgs(r RepoRef, number string, m MergeMethod, deleteBranch bool) []str
 	if deleteBranch {
 		a = append(a, "--delete-branch")
 	}
+	if headSHA != "" {
+		a = append(a, "--match-head-commit="+headSHA)
+	}
 	return Scoped(r, a...)
 }
 
 // MergePR merges the PR.
-func MergePR(r RepoRef, number string, m MergeMethod, deleteBranch bool) error {
-	args := MergeArgs(r, number, m, deleteBranch)
+func MergePR(r RepoRef, number string, m MergeMethod, deleteBranch bool, headSHA string) error {
+	args := MergeArgs(r, number, m, deleteBranch, headSHA)
 	if args == nil {
 		return fmt.Errorf("unknown merge method %q", m)
 	}

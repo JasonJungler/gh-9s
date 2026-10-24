@@ -10,18 +10,20 @@ import (
 // shared code (fetch, Update, handleKey, View, footer, shouldPoll) asks the registry before
 // falling back to the built-in views, so adding a screen does not touch those switches.
 type screen struct {
-	name   string                                             // shown in the title as <name>
-	fetch  func(m model) tea.Cmd                              // loads the screen's data; yields a screenMsg
-	apply  func(m model, msg screenMsg) model                 // stores a loaded result in the model
-	key    func(m model, k tea.KeyMsg) (model, tea.Cmd, bool) // handled=false falls through to the shared keys
-	body   func(m model) string                               // everything between the header and the footer
-	footer string                                             // key hints
-	poll   bool                                               // refetch on every tick
+	name     string                                             // shown in the title as <name>
+	fetch    func(m model) tea.Cmd                              // loads the screen's data; yields a screenMsg
+	apply    func(m model, msg screenMsg) model                 // stores a loaded result in the model
+	key      func(m model, k tea.KeyMsg) (model, tea.Cmd, bool) // handled=false falls through to the shared keys
+	body     func(m model) string                               // everything between the header and the footer
+	footer   string                                             // key hints
+	identity func(m model) string                               // what the screen shows; a result for anything else is dropped
+	poll     bool                                               // refetch on every tick
 }
 
 // screenMsg carries a screen's loaded data back to Update.
 type screenMsg struct {
 	view viewKind
+	id   string // the identity the data was fetched for
 	data any
 	err  error
 }
@@ -51,3 +53,8 @@ func (m model) withScreenData(v viewKind, d any) model {
 	m.sdata = next
 	return m
 }
+
+// itemID names "this repo's PR or issue number": the identity of a detail screen. Every fetch
+// records it and Update drops a result whose identity is no longer the one on screen, so a slow
+// answer for the previous item can never be shown (or acted on) as the current one.
+func (m model) itemID(number string) string { return m.target.String() + "#" + number }

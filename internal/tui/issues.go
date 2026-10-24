@@ -31,12 +31,13 @@ type issueState struct {
 
 func init() {
 	register(viewIssues, screen{
-		name: "issues",
+		name:     "issues",
+		identity: func(m model) string { return m.target.String() + "|" + issueFilterName(m.issueFilter) },
 		fetch: func(m model) tea.Cmd {
-			tg, f := m.target, m.issueFilter
+			tg, f, id := m.target, m.issueFilter, m.target.String()+"|"+issueFilterName(m.issueFilter)
 			return func() tea.Msg {
 				t, err := fetchIssueList(tg, f)
-				return screenMsg{view: viewIssues, data: t, err: err}
+				return screenMsg{view: viewIssues, id: id, data: t, err: err}
 			}
 		},
 		apply: func(m model, msg screenMsg) model {
@@ -52,12 +53,13 @@ func init() {
 		poll:   false,
 	})
 	register(viewIssue, screen{
-		name: "issue",
+		name:     "issue",
+		identity: func(m model) string { return m.itemID(m.issue) },
 		fetch: func(m model) tea.Cmd {
-			tg, number := m.target, m.issue
+			tg, number, id := m.target, m.issue, m.itemID(m.issue)
 			return func() tea.Msg {
 				d, err := fetchIssue(tg, number)
-				return screenMsg{view: viewIssue, data: d, err: err}
+				return screenMsg{view: viewIssue, id: id, data: d, err: err}
 			}
 		},
 		apply: func(m model, msg screenMsg) model {
@@ -215,7 +217,8 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 			kind, p.current = "assignees", st.d.Assignees
 		}
 		m.status = styDim.Render("loading " + kind + "…")
-		tg := p.target
+		tg, id := p.target, m.itemID(m.issue)
+		p.want = kind
 		return m, func() tea.Msg {
 			var names []string
 			var err error
@@ -224,7 +227,7 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 			} else {
 				names, err = listAssignees(tg)
 			}
-			return choicesMsg{kind: kind, names: names, err: err}
+			return choicesMsg{id: id, kind: kind, names: names, err: err}
 		}, true
 	case "o":
 		if st.d.URL != "" {
@@ -296,6 +299,7 @@ func stateWord(d ghcli.IssueDetail, word string) string {
 
 // choicesMsg carries the repo's labels or assignable users for a multi-choice dialog.
 type choicesMsg struct {
+	id    string // the issue the lists were fetched for
 	kind  string // "labels" or "assignees"
 	names []string
 	err   error
@@ -305,8 +309,8 @@ type choicesMsg struct {
 // list, even if the repo no longer offers them, so they can still be removed.
 func (m model) choicesLoaded(msg choicesMsg) model {
 	p := m.pending
-	if p == nil || m.view != viewIssue {
-		return m
+	if p == nil || m.view != viewIssue || msg.id != m.itemID(m.issue) || p.want != msg.kind || m.dlg != nil {
+		return m // nothing is waiting for this, or the user has moved on or is busy with a dialog
 	}
 	if msg.err != nil {
 		m.pending = nil

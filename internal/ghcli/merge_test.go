@@ -68,14 +68,16 @@ func TestMergeArgs(t *testing.T) {
 		r      RepoRef
 		method MergeMethod
 		del    bool
+		head   string
 		want   []string
 	}{
-		{acmeAPI, MergeSquash, false, []string{"pr", "merge", "482", "--squash", "-R", "acme/api"}},
-		{acmeAPI, MergeCommit, true, []string{"pr", "merge", "482", "--merge", "--delete-branch", "-R", "acme/api"}},
-		{RepoRef{}, MergeRebase, false, []string{"pr", "merge", "482", "--rebase"}},
+		{acmeAPI, MergeSquash, false, "", []string{"pr", "merge", "482", "--squash", "-R", "acme/api"}},
+		{acmeAPI, MergeCommit, true, "", []string{"pr", "merge", "482", "--merge", "--delete-branch", "-R", "acme/api"}},
+		{RepoRef{}, MergeRebase, false, "", []string{"pr", "merge", "482", "--rebase"}},
+		{acmeAPI, MergeSquash, true, "abc123", []string{"pr", "merge", "482", "--squash", "--delete-branch", "--match-head-commit=abc123", "-R", "acme/api"}},
 	}
 	for _, c := range cases {
-		got := MergeArgs(c.r, "482", c.method, c.del)
+		got := MergeArgs(c.r, "482", c.method, c.del, c.head)
 		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("MergeArgs = %q; want %q", got, c.want)
 		}
@@ -84,6 +86,9 @@ func TestMergeArgs(t *testing.T) {
 				t.Errorf("release 2 never passes %s: %q", a, got)
 			}
 		}
+	}
+	if got := MergeArgs(acmeAPI, "1", MergeMethod("admin"), false, ""); got != nil {
+		t.Errorf("an unknown method must build nothing, got %q", got)
 	}
 }
 

@@ -55,18 +55,18 @@ func ParseIssueDetail(b []byte) (IssueDetail, error) {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return IssueDetail{}, err
 	}
-	d := IssueDetail{Number: raw.Number, Title: raw.Title, Body: raw.Body, Author: loginOrGhost(raw.Author),
+	d := IssueDetail{Number: raw.Number, Title: CleanText(raw.Title), Body: CleanText(raw.Body), Author: loginOrGhost(raw.Author),
 		State: raw.State, URL: raw.URL}
 	for _, l := range raw.Labels {
-		d.Labels = append(d.Labels, l.Name)
+		d.Labels = append(d.Labels, CleanText(l.Name))
 	}
 	for _, a := range raw.Assignees {
 		if a.Login != "" {
-			d.Assignees = append(d.Assignees, a.Login)
+			d.Assignees = append(d.Assignees, CleanText(a.Login))
 		}
 	}
 	for _, c := range raw.Comments {
-		d.Comments = append(d.Comments, Comment{loginOrGhost(c.Author), c.Body, c.CreatedAt})
+		d.Comments = append(d.Comments, Comment{loginOrGhost(c.Author), CleanText(c.Body), c.CreatedAt})
 	}
 	return d, nil
 }

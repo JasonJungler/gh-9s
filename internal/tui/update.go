@@ -91,6 +91,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.view != m.view {
 			return m, nil // a late result for a view we have left
 		}
+		if s := screens[msg.view]; s.identity != nil && msg.id != s.identity(m) {
+			return m, nil // a late result for a PR, issue, repo or filter we have left
+		}
 		m.loading, m.err = false, msg.err
 		if s := screens[msg.view]; msg.err == nil && s.apply != nil {
 			m = s.apply(m, msg)
@@ -184,7 +187,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = styErr.Render("✗ " + msg.err.Error())
 			return m, nil
 		}
-		m.pr = msg.pr
+		m.pr, m.prTarget = msg.pr, m.target
 		return m, m.push(msg.view)
 	case tea.KeyMsg:
 		return m.handleKey(msg)

@@ -4,6 +4,20 @@ package diff
 
 import "strings"
 
+// clean drops control characters (escape sequences and the like) from a line of someone else's
+// diff; tabs stay. A diff is untrusted text and must never be able to drive the terminal.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // Kind says what a line of a diff is.
 type Kind int
 
@@ -58,7 +72,7 @@ func Parse(text string, maxLines int) Diff {
 		stored++
 	}
 	for _, line := range lines {
-		line = strings.TrimSuffix(line, "\r")
+		line = clean(strings.TrimSuffix(line, "\r"))
 		if strings.HasPrefix(line, "diff --git ") {
 			d.Files = append(d.Files, File{Path: headerPath(line)})
 			ci, inHunk, skipPatch = len(d.Files)-1, false, false

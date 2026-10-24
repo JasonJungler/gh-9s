@@ -18,10 +18,11 @@ var (
 // mergeAction is a merge being put together through dialogs. It remembers the repo and PR it
 // was started for.
 type mergeAction struct {
-	target  ghcli.RepoRef
+	target  ghcli.RepoRef // always the explicit repo (never empty when it is known), so gh cannot touch a local checkout
 	number  string
 	label   string // "acme/api#482"
 	branch  string
+	head    string // the commit that was read; the merge is refused if the PR has moved on
 	method  ghcli.MergeMethod
 	verdict ghcli.MergeVerdict
 }
@@ -29,6 +30,7 @@ type mergeAction struct {
 // mergeInfoMsg is what m collects before asking anything: a fresh read of the PR and the
 // merge methods the repo allows.
 type mergeInfoMsg struct {
+	id      string // the PR the options were fetched for
 	d       ghcli.PRDetail
 	methods []ghcli.MergeMethod
 	err     error
@@ -43,24 +45,24 @@ var methodNames = map[ghcli.MergeMethod]string{
 // startMerge reads the PR again (what is on screen may be old) and asks the repo which merge
 // methods it allows; mergeInfoMsg then opens the first dialog.
 func (m model) startMerge() (model, tea.Cmd) {
-	tg, number := m.target, m.pr
-	m.pendingMerge = &mergeAction{target: tg, number: number, label: m.prLabel()}
+	tg, number, id := m.target, m.pr, m.itemID(m.pr)
+	m.pendingMerge = &mergeAction{target: m.curTarget(), number: number, label: m.prLabel()}
 	m.status = styDim.Render("checking merge options for " + m.pendingMerge.label + "…")
 	return m, func() tea.Msg {
 		d, err := fetchPR(tg, number)
 		if err != nil {
-			return mergeInfoMsg{err: err}
+			return mergeInfoMsg{id: id, err: err}
 		}
 		methods, err := allowedMethods(tg)
-		return mergeInfoMsg{d: d, methods: methods, err: err}
+		return mergeInfoMsg{id: id, d: d, methods: methods, err: err}
 	}
 }
 
 // mergeInfo opens the method dialog for a PR whose state has just been read.
 func (m model) mergeInfo(msg mergeInfoMsg) model {
 	p := m.pendingMerge
-	if p == nil || m.view != viewPRDetail {
-		return m
+	if p == nil || m.view != viewPRDetail || msg.id != m.itemID(m.pr) || m.dlg != nil {
+		return m // nothing is waiting for this, or the user has moved on or is busy with a dialog
 	}
 	if msg.err != nil {
 		m.pendingMerge = nil
@@ -74,7 +76,7 @@ func (m model) mergeInfo(msg mergeInfoMsg) model {
 		m.status = styErr.Render("✗ no merge method is allowed for " + displayRef(m.curTarget()) + " (or its settings are not visible to you)")
 		return m
 	}
-	p.verdict, p.branch = ghcli.EvaluateMerge(msg.d), msg.d.HeadRef
+	p.verdict, p.branch, p.head = ghcli.EvaluateMerge(msg.d), msg.d.HeadRef, msg.d.HeadSHA
 	reasons := strings.Join(p.verdict.Reasons, "; ")
 	var prompt string
 	switch p.verdict.Level {
@@ -126,7 +128,7 @@ func init() {
 			_ = prefs{DeleteBranchAfterMerge: r.toggled}.save(m.prefsFile) // best effort
 		}
 		return m, func() tea.Msg {
-			err := mergePR(p.target, p.number, p.method, r.toggled)
+			err := mergePR(p.target, p.number, p.method, r.toggled, p.head)
 			return prActionDoneMsg{text: fmt.Sprintf("merged %s (%s)", p.label, p.method), err: err}
 		}
 	}

@@ -76,16 +76,17 @@ type model struct {
 	mi                            int
 	follow                        bool
 
-	note         string           // explanation tied to the current view (cleared when the view changes)
-	banner       string           // sticky startup problem, always shown
-	runStatus    string           // last seen status of the watched run, for the finished notification
-	pendingMerge *mergeAction     // the merge being collected through dialogs
-	prefsFile    string           // where small remembered choices live ("" = do not persist)
-	pending      *prAction        // the PR action being collected through dialogs
-	dlg          *dialog          // a question being asked (text, choice or yes/no)
-	picker       *picker          // the repo picker overlay, when open
-	recents      *recent.Store    // repos chosen before; nil if the file could not be read
-	sdata        map[viewKind]any // per-screen data, see screen.go
+	note         string                    // explanation tied to the current view (cleared when the view changes)
+	banner       string                    // sticky startup problem, always shown
+	runStatus    string                    // last seen status of the watched run, for the finished notification
+	pendingMerge *mergeAction              // the merge being collected through dialogs
+	prefsFile    string                    // where small remembered choices live ("" = do not persist)
+	pending      *prAction                 // the PR action being collected through dialogs
+	dlg          *dialog                   // a question being asked (text, choice or yes/no)
+	repoCache    map[string]repoCacheEntry // the repos I can access, per host, reused for a while
+	picker       *picker                   // the repo picker overlay, when open
+	recents      *recent.Store             // repos chosen before; nil if the file could not be read
+	sdata        map[viewKind]any          // per-screen data, see screen.go
 	graph        graph.Graph
 	gstyle       graph.Style
 	gsel         int
@@ -178,6 +179,7 @@ func (m *model) switchTo(v viewKind) tea.Cmd {
 	m.logs, m.follow = nil, false
 	m.query, m.matches, m.mi = "", nil, 0
 	m.note = ""
+	m.pending, m.pendingMerge = nil, nil // half-finished actions belong to the screen we are leaving
 	m.loading = true
 	return m.fetch()
 }

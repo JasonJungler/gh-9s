@@ -17,6 +17,7 @@ type PRDetail struct {
 	Title, Body, Author, State, BaseRef, HeadRef, URL string
 	ReviewDecision, Mergeable, MergeState             string
 	IsDraft                                           bool
+	HeadSHA                                           string // the commit the PR was read at
 	Additions, Deletions, ChangedFiles                int
 	Labels                                            []string
 	ChecksPassed, ChecksFailed, ChecksPending         int
@@ -48,7 +49,7 @@ func loginOrGhost(a *rawLogin) string {
 	if a == nil || a.Login == "" {
 		return "ghost"
 	}
-	return a.Login
+	return CleanText(a.Login)
 }
 
 // ParsePRDetail reads the JSON of `gh pr view --json ...` (fields listed in FetchPR).
@@ -62,6 +63,7 @@ func ParsePRDetail(b []byte) (PRDetail, error) {
 		IsDraft          bool      `json:"isDraft"`
 		BaseRefName      string    `json:"baseRefName"`
 		HeadRefName      string    `json:"headRefName"`
+		HeadRefOid       string    `json:"headRefOid"`
 		URL              string    `json:"url"`
 		ReviewDecision   string    `json:"reviewDecision"`
 		Mergeable        string    `json:"mergeable"`
@@ -94,19 +96,19 @@ func ParsePRDetail(b []byte) (PRDetail, error) {
 		return PRDetail{}, err
 	}
 	d := PRDetail{
-		Number: raw.Number, Title: raw.Title, Body: raw.Body, Author: loginOrGhost(raw.Author), State: raw.State,
-		BaseRef: raw.BaseRefName, HeadRef: raw.HeadRefName, URL: raw.URL, ReviewDecision: raw.ReviewDecision,
+		Number: raw.Number, Title: CleanText(raw.Title), Body: CleanText(raw.Body), Author: loginOrGhost(raw.Author), State: raw.State,
+		BaseRef: CleanText(raw.BaseRefName), HeadRef: CleanText(raw.HeadRefName), HeadSHA: raw.HeadRefOid, URL: raw.URL, ReviewDecision: raw.ReviewDecision,
 		Mergeable: raw.Mergeable, MergeState: raw.MergeStateStatus, IsDraft: raw.IsDraft,
 		Additions: raw.Additions, Deletions: raw.Deletions, ChangedFiles: raw.ChangedFiles,
 	}
 	for _, l := range raw.Labels {
-		d.Labels = append(d.Labels, l.Name)
+		d.Labels = append(d.Labels, CleanText(l.Name))
 	}
 	for _, c := range raw.Comments {
-		d.Comments = append(d.Comments, Comment{loginOrGhost(c.Author), c.Body, c.CreatedAt})
+		d.Comments = append(d.Comments, Comment{loginOrGhost(c.Author), CleanText(c.Body), c.CreatedAt})
 	}
 	for _, r := range raw.Reviews {
-		d.Reviews = append(d.Reviews, Review{loginOrGhost(r.Author), r.State, r.Body, r.SubmittedAt})
+		d.Reviews = append(d.Reviews, Review{loginOrGhost(r.Author), r.State, CleanText(r.Body), r.SubmittedAt})
 	}
 	for _, c := range raw.Rollup {
 		switch checkOutcome(c.Typename, c.Status, c.Conclusion, c.State) {
@@ -147,7 +149,7 @@ func checkOutcome(typename, status, conclusion, state string) string {
 // FetchPR loads one PR with everything the detail screen needs.
 func FetchPR(r RepoRef, number string) (PRDetail, error) {
 	out, err := Run(Scoped(r, "pr", "view", number, "--json",
-		"number,title,body,author,state,isDraft,baseRefName,headRefName,url,reviewDecision,mergeable,"+
+		"number,title,body,author,state,isDraft,baseRefName,headRefName,headRefOid,url,reviewDecision,mergeable,"+
 			"mergeStateStatus,statusCheckRollup,comments,reviews,additions,deletions,changedFiles,labels")...)
 	if err != nil {
 		return PRDetail{}, err

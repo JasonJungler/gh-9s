@@ -26,12 +26,13 @@ type prDetailState struct {
 
 func init() {
 	register(viewPRDetail, screen{
-		name: "pr",
+		name:     "pr",
+		identity: func(m model) string { return m.itemID(m.pr) },
 		fetch: func(m model) tea.Cmd {
-			tg, number := m.target, m.pr
+			tg, number, id := m.target, m.pr, m.itemID(m.pr)
 			return func() tea.Msg {
 				d, err := fetchPR(tg, number)
-				return screenMsg{view: viewPRDetail, data: d, err: err}
+				return screenMsg{view: viewPRDetail, id: id, data: d, err: err}
 			}
 		},
 		apply: func(m model, msg screenMsg) model {

@@ -180,6 +180,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) goTop(v viewKind) (tea.Model, tea.Cmd) {
 	m.back, m.wfID, m.wfName, m.pr, m.target = nil, "", "", "", m.base
+	m.prTarget = m.base
 	return m, m.switchTo(v)
 }
 

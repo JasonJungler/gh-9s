@@ -153,3 +153,19 @@ func TestParseTextBeforeAnyFileIsIgnored(t *testing.T) {
 		t.Errorf("files = %d; stray leading text must not create a file", len(d.Files))
 	}
 }
+
+func TestParseStripsTerminalControlSequences(t *testing.T) {
+	d := Parse("diff --git a/x\x1b[31m b/x\x1b[31m\n--- a/x\n+++ b/x\n@@ -0,0 +1,2 @@\n+evil \x1b]52;c;ZXZpbA==\x07 clipboard\n+ok\ttab\n", 100)
+	f := d.Files[0]
+	for _, l := range f.Lines {
+		if strings.ContainsAny(l.Text, "\x1b\x07") {
+			t.Errorf("line %q kept a control character", l.Text)
+		}
+	}
+	if strings.ContainsAny(f.Path, "\x1b\x07") {
+		t.Errorf("path %q kept a control character", f.Path)
+	}
+	if f.Lines[1].Text != "evil ]52;c;ZXZpbA== clipboard" || f.Lines[2].Text != "ok\ttab" {
+		t.Errorf("printable text and tabs must survive: %q / %q", f.Lines[1].Text, f.Lines[2].Text)
+	}
+}

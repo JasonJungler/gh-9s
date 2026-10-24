@@ -20,6 +20,7 @@ type prAction struct {
 	label   string // "acme/api#482", shown in every question
 	kind    ghcli.ReviewKind
 	body    string
+	want    string   // for a list being fetched: "labels" or "assignees"
 	current []string // labels or assignees the issue has now, for diffing a multi-choice answer
 }
 

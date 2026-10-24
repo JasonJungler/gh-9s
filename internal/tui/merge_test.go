@@ -15,6 +15,7 @@ type mergeCall struct {
 	number string
 	method ghcli.MergeMethod
 	del    bool
+	head   string
 }
 
 type mergeFakes struct {
@@ -36,8 +37,8 @@ func installMerge(t *testing.T, methods []ghcli.MergeMethod, prs ...ghcli.PRDeta
 		return f.prs[i], nil
 	}
 	allowedMethods = func(r ghcli.RepoRef) ([]ghcli.MergeMethod, error) { return f.methods, f.methodsErr }
-	mergePR = func(r ghcli.RepoRef, number string, m ghcli.MergeMethod, del bool) error {
-		f.calls = append(f.calls, mergeCall{r, number, m, del})
+	mergePR = func(r ghcli.RepoRef, number string, m ghcli.MergeMethod, del bool, head string) error {
+		f.calls = append(f.calls, mergeCall{r, number, m, del, head})
 		return f.mergeErr
 	}
 	t.Cleanup(func() {
@@ -49,6 +50,7 @@ func installMerge(t *testing.T, methods []ghcli.MergeMethod, prs ...ghcli.PRDeta
 func prState(mergeable, mergeState, review string) ghcli.PRDetail {
 	d := fixturePR()
 	d.State, d.Mergeable, d.MergeState, d.ReviewDecision = "OPEN", mergeable, mergeState, review
+	d.HeadSHA = "deadbeef"
 	return d
 }
 
@@ -146,7 +148,7 @@ func TestCleanPRMergesAfterAConfirmationNamingEverything(t *testing.T) {
 		t.Fatal("nothing may be merged before the confirmation")
 	}
 	m = keyAll(m, "y")
-	want := mergeCall{acme, "482", ghcli.MergeSquash, false}
+	want := mergeCall{acme, "482", ghcli.MergeSquash, false, "deadbeef"}
 	if len(f.calls) != 1 || f.calls[0] != want {
 		t.Errorf("calls = %+v; want %+v", f.calls, want)
 	}

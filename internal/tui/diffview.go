@@ -45,15 +45,16 @@ type dline struct {
 
 func init() {
 	register(viewDiff, screen{
-		name: "diff",
+		name:     "diff",
+		identity: func(m model) string { return m.itemID(m.pr) },
 		fetch: func(m model) tea.Cmd {
-			tg, number, limit := m.target, m.pr, maxDiffLines
+			tg, number, limit, id := m.target, m.pr, maxDiffLines, m.itemID(m.pr)
 			return func() tea.Msg {
 				text, err := fetchDiff(tg, number)
 				if err != nil {
-					return screenMsg{view: viewDiff, err: err}
+					return screenMsg{view: viewDiff, id: id, err: err}
 				}
-				return screenMsg{view: viewDiff, data: diff.Parse(text, limit)}
+				return screenMsg{view: viewDiff, id: id, data: diff.Parse(text, limit)}
 			}
 		},
 		apply: func(m model, msg screenMsg) model {

@@ -250,7 +250,7 @@ func (m model) tableBody() string {
 		r := vis[i]
 		var line strings.Builder
 		for j, c := range r.cells {
-			s := trunc(c, w[j]) + "  "
+			s := trunc(ghcli.CleanText(c), w[j]) + "  "
 			if j == statusCol(m.view) && i != m.cursor {
 				s = stateStyle(r.state).Render(s)
 			}

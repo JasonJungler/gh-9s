@@ -22,6 +22,29 @@ var (
 	}
 )
 
+// repoCacheTTL is how long the list of repos I can access is reused: it takes one request per
+// organisation to build and changes slowly.
+const repoCacheTTL = 10 * time.Minute
+
+// clock is time.Now; tests replace it.
+var clock = time.Now
+
+type repoCacheEntry struct {
+	list []ghcli.RepoInfo
+	at   time.Time
+}
+
+// withRepoCache returns a copy of the cache with host's entry replaced (the map is shared with
+// copies of the model, so it is never written in place).
+func withRepoCache(c map[string]repoCacheEntry, host string, list []ghcli.RepoInfo) map[string]repoCacheEntry {
+	out := make(map[string]repoCacheEntry, len(c)+1)
+	for k, v := range c {
+		out[k] = v
+	}
+	out[host] = repoCacheEntry{list, clock()}
+	return out
+}
+
 const (
 	minGlobalQuery = 2  // shorter global queries are not sent: GitHub's search limits are tight
 	searchLimit    = 30 // results asked of a global search
@@ -46,6 +69,7 @@ type picker struct {
 }
 
 type pickerLoadedMsg struct {
+	host  string
 	cache []ghcli.RepoInfo
 	err   error
 }
@@ -103,11 +127,15 @@ func (m model) recentList() []ghcli.RepoRef {
 
 // openPicker shows the picker and starts loading the repos the user can access.
 func (m *model) openPicker() tea.Cmd {
-	m.picker = &picker{loading: true}
 	host := m.curTarget().Host
+	if e, ok := m.repoCache[host]; ok && clock().Sub(e.at) < repoCacheTTL {
+		m.picker = &picker{cache: e.list} // fetched recently: no new round of API calls
+		return nil
+	}
+	m.picker = &picker{loading: true}
 	return func() tea.Msg {
 		l, err := listRepos(host)
-		return pickerLoadedMsg{l, err}
+		return pickerLoadedMsg{host, l, err}
 	}
 }
 
@@ -127,7 +155,7 @@ func (p *picker) queryChanged() tea.Cmd {
 
 func (m model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	p := *m.picker
-	rows := p.rows(m.curTarget(), m.recentList())
+	rows := p.rows(m.curRepo, m.recentList())
 	var cmd tea.Cmd
 	switch k.Type {
 	case tea.KeyEsc:
@@ -183,6 +211,7 @@ func (m model) pickerMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.err = msg.err.Error()
 		} else {
 			p.cache = msg.cache
+			m.repoCache = withRepoCache(m.repoCache, msg.host, msg.cache)
 		}
 	case pickerDebounceMsg:
 		if msg.seq != p.seq {
@@ -226,7 +255,7 @@ func (m model) pickerView() string {
 	default:
 		b.WriteString("\n")
 	}
-	rows := p.rows(m.curTarget(), m.recentList())
+	rows := p.rows(m.curRepo, m.recentList())
 	h := max(5, m.height-9)
 	start := 0
 	if p.sel >= h {
