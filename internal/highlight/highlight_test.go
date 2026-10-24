@@ -66,6 +66,9 @@ func TestOldAndNewSidesAreTokenisedSeparately(t *testing.T) {
 func TestMultiLineStringInsideAHunk(t *testing.T) {
 	f := fileOf(t, "a.go", "@@ -1,4 +1,4 @@\n x := `one\n two\n three`\n y := 1\n")
 	h := ForFile(f)
+	if h.Right(2) == nil || h.Right(1) == nil {
+		t.Fatal("context lines are coloured on the new side")
+	}
 	if colourOf(h.Right(2), "two") != colourOf(h.Right(1), "one") {
 		t.Errorf("the middle of a raw string should be string-coloured: %+v / %+v", h.Right(2), h.Right(1))
 	}
