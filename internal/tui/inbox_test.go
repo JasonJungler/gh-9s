@@ -302,3 +302,106 @@ func TestSwitchingRepoDoesNotChangeTheInbox(t *testing.T) {
 		t.Errorf("the inbox is not about one repo; calls %d -> %d\n%s", before, f.calls, v)
 	}
 }
+
+func TestAHostThatFailsKeepsItsLastRowsWithANote(t *testing.T) {
+	f := installInbox(t)
+	f.hosts = []string{"github.com", "ghe.corp"}
+	f.items[inboxKeyOf("ghe.corp", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("ghe.corp", "acme/api", 1, "from ghe", "2026-10-24T11:00:00Z")}
+	m := openInbox(t)
+	f.failing["ghe.corp"] = errors.New("i/o timeout")
+	f.now = f.now.Add(2 * time.Minute)
+	m = poll(t, m)
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "from ghe") || !strings.Contains(v, "i/o timeout") {
+		t.Errorf("a transient failure keeps the last answer and says what happened:\n%s", v)
+	}
+}
+
+func TestEnterOpensAPRInItsOwnRepoAndEscComesBackToTheSameRow(t *testing.T) {
+	f := installInbox(t)
+	f.items[inboxKeyOf("github.com", ghcli.InboxReviewRequested)] = []ghcli.InboxItem{
+		prItem("github.com", "acme/web", 482, "Fix retry", "2026-10-24T10:00:00Z"), prItem("github.com", "other/lib", 7, "Second", "2026-10-24T09:00:00Z")}
+	installPRFetch(t, fixturePR())
+	m := openInbox(t)
+	m = keys(m, "tab", "j") // second row of the review-requested tab
+	m = keys(m, "enter")
+	if m.view != viewPRDetail || m.pr != "7" || m.target != (ghcli.RepoRef{Owner: "other", Name: "lib"}) || m.prTarget != m.target {
+		t.Fatalf("view=%v pr=%q target=%+v prTarget=%+v; want PR 7 of other/lib", m.view, m.pr, m.target, m.prTarget)
+	}
+	m = keys(m, "esc")
+	if m.view != viewInbox || m.target != m.base {
+		t.Fatalf("view=%v target=%+v; back in the inbox with the repo we came from", m.view, m.target)
+	}
+	m = pump(m, m.fetch())
+	if st := inboxSt(m); st.tab != 1 {
+		t.Errorf("tab = %d; want the same tab", st.tab)
+	}
+	if r, _ := m.selected(); r.id != "github.com/other/lib#7" {
+		t.Errorf("selected %q; want the same row", r.id)
+	}
+}
+
+func TestEnterpriseItemsOpenInTheirHostAndNothingCarriesOver(t *testing.T) {
+	f := installInbox(t)
+	f.hosts = []string{"github.com", "ghe.corp"}
+	f.items[inboxKeyOf("ghe.corp", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("ghe.corp", "corp/tool", 3, "on ghe", "2026-10-24T11:00:00Z")}
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 9, "on github", "2026-10-24T10:00:00Z")}
+	fk := installIssues(t, fixtureIssue())
+	m := openInbox(t)
+	m = keys(m, "enter") // newest first: the Enterprise issue
+	next, _ := m.Update(m.fetch()())
+	m = next.(model)
+	want := ghcli.RepoRef{Host: "ghe.corp", Owner: "corp", Name: "tool"}
+	if m.view != viewIssue || m.issue != "3" || m.target != want || len(fk.viewTargets) != 1 || fk.viewTargets[0] != want {
+		t.Fatalf("view=%v issue=%q target=%+v fetched=%v; want issue 3 of ghe.corp/corp/tool", m.view, m.issue, m.target, fk.viewTargets)
+	}
+	m = keys(m, "esc")
+	m = pump(m, m.fetch())
+	m = keys(m, "j", "enter") // the github.com issue
+	next, _ = m.Update(m.fetch()())
+	m = next.(model)
+	if m.target != (ghcli.RepoRef{Owner: "acme", Name: "api"}) || len(fk.viewTargets) != 2 || fk.viewTargets[1].Host != "" {
+		t.Errorf("target=%+v fetched=%v; the first item's host must not carry over", m.target, fk.viewTargets)
+	}
+}
+
+func TestPRActionsFromTheInboxActOnTheItemsRepo(t *testing.T) {
+	f := installInbox(t)
+	f.items[inboxKeyOf("github.com", ghcli.InboxReviewRequested)] = []ghcli.InboxItem{prItem("github.com", "other/lib", 7, "Second", "2026-10-24T09:00:00Z")}
+	installPRFetch(t, fixturePR())
+	comments := installPRActions(t)
+	m := openInbox(t)
+	m = keys(m, "tab", "enter")
+	m = openDetail2(t, m)
+	m = keyAll(m, "C")
+	m = typeAll(m, "hello")
+	m = keyAll(m, "enter")
+	if len(comments.comments) != 1 || comments.comments[0].repo != (ghcli.RepoRef{Owner: "other", Name: "lib"}) || comments.comments[0].number != "7" {
+		t.Errorf("comments = %+v; want a comment on other/lib#7", comments.comments)
+	}
+}
+
+// openDetail2 delivers the detail the PR screen fetched.
+func openDetail2(t *testing.T, m model) model {
+	t.Helper()
+	next, _ := m.Update(m.fetch()())
+	return next.(model)
+}
+
+func TestOOpensTheItemInTheBrowserAndAVanishedRowDoesNothing(t *testing.T) {
+	f := installInbox(t)
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 1, "one", "2026-10-24T10:00:00Z")}
+	opened := recordOpenURL(t)
+	m := openInbox(t)
+	m = keys(m, "o")
+	if len(*opened) != 1 || (*opened)[0] != "https://github.com/acme/api/issues/1" {
+		t.Errorf("opened %v", *opened)
+	}
+	st := inboxSt(m)
+	st.tabs[0].items = nil // refreshed away while the table still shows it
+	m = m.withScreenData(viewInbox, st)
+	m = keys(m, "enter")
+	if m.view != viewInbox {
+		t.Errorf("view = %v; a row that is gone opens nothing", m.view)
+	}
+}
