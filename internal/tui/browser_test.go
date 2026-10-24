@@ -57,3 +57,27 @@ func TestOpenSuccessLeavesTheStatusAlone(t *testing.T) {
 		t.Errorf("opened=%v status=%q", *opened, m.status)
 	}
 }
+
+func TestOpenFailureIsShownInTheListViews(t *testing.T) {
+	asked := failOpenURL(t)
+	m := model{view: viewRuns, width: 100, height: 20, tbl: table{cols: []string{"ID"},
+		rows: []row{{id: "1", url: "https://github.com/acme/api/actions/runs/1", cells: []string{"1"}}}}}
+	m = keys(m, "o")
+	wantBrowserError(t, "list", m, *asked)
+	if strings.Contains(m.status, "opened ") {
+		t.Errorf("status %q claims the link opened", m.status)
+	}
+}
+
+func TestOpenFailureIsShownInTheGraphAndLogViews(t *testing.T) {
+	asked := failOpenURL(t)
+	g := graphModel()
+	for i := range g.graph.Nodes {
+		g.graph.Nodes[i].Job.URL = "https://github.com/acme/api/actions/runs/42/job/7"
+	}
+	wantBrowserError(t, "graph", keys(g, "o"), *asked)
+
+	asked2 := failOpenURL(t)
+	logs := model{view: viewLogs, width: 100, height: 20, jobURL: "https://github.com/acme/api/actions/runs/42/job/7", logs: []string{"a"}}
+	wantBrowserError(t, "logs", keys(logs, "o"), *asked2)
+}

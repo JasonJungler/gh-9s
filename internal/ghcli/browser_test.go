@@ -53,7 +53,7 @@ func TestBrowserCommand(t *testing.T) {
 		{"windows", BrowserEnv{GOOS: "windows", Has: has()}, "rundll32", []string{"url.dll,FileProtocolHandler", url}},
 		{"linux", BrowserEnv{GOOS: "linux", Has: has()}, "xdg-open", []string{url}},
 		{"wsl with wslview", BrowserEnv{GOOS: "linux", WSL: true, Has: has("wslview")}, "wslview", []string{url}},
-		{"wsl without wslview", BrowserEnv{GOOS: "linux", WSL: true, Has: has()}, "cmd.exe", []string{"/c", "start", "", url}},
+		{"wsl without wslview", BrowserEnv{GOOS: "linux", WSL: true, Has: has()}, "cmd.exe", []string{"/c", "start", "", "https://github.com/a/b/pull/1?x=1^&y=2"}},
 		{"browser with args", BrowserEnv{GOOS: "linux", WSL: true, Browser: "firefox --new-tab", Has: has("wslview")}, "firefox", []string{"--new-tab", url}},
 		{"alternatives, second present", BrowserEnv{GOOS: "linux", Browser: "a:b", Has: has("b")}, "b", []string{url}},
 		{"alternatives, none present", BrowserEnv{GOOS: "linux", Browser: "a:b", Has: has()}, "a", []string{url}},
@@ -97,5 +97,19 @@ func TestOpenURLReturnsTheStartError(t *testing.T) {
 	err := OpenURL("https://x.test")
 	if err == nil || !strings.Contains(err.Error(), "fakebrowser") || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("err = %v; want it to name the command and the cause", err)
+	}
+}
+
+// cmd.exe reads the whole command line itself, so its metacharacters must be escaped.
+func TestCmdExeURLEscapesMetacharacters(t *testing.T) {
+	_, args := BrowserCommand(BrowserEnv{GOOS: "linux", WSL: true, Has: func(string) bool { return false }},
+		"https://ci.example.com/b?id=1&tab=logs|x<y>z^w")
+	if got, want := args[len(args)-1], "https://ci.example.com/b?id=1^&tab=logs^|x^<y^>z^^w"; got != want {
+		t.Errorf("url argument = %q; want %q", got, want)
+	}
+	// wslview takes the URL as is
+	_, args = BrowserCommand(BrowserEnv{GOOS: "linux", WSL: true, Has: func(string) bool { return true }}, "https://a/b?x=1&y=2")
+	if args[0] != "https://a/b?x=1&y=2" {
+		t.Errorf("wslview url = %q", args[0])
 	}
 }

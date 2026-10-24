@@ -63,7 +63,7 @@ func BrowserCommand(e BrowserEnv, url string) (name string, args []string) {
 	case e.WSL && e.Has("wslview"):
 		return "wslview", []string{url}
 	case e.WSL:
-		return "cmd.exe", []string{"/c", "start", "", url}
+		return "cmd.exe", []string{"/c", "start", "", cmdEscaper.Replace(url)}
 	case e.GOOS == "darwin":
 		return "open", []string{url}
 	case e.GOOS == "windows":
@@ -105,3 +105,6 @@ func fromBrowserVar(e BrowserEnv, url string) (string, []string, bool) {
 	}
 	return first[0], args, true
 }
+
+// cmdEscaper protects a URL from cmd.exe, which parses the whole command line itself.
+var cmdEscaper = strings.NewReplacer("&", "^&", "|", "^|", "<", "^<", ">", "^>", "^", "^^")

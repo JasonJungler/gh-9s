@@ -110,8 +110,10 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case "o":
 		if r, ok := m.selected(); ok && r.url != "" {
-			_ = ghcli.OpenURL(r.url)
-			m.status = styDim.Render("opened " + r.url)
+			m = m.open(r.url)
+			if m.status == "" {
+				m.status = styDim.Render("opened " + r.url)
+			}
 		}
 	case "enter":
 		return m.enter()
@@ -370,7 +372,7 @@ func (m model) graphKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		return m, m.push(viewLogs), true
 	case "o":
 		if m.gsel < len(g.Nodes) && g.Nodes[m.gsel].Job.URL != "" {
-			_ = ghcli.OpenURL(g.Nodes[m.gsel].Job.URL)
+			m = m.open(g.Nodes[m.gsel].Job.URL)
 		}
 	case "ctrl+d", "pgdown", "ctrl+u", "pgup":
 		lines, _ := m.graphLines()
@@ -446,7 +448,7 @@ func (m model) logKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 	case "o":
 		if m.jobURL != "" {
-			_ = ghcli.OpenURL(m.jobURL)
+			m = m.open(m.jobURL)
 		}
 	case "esc":
 		if m.query != "" {
