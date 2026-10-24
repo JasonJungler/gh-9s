@@ -147,7 +147,18 @@ func (m model) cycleSetting(st settingsState, dir int) (model, tea.Cmd) {
 	if d.Key == "icons" {
 		return m.afterIconsChanged()
 	}
-	return m, nil
+	return m, mouseCmd(d.Key, m.cfg().Bool("mouse"))
+}
+
+// mouseCmd turns the terminal's mouse reporting on or off when the setting "mouse" was changed.
+func mouseCmd(key string, on bool) tea.Cmd {
+	if key != "mouse" {
+		return nil
+	}
+	if on {
+		return tea.EnableMouseCellMotion
+	}
+	return tea.DisableMouse
 }
 
 // settingStatus words the outcome of a change for the status line.
@@ -182,6 +193,7 @@ func (m model) setCommand(args []string) (tea.Model, tea.Cmd) {
 		if strings.EqualFold(args[0], "icons") {
 			return m.afterIconsChanged()
 		}
+		return m, mouseCmd(strings.ToLower(args[0]), m.cfg().Bool("mouse"))
 	default:
 		m.status = styErr.Render("usage: :set key value")
 	}

@@ -23,6 +23,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return m.wheel(msg)
 	case previewTickMsg:
 		return m.previewTick(msg)
 	case previewLoadedMsg:

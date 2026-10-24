@@ -35,6 +35,8 @@ var Registry = []Def{
 		Kind: Int, Default: 40, Min: 25, Max: 60},
 	{Key: "preview_min_columns", Label: "Preview minimum columns", Desc: "the narrowest terminal that shows the preview pane",
 		Kind: Int, Default: 120, Min: 80, Max: 400},
+	{Key: "mouse", Label: "Mouse wheel", Desc: "scroll with the wheel; while on, select text by holding Option (iTerm2, Terminal.app) or Shift (Windows Terminal, tmux)",
+		Kind: Bool, Default: true},
 	{Key: "delete_branch_after_merge", Label: "Delete branch after merge", Desc: "the answer to \"delete the branch?\" in the merge dialog starts as this",
 		Kind: Bool, Default: false},
 }

@@ -195,7 +195,11 @@ func Run() error {
 		m.recents = rs
 	}
 	m = m.startIcons()
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if m.cfg().Bool("mouse") {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	_, err := tea.NewProgram(m, opts...).Run()
 	return err
 }
 
