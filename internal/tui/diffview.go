@@ -17,6 +17,7 @@ import (
 var (
 	fetchDiff    = ghcli.FetchPRDiff
 	fetchThreads = ghcli.FetchReviewThreads
+	prHead       = ghcli.PRHead
 	maxDiffLines = 50000 // lines kept; a bigger diff is cut and the browser is offered
 )
 
@@ -50,6 +51,7 @@ type diffPayload struct {
 	threads   []ghcli.Thread
 	threadErr error
 	hl        []*highlight.File
+	head      string // the PR's head commit when the diff was fetched; "" when unknown
 }
 
 type dkind int
@@ -81,25 +83,30 @@ func init() {
 					ts  []ghcli.Thread
 					err error
 				}
-				ch := make(chan thr, 1)
+				ch, headCh := make(chan thr, 1), make(chan string, 1)
 				go func() {
 					ts, err := fetchThreads(tg, number)
 					ch <- thr{ts, err}
 				}()
+				go func() {
+					h, _ := prHead(tg, number) // the commit this diff is of; an error just means unknown
+					headCh <- h
+				}()
 				text, err := fetchDiff(tg, number)
-				th := <-ch
+				th, head := <-ch, <-headCh
 				if err != nil {
 					return screenMsg{view: viewDiff, id: id, err: err}
 				}
 				d := diff.Parse(text, limit)
-				return screenMsg{view: viewDiff, id: id, data: diffPayload{d: d, threads: th.ts, threadErr: th.err, hl: highlightFiles(d)}}
+				return screenMsg{view: viewDiff, id: id, data: diffPayload{d: d, threads: th.ts, threadErr: th.err, hl: highlightFiles(d), head: head}}
 			}
 		},
 		apply: func(m model, msg screenMsg) model {
 			p := msg.data.(diffPayload)
 			old, _ := m.screenData(viewDiff).(diffState)
 			st := diffState{d: p.d, threads: p.threads, sbs: old.sbs}
-			if pd, ok := m.screenData(viewPRDetail).(prDetailState); ok {
+			st.head = p.head
+			if pd, ok := m.screenData(viewPRDetail).(prDetailState); ok && st.head == "" {
 				st.head = pd.d.HeadSHA
 			}
 			if st.head != "" && st.head == old.head {

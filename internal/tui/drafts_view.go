@@ -185,6 +185,8 @@ func draftKeys(m model, st diffState, key string) (model, tea.Cmd, bool) {
 		return m.startDraft(st, key == "C"), nil, true
 	case "x":
 		return m.removeDraftAtCursor(st), nil, true
+	case "r":
+		return m.startDiffReview(st), nil, true
 	case "X":
 		if len(st.drafts) == 0 {
 			m.status = styDim.Render("no drafts")
@@ -292,4 +294,36 @@ func threadTextRows(t ghcli.Thread) []string {
 		}
 	}
 	return out
+}
+
+// startDiffReview opens the review dialogs from the diff screen; the drafts go with the review.
+func (m model) startDiffReview(st diffState) model {
+	if st.head == "" {
+		m.status = styErr.Render("can't tell which commit this diff is of: reload it (R) before reviewing")
+		return m
+	}
+	m, p := m.startPRAction()
+	p.drafts = append([]drafts.Draft(nil), st.drafts...)
+	p.head = st.head
+	p.draftsKey, _ = m.draftsKey()
+	return m.withDialog(newChoiceDialog("pr.review.kind", "Review "+p.label, []choice{
+		{label: "Approve", value: string(ghcli.ReviewApprove)},
+		{label: "Request changes", value: string(ghcli.ReviewRequestChanges)},
+		{label: "Comment", value: string(ghcli.ReviewComment)},
+	}, false, nil))
+}
+
+// clearSentDrafts forgets the drafts of a PR whose review has gone out.
+func (m model) clearSentDrafts(key string) model {
+	if cur, ok := m.draftsKey(); ok && cur == key {
+		if st, ok := m.screenData(viewDiff).(diffState); ok {
+			st.drafts = nil
+			m = m.withScreenData(viewDiff, st)
+		}
+	}
+	_ = m.drafts.Delete(key)
+	if cur, ok := m.draftsKey(); ok && cur == key && m.view == viewDiff {
+		m = m.rebuildDiff()
+	}
+	return m
 }

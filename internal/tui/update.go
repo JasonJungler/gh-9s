@@ -76,6 +76,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = styOK.Render("✓ " + msg.text)
+		if msg.sentDrafts != "" {
+			m = m.clearSentDrafts(msg.sentDrafts)
+		}
 		return m, m.fetch() // the PR changed: reload what is on screen
 	case dialogResultMsg:
 		if h, ok := dialogHandlers[msg.id]; ok {
