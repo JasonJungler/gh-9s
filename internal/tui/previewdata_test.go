@@ -3,11 +3,13 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 )
@@ -241,5 +243,71 @@ func TestMovingAwayAndBackWithinThePauseFetchesOnce(t *testing.T) {
 	f.settle(second)
 	if got := f.calls.Load(); got != 1 {
 		t.Errorf("%d fetches for one row, want 1", got)
+	}
+}
+
+func TestStayingOnARowRefreshesItWhenTheListSaysItChanged(t *testing.T) {
+	old := previewDelay
+	previewDelay = time.Millisecond
+	defer func() { previewDelay = old }()
+	f := newPreviewFixture(t, 3)
+	f.settle(f.move(1))
+	f.m.tbl.rows[1].updated = "2026-02-01T00:00:00Z" // a refresh brought a newer updatedAt
+	var cmd tea.Cmd
+	f.m, cmd = f.m.previewSync()
+	if cmd == nil {
+		t.Fatal("the pane must refetch the row it stays on")
+	}
+	f.settle(cmd)
+	if f.calls.Load() != 2 {
+		t.Errorf("%d fetches, want 2", f.calls.Load())
+	}
+	if _, cmd = f.m.previewSync(); cmd != nil {
+		t.Error("and not again once it is fresh")
+	}
+	// the cache lifetime ends while the row stays selected
+	f.now = f.now.Add(6 * time.Minute)
+	if _, cmd = f.m.previewSync(); cmd == nil {
+		t.Error("an old entry on the selected row is fetched again")
+	}
+}
+
+func TestAHungFetchDoesNotBlockTheRowForever(t *testing.T) {
+	old := previewDelay
+	previewDelay = time.Millisecond
+	defer func() { previewDelay = old }()
+	f := newPreviewFixture(t, 3)
+	tm := f.move(1)().(previewTickMsg)
+	next, fetch := f.m.previewTick(tm) // the fetch is started and never answers
+	f.m = next.(model)
+	_ = fetch
+	f.move(2)
+	if c := f.move(1); c != nil {
+		t.Error("while the fetch may still answer there is nothing to start")
+	}
+	f.now = f.now.Add(inflightFor + time.Second)
+	f.move(2)
+	if c := f.move(1); c == nil {
+		t.Error("a fetch that never answered must not block the row for the rest of the session")
+	}
+}
+
+func TestEveryRowOfAScrolledListIsVisibleWithThePane(t *testing.T) {
+	f := newPreviewFixture(t, 60)
+	m := f.m
+	m.width, m.height = 160, 30
+	m.tbl = prRows(func() []prListItem {
+		var out []prListItem
+		for i := 1; i <= 60; i++ {
+			out = append(out, prListItem{Number: i, Title: fmt.Sprintf("title-%03d", i)})
+		}
+		return out
+	}(), "")
+	for i := 0; i < 60; i++ {
+		m.cursor = i
+		m.scroll()
+		if v := ansi.Strip(m.View()); !strings.Contains(v, fmt.Sprintf("title-%03d", i+1)) {
+			t.Fatalf("cursor on row %d: its row is not on screen (top=%d)", i, m.top)
+		}
 	}
 }

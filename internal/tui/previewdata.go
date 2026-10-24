@@ -19,6 +19,10 @@ var (
 	previewDelay = 250 * time.Millisecond
 )
 
+// inflightFor is how long a fetch that has not answered still counts as under way: gh can hang, and
+// a row must not stay "loading…" for the rest of the session.
+const inflightFor = 30 * time.Second
+
 const (
 	previewCap    = 50              // entries kept; the least recently used goes first
 	previewTTL    = 5 * time.Minute // how long a loaded detail is reused
@@ -45,10 +49,11 @@ type previewState struct {
 	has      bool
 	seq      int // changes with every selection, so an older tick can tell it is old
 	cache    map[previewKey]previewEntry
-	order    []previewKey // least recently used first
-	inflight map[previewKey]bool
-	top      int // the pane's scroll
-	paneW    int // the size the pane was last drawn at, which scrolling needs
+	order    []previewKey             // least recently used first
+	inflight map[previewKey]time.Time // fetches under way, and since when
+	ticking  map[previewKey]bool      // a tick is on its way
+	top      int                      // the pane's scroll
+	paneW    int                      // the size the pane was last drawn at, which scrolling needs
 	paneH    int
 
 	lines    []string // the selected entry laid out, kept until the entry or the width changes
@@ -58,7 +63,7 @@ type previewState struct {
 }
 
 func newPreviewState() *previewState {
-	return &previewState{cache: map[previewKey]previewEntry{}, inflight: map[previewKey]bool{}}
+	return &previewState{cache: map[previewKey]previewEntry{}, inflight: map[previewKey]time.Time{}, ticking: map[previewKey]bool{}}
 }
 
 type previewTickMsg struct {
@@ -174,29 +179,46 @@ func (m model) previewSync() (model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if st.has && st.sel == key {
-		return m, nil
+	same := st.has && st.sel == key
+	if !same {
+		st.sel, st.has, st.top = key, true, 0
+		st.seq++
 	}
-	st.sel, st.has, st.top = key, true, 0
-	st.seq++
 	if e, ok := st.get(key); ok && e.fresh(updated, previewNow()) {
 		return m, nil
 	}
-	if st.inflight[key] {
+	if st.inflightNow(key) || same && st.ticking[key] {
 		return m, nil
 	}
+	// not loaded, or loaded long ago, or the list says the item changed: fetch after a pause. Staying
+	// on the row keeps showing the old text meanwhile.
+	st.ticking[key] = true
 	seq := st.seq
 	return m, tea.Tick(previewDelay, func(time.Time) tea.Msg {
 		return previewTickMsg{seq: seq, key: key, target: tg, updated: updated}
 	})
 }
 
+// inflightNow says whether a fetch for k is under way (one that has not answered for inflightFor is
+// given up on).
+func (st *previewState) inflightNow(k previewKey) bool {
+	since, ok := st.inflight[k]
+	return ok && previewNow().Sub(since) < inflightFor
+}
+
 func (m model) previewTick(msg previewTickMsg) (tea.Model, tea.Cmd) {
 	st := m.preview
-	if st == nil || !st.has || st.seq != msg.seq || st.sel != msg.key || st.inflight[msg.key] {
+	if st == nil {
 		return m, nil
 	}
-	st.inflight[msg.key] = true
+	delete(st.ticking, msg.key)
+	if !st.has || st.seq != msg.seq || st.sel != msg.key || st.inflightNow(msg.key) {
+		return m, nil
+	}
+	if e, ok := st.cache[msg.key]; ok && e.fresh(msg.updated, previewNow()) {
+		return m, nil // it arrived while the tick was on its way
+	}
+	st.inflight[msg.key] = previewNow()
 	return m, func() tea.Msg {
 		e := previewEntry{rowUpdated: msg.updated}
 		num := fmt.Sprint(msg.key.number)

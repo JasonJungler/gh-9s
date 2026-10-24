@@ -26,7 +26,6 @@ func Text(s string) string {
 		case c == '\n' || c == '\t':
 			b.WriteRune(c)
 		case c < 0x20, c == 0x7f, c >= 0x80 && c <= 0x9f:
-		case c >= 0x202a && c <= 0x202e, c >= 0x2066 && c <= 0x2069: // bidi embeddings, overrides and isolates: they reorder what is shown
 		default:
 			b.WriteRune(c)
 		}
@@ -72,4 +71,16 @@ func skipString(r []rune, i int) int {
 		}
 	}
 	return i - 1 // unterminated: drop only the introducer, keep the text
+}
+
+// NoBidi removes the bidirectional embeddings, overrides and isolates (U+202A–202E, U+2066–2069):
+// they reorder what is shown, so a name or title can read as something it is not. It is for text that
+// is only displayed; Text, which also decides whether stored text is valid, leaves them alone.
+func NoBidi(s string) string {
+	return strings.Map(func(c rune) rune {
+		if c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069 {
+			return -1
+		}
+		return c
+	}, s)
 }

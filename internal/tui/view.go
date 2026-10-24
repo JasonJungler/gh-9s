@@ -22,7 +22,13 @@ func (m model) logHeight() int { return m.bodyHeight() + 1 }
 func (m model) maxTop() int { return max(0, len(m.logs)-m.logHeight()) }
 
 // bodyHeight is how many table rows fit; the prompt box, when open, takes three lines of the screen.
-func (m model) bodyHeight() int { return max(1, m.height-5-m.promptRows()-m.inboxExtraRows()) }
+func (m model) bodyHeight() int {
+	h := m.height - 5 - m.promptRows() - m.inboxExtraRows()
+	if !m.paneList && m.previewShown() {
+		h -= 2 // the list sits in a box
+	}
+	return max(1, h)
+}
 
 func trunc(s string, w int) string {
 	if w <= 0 {
