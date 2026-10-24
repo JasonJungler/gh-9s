@@ -168,6 +168,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.selected(); ok && (m.view == viewWorkflows || m.view == viewFavs) {
 			return m.toggleFavorite(r)
 		}
+		if m.view == viewRuns || m.view == viewPRs || m.view == viewIssues {
+			return m.toggleCurrentRepoPin()
+		}
 	case "a":
 		if r, ok := m.selected(); ok && (m.view == viewWorkflows || m.view == viewFavs) {
 			return m.startAlias(r)

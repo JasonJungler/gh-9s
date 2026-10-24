@@ -401,3 +401,28 @@ func TestTabBarsFitNarrowTerminals(t *testing.T) {
 		}
 	}
 }
+
+func TestFPinsAndUnpinsWhereTheThingIsShown(t *testing.T) {
+	for _, v := range []viewKind{viewRuns, viewPRs, viewIssues} {
+		m := pinsModel(t)
+		m.view, m.previewOff = v, true
+		m.tbl = table{cols: []string{"A"}, rows: []row{{id: "1", cells: []string{"x"}}}}
+		m = keyAll(m, "f")
+		if !m.pins.HasRepo("", "acme/api") {
+			t.Fatalf("view %v: f did not pin the repo (%q)", v, m.status)
+		}
+		m = keyAll(m, "f")
+		if m.pins.HasRepo("", "acme/api") {
+			t.Errorf("view %v: second f did not unpin", v)
+		}
+	}
+	m, _ := boardOn(t)
+	m = keyAll(m, "f")
+	if len(m.pins.Projects) != 0 {
+		t.Fatalf("f on a pinned Project's board should unpin it: %+v", m.pins.Projects)
+	}
+	m = keyAll(m, "f")
+	if len(m.pins.Projects) != 1 || m.pins.Projects[0].Title != "Roadmap" {
+		t.Errorf("f did not pin again: %+v", m.pins.Projects)
+	}
+}

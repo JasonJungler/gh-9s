@@ -293,3 +293,20 @@ func (m model) favCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 	return m.pinRepoChecked(repo)
 }
+
+// toggleCurrentRepoPin is f on the lists of one repo: pin the repo being shown, or unpin it.
+func (m model) toggleCurrentRepoPin() (tea.Model, tea.Cmd) {
+	t := m.curTarget()
+	if t == (ghcli.RepoRef{}) {
+		m.status = styErr.Render("cannot tell which repo this is; run gh-9s inside a repo or use :repo")
+		return m, nil
+	}
+	repo := pins.Repo{Host: t.Host, Repo: t.Owner + "/" + t.Name}
+	if repo.Host == "github.com" {
+		repo.Host = ""
+	}
+	if m.pinStore().HasRepo(repo.Host, repo.Repo) {
+		return m.togglePinnedRepo(repo)
+	}
+	return m.pinRepoChecked(repo)
+}

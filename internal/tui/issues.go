@@ -51,7 +51,7 @@ func init() {
 		},
 		key:    issuesKey,
 		body:   func(m model) string { return m.tableBody() },
-		footer: "enter open  O/C/A open/closed/all  u assigned to me  m opened by me  o browser",
+		footer: "enter open  O/C/A open/closed/all  u assigned to me  m opened by me  f pin-repo  o browser",
 		poll:   false,
 	})
 	register(viewIssue, screen{

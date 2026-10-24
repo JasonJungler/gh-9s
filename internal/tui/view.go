@@ -322,11 +322,11 @@ func (m model) footer() string {
 	var keys string
 	switch m.view {
 	case viewRuns:
-		keys = "enter jobs  l pager-logs  L failed-logs  w watch  r rerun  F rerun-failed  c cancel  d delete  o open"
+		keys = "enter jobs  l pager-logs  L failed-logs  w watch  r rerun  F rerun-failed  c cancel  d delete  f pin-repo  o open"
 	case viewWorkflows:
 		keys = "enter runs  t trigger  f favorite  a alias  e enable/disable  o open"
 	case viewPRs:
-		keys = "enter detail  u mine  e review-requested  a all  o open"
+		keys = "enter detail  u mine  e review-requested  a all  f pin-repo  o open"
 	case viewFavs:
 		keys = m.favFooter()
 	case viewChecks:

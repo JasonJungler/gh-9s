@@ -52,7 +52,7 @@ func init() {
 		apply:    boardApply,
 		key:      boardKeyHandler,
 		body:     boardBody,
-		footer:   "tab/h/l switch column  enter open  o browser  / filter  R refresh",
+		footer:   "tab/h/l switch column  enter open  f pin/unpin Project  o browser  / filter",
 	})
 }
 
@@ -301,6 +301,18 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		m = m.withScreenData(viewBoard, st)
 		m.loading = true
 		return m, m.fetch(), true
+	case "f":
+		p := m.board
+		if p.Title == "" || p.URL == "" {
+			p.Title, p.URL = st.data.Title, st.data.URL
+		}
+		if !pins.WebURL(p.URL) {
+			p.URL = ""
+		}
+		if p.Title == "" {
+			p.Title = projectKey(p)
+		}
+		return m.togglePinnedProjectKeys(p)
 	case "o":
 		r, ok := m.selected()
 		if !ok {
@@ -374,4 +386,9 @@ func (m model) openBoard(p pins.Project) (model, tea.Cmd) {
 	m.board = p
 	cmd := m.push(viewBoard)
 	return m, cmd
+}
+
+func (m model) togglePinnedProjectKeys(p pins.Project) (model, tea.Cmd, bool) {
+	m, cmd := m.togglePinnedProject(p)
+	return m, cmd, true
 }
