@@ -67,6 +67,8 @@ type model struct {
 	mi                            int
 	follow                        bool
 
+	note      string // explanation tied to the current view (cleared when the view changes)
+	banner    string // sticky startup problem, always shown
 	runStatus string // last seen status of the watched run, for the finished notification
 	graph     graph
 	gstyle    graphStyle
@@ -90,6 +92,7 @@ type dataMsg struct {
 	latest map[string]latestEntry
 	graph  *graph
 	jobs   []runJob
+	run    runMeta // the run's own status/conclusion (graph and jobs views)
 	specs  map[string][]jobSpec
 	err    error
 }
@@ -139,7 +142,7 @@ var (
 func main() {
 	m := model{loading: true}
 	if fs, err := loadFavs(favsPath()); err != nil {
-		m.status = styErr.Render("favorites disabled: " + err.Error())
+		m.banner = "favorites disabled: " + err.Error()
 	} else {
 		m.favs = fs
 	}
@@ -177,6 +180,7 @@ func (m model) fetch() tea.Cmd {
 		var latest map[string]latestEntry
 		var gr *graph
 		var gjobs []runJob
+		var meta runMeta
 		var newSpecs map[string][]jobSpec
 		var logs []string
 		var err error
@@ -191,12 +195,15 @@ func (m model) fetch() tea.Cmd {
 		case viewChecks:
 			t, err = fetchChecks(tg, pr)
 		case viewJobs:
-			t, err = fetchJobs(tg, run)
+			var jobs []runJob
+			if jobs, meta, _, _, err = fetchRunJobs(tg, run); err == nil {
+				t = jobsTable(jobs)
+			}
 		case viewLogs:
 			logs, err = fetchJobLog(tg, run, job)
 		case viewGraph:
 			var sha, path string
-			gjobs, sha, path, err = fetchRunJobs(tg, run)
+			gjobs, meta, sha, path, err = fetchRunJobs(tg, run)
 			if err != nil {
 				break
 			}
@@ -215,7 +222,7 @@ func (m model) fetch() tea.Cmd {
 				t, latest = fetchFavorites(snap, cache, time.Now())
 			}
 		}
-		return dataMsg{v, t, logs, latest, gr, gjobs, newSpecs, err}
+		return dataMsg{view: v, tbl: t, logs: logs, latest: latest, graph: gr, jobs: gjobs, specs: newSpecs, run: meta, err: err}
 	}
 }
 
@@ -228,6 +235,7 @@ func (m *model) switchTo(v viewKind) tea.Cmd {
 	m.view, m.tbl, m.cursor, m.top, m.filter, m.err = v, table{}, 0, 0, "", nil
 	m.logs, m.follow = nil, false
 	m.query, m.matches, m.mi = "", nil, 0
+	m.note = ""
 	m.loading = true
 	return m.fetch()
 }
@@ -300,13 +308,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tickMsg:
-		if m.view == viewLogs && !m.follow {
-			return m, tick() // logs are static unless following
+		cmds := []tea.Cmd{tick()}
+		if m.shouldPoll() {
+			cmds = append(cmds, m.fetch())
 		}
-		if m.view == viewGraph && !m.graph.active() {
-			return m, tick() // a finished run does not change
+		if m.view == viewLogs && m.runStatus != "" && m.runStatus != "completed" {
+			cmds = append(cmds, runMetaCmd(m.target, m.runID)) // keep watching the run while reading a log
 		}
-		return m, tea.Batch(m.fetch(), tick())
+		return m, tea.Batch(cmds...)
+	case runMetaMsg:
+		if msg.err == nil && msg.runID == m.runID && msg.meta.Status != "" {
+			return m.observeRun(msg.meta)
+		}
+		return m, nil
 	case dataMsg:
 		if msg.view != m.view {
 			return m, nil
@@ -316,24 +330,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.latest != nil {
 			m.latest = msg.latest
 		}
-		for k, v := range msg.specs {
-			if m.specs == nil {
-				m.specs = map[string][]jobSpec{}
+		if len(msg.specs) > 0 {
+			// copy-on-write: in-flight fetch goroutines hold the old map
+			merged := make(map[string][]jobSpec, len(m.specs)+len(msg.specs))
+			for k, v := range m.specs {
+				merged[k] = v
 			}
-			m.specs[k] = v
+			for k, v := range msg.specs {
+				merged[k] = v
+			}
+			m.specs = merged
 		}
 		var notifyCmd tea.Cmd
+		if msg.err == nil && msg.run.Status != "" && (msg.view == viewGraph || msg.view == viewJobs) {
+			m, notifyCmd = m.observeRun(msg.run)
+		}
 		if msg.err == nil && msg.graph != nil {
-			cur := runStatus(msg.jobs)
-			if runFinished(m.runStatus, cur) {
-				title, body := "gh-9s: run "+m.runID+" "+runOutcome(msg.jobs), "run "+m.runID+" "+runOutcome(msg.jobs)
-				notifyCmd = func() tea.Msg { notifier(title, body); return nil }
-			}
-			m.runStatus = cur
 			if msg.graph.flat {
 				// dependencies unknown: show the plain jobs list instead of guessing a graph
 				m.view, m.tbl, m.cursor, m.top = viewJobs, jobsTable(msg.jobs), 0, 0
-				m.status = styDim.Render("graph unavailable: " + msg.graph.reason)
+				m.note = "graph unavailable: " + msg.graph.reason
 				return m, notifyCmd
 			}
 			m.graph = *msg.graph
@@ -355,6 +371,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = max(0, n-1)
 			}
 		}
+		return m, notifyCmd
 	case actionMsg:
 		if msg.err != nil {
 			m.status = styErr.Render("✗ " + msg.err.Error())
@@ -783,16 +800,41 @@ func loadFormCmd(tgt repoRef, file, name, localBranch string) tea.Cmd {
 
 func (m model) shown() graph { return expandGraph(m.graph, m.expanded) }
 
-func (g graph) active() bool {
-	if len(g.nodes) == 0 {
-		return true // nothing loaded yet
+// shouldPoll says whether the 5s tick should refetch the current view.
+func (m model) shouldPoll() bool {
+	switch m.view {
+	case viewLogs:
+		return m.follow // logs are static unless following
+	case viewGraph, viewJobs:
+		return m.runStatus != "completed" // a finished run does not change
+	case viewFavs:
+		return false // cached ~30s; R refreshes. No continuous polling.
 	}
-	for _, n := range g.nodes {
-		if n.State == stRun {
-			return true
-		}
+	return true
+}
+
+type runMetaMsg struct {
+	runID string
+	meta  runMeta
+	err   error
+}
+
+func runMetaCmd(tg repoRef, runID string) tea.Cmd {
+	return func() tea.Msg {
+		meta, err := fetchRunMeta(tg, runID)
+		return runMetaMsg{runID, meta, err}
 	}
-	return false
+}
+
+// observeRun records the watched run's status and notifies once when it finishes.
+func (m model) observeRun(meta runMeta) (model, tea.Cmd) {
+	var cmd tea.Cmd
+	if runFinished(m.runStatus, meta.Status) {
+		text := "gh-9s: run " + m.runID + " " + runOutcome(meta.Conclusion)
+		cmd = func() tea.Msg { notifier(text, text); return nil }
+	}
+	m.runStatus = meta.Status
+	return m, cmd
 }
 
 func (m model) graphLines() ([]string, graphStyle) {
@@ -899,17 +941,19 @@ func runAction(done string, args ...string) tea.Cmd {
 	}
 }
 
-func logsCmd(tg repoRef, id string, failedOnly bool) tea.Cmd {
+// pagerCommand shows a run's log in the pager. The values are passed to the shell
+// as positional arguments, never pasted into the script.
+func pagerCommand(tg repoRef, id string, failedOnly bool) *exec.Cmd {
 	flag := "--log"
 	if failedOnly {
 		flag = "--log-failed"
 	}
-	scope := ""
-	if a := tg.args(); a != nil {
-		scope = " -R " + a[1]
-	}
-	c := exec.Command("sh", "-c", fmt.Sprintf("gh run view %s %s%s 2>&1 | ${PAGER:-less -R}", id, flag, scope))
-	return tea.ExecProcess(c, func(error) tea.Msg { return actionMsg{msg: "closed logs"} })
+	args := scoped(tg, "run", "view", id, flag)
+	return exec.Command("sh", append([]string{"-c", `gh "$@" 2>&1 | ${PAGER:-less -R}`, "sh"}, args...)...)
+}
+
+func logsCmd(tg repoRef, id string, failedOnly bool) tea.Cmd {
+	return tea.ExecProcess(pagerCommand(tg, id, failedOnly), func(error) tea.Msg { return actionMsg{msg: "closed logs"} })
 }
 
 func (m *model) scroll() {
@@ -1262,8 +1306,12 @@ func (m model) footer() string {
 		keys = "j/k scroll  space/ctrl-d page  g/G top/bottom  / search  n/N next/prev  f follow  esc back"
 	}
 	keys += "  R refresh  q quit"
-	if m.status != "" {
-		return m.status + "\n" + styDim.Render(keys)
+	line := m.status
+	if line == "" && m.note != "" {
+		line = styDim.Render(m.note)
 	}
-	return "\n" + styDim.Render(keys)
+	if line == "" && m.banner != "" {
+		line = styErr.Render(m.banner)
+	}
+	return line + "\n" + styDim.Render(keys)
 }

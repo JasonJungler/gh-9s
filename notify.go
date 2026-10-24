@@ -13,26 +13,21 @@ func runFinished(prev, cur string) bool {
 	return prev != "" && prev != "completed" && cur == "completed"
 }
 
-// runStatus summarises a run from its jobs: "" (no jobs yet), "in_progress", or "completed".
-func runStatus(jobs []runJob) string {
-	if len(jobs) == 0 {
-		return ""
+// runOutcome words a run's conclusion for a notification.
+func runOutcome(conclusion string) string {
+	switch conclusion {
+	case "success":
+		return "succeeded"
+	case "failure":
+		return "failed"
+	case "cancelled":
+		return "was cancelled"
+	case "timed_out":
+		return "timed out"
+	case "":
+		return "finished"
 	}
-	for _, j := range jobs {
-		if j.Status != "completed" {
-			return "in_progress"
-		}
-	}
-	return "completed"
-}
-
-func runOutcome(jobs []runJob) string {
-	for _, j := range jobs {
-		if _, s := j.state(); s == stFail {
-			return "failed"
-		}
-	}
-	return "succeeded"
+	return conclusion
 }
 
 // notifier is a variable so tests can observe notifications.

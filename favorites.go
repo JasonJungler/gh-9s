@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -21,6 +22,23 @@ type favorite struct {
 	Repo     string `json:"repo"`     // owner/name
 	Workflow string `json:"workflow"` // file base name, e.g. deploy.yml
 	Alias    string `json:"alias,omitempty"`
+}
+
+var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// validate keeps hostile or garbled values from a hand-edited (or synced) config file
+// out of command lines and API paths: names are plain tokens that cannot start with "-".
+func (f favorite) validate() error {
+	owner, name, ok := strings.Cut(f.Repo, "/")
+	switch {
+	case !ok || !safeName.MatchString(owner) || !safeName.MatchString(name):
+		return fmt.Errorf("invalid repo %q (want owner/name)", f.Repo)
+	case f.Host != "" && !safeName.MatchString(f.Host):
+		return fmt.Errorf("invalid host %q", f.Host)
+	case !safeName.MatchString(f.Workflow) || f.Workflow == "." || f.Workflow == "..":
+		return fmt.Errorf("invalid workflow file %q", f.Workflow)
+	}
+	return nil
 }
 
 func (f favorite) key() string { return f.Host + "/" + f.Repo + "/" + f.Workflow }
@@ -56,6 +74,11 @@ func loadFavs(path string) (*favStore, error) {
 	}
 	if err := json.Unmarshal(b, &s.items); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	for i, it := range s.items {
+		if err := it.validate(); err != nil {
+			return nil, fmt.Errorf("%s: entry %d: %w", path, i+1, err)
+		}
 	}
 	return s, nil
 }

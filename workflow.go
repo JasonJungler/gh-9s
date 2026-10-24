@@ -20,15 +20,40 @@ type jobSpec struct {
 
 // mapGet returns the value node for key in a mapping node, or nil.
 func mapGet(n *yaml.Node, key string) *yaml.Node {
+	n = deref(n)
 	if n == nil || n.Kind != yaml.MappingNode {
 		return nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == key {
-			return n.Content[i+1]
+			return deref(n.Content[i+1])
+		}
+	}
+	// `<<: *anchor` merge keys (a single mapping or a list of them)
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value != "<<" {
+			continue
+		}
+		v := deref(n.Content[i+1])
+		cands := []*yaml.Node{v}
+		if v != nil && v.Kind == yaml.SequenceNode {
+			cands = v.Content
+		}
+		for _, c := range cands {
+			if r := mapGet(c, key); r != nil {
+				return r
+			}
 		}
 	}
 	return nil
+}
+
+// deref follows YAML aliases (`*anchor`) to the node they refer to.
+func deref(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode {
+		n = n.Alias
+	}
+	return n
 }
 
 func parseRoot(src []byte) (*yaml.Node, error) {
@@ -37,12 +62,13 @@ func parseRoot(src []byte) (*yaml.Node, error) {
 		return nil, err
 	}
 	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-		return doc.Content[0], nil
+		return deref(doc.Content[0]), nil
 	}
 	return nil, nil
 }
 
 func scalars(n *yaml.Node) []string {
+	n = deref(n)
 	switch {
 	case n == nil:
 		return nil
@@ -51,7 +77,7 @@ func scalars(n *yaml.Node) []string {
 	case n.Kind == yaml.SequenceNode:
 		var out []string
 		for _, c := range n.Content {
-			out = append(out, c.Value)
+			out = append(out, deref(c).Value)
 		}
 		return out
 	}

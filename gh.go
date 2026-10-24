@@ -277,7 +277,7 @@ func openURL(url string) error {
 }
 
 func fetchJobs(r repoRef, runID string) (table, error) {
-	jobs, _, _, err := fetchRunJobs(r, runID)
+	jobs, _, _, _, err := fetchRunJobs(r, runID)
 	if err != nil {
 		return table{}, err
 	}
@@ -360,8 +360,10 @@ func isActiveStep(status, conclusion string) bool {
 
 // fetchRunJobs returns a run's jobs together with the commit and workflow file
 // path they ran from (needed to read the job dependencies).
-func fetchRunJobs(r repoRef, runID string) (jobs []runJob, headSHA, workflowPath string, err error) {
+func fetchRunJobs(r repoRef, runID string) (jobs []runJob, meta runMeta, headSHA, workflowPath string, err error) {
 	var v struct {
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
 		HeadSHA    string `json:"headSha"`
 		WorkflowID int64  `json:"workflowDatabaseId"`
 		Jobs       []struct {
@@ -379,9 +381,10 @@ func fetchRunJobs(r repoRef, runID string) (jobs []runJob, headSHA, workflowPath
 			} `json:"steps"`
 		} `json:"jobs"`
 	}
-	if err = ghJSON(&v, scoped(r, "run", "view", runID, "--json", "jobs,headSha,workflowDatabaseId")...); err != nil {
-		return nil, "", "", err
+	if err = ghJSON(&v, scoped(r, "run", "view", runID, "--json", "jobs,headSha,workflowDatabaseId,status,conclusion")...); err != nil {
+		return nil, runMeta{}, "", "", err
 	}
+	meta = runMeta{v.Status, v.Conclusion}
 	for _, j := range v.Jobs {
 		rj := runJob{ID: fmt.Sprint(j.ID), Name: j.Name, Status: j.Status, Conclusion: j.Conclusion,
 			URL: j.URL, Start: j.StartedAt, End: j.CompletedAt}
@@ -395,14 +398,14 @@ func fetchRunJobs(r repoRef, runID string) (jobs []runJob, headSHA, workflowPath
 	}
 	key := fmt.Sprintf("%s#%d", r, v.WorkflowID)
 	if p, ok := wfPaths.Load(key); ok {
-		return jobs, v.HeadSHA, p.(string), nil
+		return jobs, meta, v.HeadSHA, p.(string), nil
 	}
 	var wfs []struct {
 		ID   int64  `json:"id"`
 		Path string `json:"path"`
 	}
 	if err = ghJSON(&wfs, scoped(r, "workflow", "list", "--all", "--json", "id,path")...); err != nil {
-		return jobs, v.HeadSHA, "", err
+		return jobs, meta, v.HeadSHA, "", err
 	}
 	for _, w := range wfs {
 		if w.ID == v.WorkflowID {
@@ -410,5 +413,18 @@ func fetchRunJobs(r repoRef, runID string) (jobs []runJob, headSHA, workflowPath
 			wfPaths.Store(key, w.Path)
 		}
 	}
-	return jobs, v.HeadSHA, workflowPath, nil
+	return jobs, meta, v.HeadSHA, workflowPath, nil
+}
+
+// runMeta is the run's own status and conclusion (not derived from its jobs: between
+// two stages every listed job can be completed while the run is still going).
+type runMeta struct {
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+func fetchRunMeta(r repoRef, runID string) (runMeta, error) {
+	var v runMeta
+	err := ghJSON(&v, scoped(r, "run", "view", runID, "--json", "status,conclusion")...)
+	return v, err
 }

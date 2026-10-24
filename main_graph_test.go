@@ -74,7 +74,7 @@ func TestFlatGraphFallsBackToJobsTable(t *testing.T) {
 	flat := flatGraph([]runJob{ok("a"), ok("b")}, "dependencies unavailable")
 	next, _ := m.Update(dataMsg{view: viewGraph, graph: &flat, jobs: []runJob{ok("a"), ok("b")}})
 	m = next.(model)
-	if m.view != viewJobs || len(m.tbl.rows) != 2 || !strings.Contains(m.status, "dependencies unavailable") {
+	if m.view != viewJobs || len(m.tbl.rows) != 2 || !strings.Contains(m.note, "dependencies unavailable") {
 		t.Errorf("view=%v rows=%d status=%q", m.view, len(m.tbl.rows), m.status)
 	}
 	if m = keys(m, "esc"); m.view != viewRuns {
