@@ -1,7 +1,11 @@
 # gh-9s
 
-A [k9s](https://k9scli.io)-style terminal UI for GitHub Actions, as a `gh` extension.
-Release 1 is workflow-focused: trigger workflows, watch runs as a live job graph, and keep your favorite workflows one keypress away.
+A [k9s](https://k9scli.io)-style terminal UI for GitHub, as a `gh` extension.
+
+- **Actions:** trigger workflows, watch runs as a live job graph, keep favorite workflows one keypress away.
+- **Pull requests:** list and filter, see checks (and jump into the Actions run behind a check), read the diff, comment, review and merge.
+- **Issues:** list and filter, read, comment, close and reopen, manage labels and assignees.
+- **Repos:** an interactive picker to move between any repo you can reach.
 
 ## Install / develop
 
@@ -23,11 +27,13 @@ Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release
 |---|---|
 | `1` / `:runs` | workflow runs (refreshes every 5s) |
 | `2` / `:wf` | workflows; your favorites are pinned on top with a ★ |
-| `3` / `:pr` | open pull requests (`*` marks the current branch) |
+| `3` / `:pr` | open pull requests (`*` marks the current branch); `enter` opens one |
+| `4` / `:issues` | issues; `enter` opens one |
 | `P` / `:cpr` | checks of the current branch's PR |
 | `:fav` | favorite workflows from every repo, with the latest run's status |
 | `:<alias>` | open the runs of the favorite with that alias |
-| `:repo OWNER/REPO` | switch every view to another repo (`HOST/OWNER/REPO` for another host). The repo is checked first; `:repo` alone returns to the current directory's repo. The current-branch PR (`P`, `:cpr`) only exists in the current directory's repo. |
+| `:repo` | open the repo picker (below) |
+| `:repo OWNER/REPO` | switch every view to another repo (`HOST/OWNER/REPO` for another host). The repo is checked first. The current-branch PR (`P`, `:cpr`) only exists in the current directory's repo. |
 
 ## Keys
 
@@ -45,7 +51,32 @@ Everywhere: `j/k` move, `g/G` top/bottom, `/` filter, `:` command bar, `esc` bac
 - Dependencies come from the `needs:` entries of the workflow file at the run's commit. If they cannot be determined, gh-9s shows the plain jobs list and says why — it never draws a guessed graph.
 - You get a terminal bell and a desktop notification when a run you are watching finishes.
 
+**Pull request list** — `enter` detail · `u` opened by me · `e` review requested from me · `a` all · `o` browser
+
+**Pull request detail** — description, review/merge state, checks summary, and the discussion in time order. `c` checks (`enter` on a GitHub Actions check opens that run's graph, in the run's own repo; other checks open in the browser) · `d` diff · `C` comment · `r` review (approve / request changes / comment) · `m` merge · `o` browser · `esc` back
+
+**Diff** — added/removed lines coloured; `]`/`[` next/previous file · `f` file list · `/` search, `n`/`N` · `j/k`, `g/G`, `ctrl-d/u` scroll · `o` the PR in the browser. A diff over 5000 lines is cut and says so.
+
+**Issue list** — `enter` open · `O`/`C`/`A` open/closed/all · `u` assigned to me · `m` opened by me · `o` browser
+
+**Issue detail** — `C` comment · `x` close (asks first) · `X` reopen · `l` labels · `s` assignees · `o` browser
+
 **Logs** — `j/k` scroll, `space`/`ctrl-d` page, `/` search (smart-case; `n`/`N` next/previous), `f` follow a running job
+
+## Repo picker
+
+`:repo` opens a picker: type to search, `tab` switches between **my access** (your own repos and your organisations') and **global** (all of GitHub; needs two characters and waits a moment after you stop typing), `enter` switches. The first row is the current directory's repo; with nothing typed, the repos you used recently are listed. Typed names still work: `:repo acme/api`.
+
+## Reviewing and merging
+
+Every dialog names the repo and number it acts on (`acme/api#482`). Approving, requesting changes and closing an issue ask for confirmation first; request changes also needs a reason. Long text can be written in your `$EDITOR` with `ctrl+e`.
+
+**Merge** (`m` on a PR) reads the PR again, then judges it by GitHub's own merge state, not rules of its own:
+- clean: pick a merge method (only the ones the repo allows are listed), then confirm — with a "delete branch after merge" checkbox whose last choice is remembered;
+- unstable (non-required checks failing or still running): a warning, and `!` is required to go on;
+- blocked, behind, conflicting, draft, closed, or still being computed: refused, with the reason.
+
+`--admin` and auto-merge are never used.
 
 ## Trigger
 
@@ -63,13 +94,15 @@ internal/
   ui/                   shared state type, colours, status/time formatting
   workflow/             workflow YAML: dispatch inputs, job needs (pure, no network)
   graph/                job dependency graph, navigation, and the three renderers (+ golden files)
-  ghcli/                the only code that runs `gh`: runs, jobs, logs, branches, trigger lookup
+  diff/                 unified-diff parser (pure)
+  ghcli/                the only code that runs `gh`: runs, jobs, logs, PRs, issues, merge, repos, search
   favorites/            favorites + aliases store, validation of the config file
-  tui/                  Bubble Tea model, keys, views, forms, and the glue between the packages
+  recent/               recently used repos, validated on load
+  tui/                  Bubble Tea model, keys, screens (registered in screen.go), dialogs, picker, and the glue
 docs/                   design spec and implementation plan
 ```
 
-Only `ghcli` talks to GitHub; `workflow`, `graph`, `favorites` and `ui` are testable without a network.
+Only `ghcli` talks to GitHub; `workflow`, `graph`, `diff`, `favorites`, `recent` and `ui` are testable without a network, and the `tui` tests run with a stub `gh` first on `PATH`. New screens register themselves in their own file (`screen.go`) instead of growing the shared `switch` statements.
 
 ## Try the graph
 
@@ -77,4 +110,4 @@ Only `ghcli` talks to GitHub; `workflow`, `graph`, `favorites` and `ui` are test
 
 ## Design
 
-See `docs/superpowers/specs/2026-10-24-gh-9s-release1-design.md` and the implementation plan in `docs/superpowers/plans/`.
+Specs and implementation plans: `docs/superpowers/specs/` and `docs/superpowers/plans/` (release 1: Actions; release 2: pull requests, issues, repo picker).
