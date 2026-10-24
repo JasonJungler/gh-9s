@@ -2,6 +2,7 @@ package ghcli
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -21,6 +22,7 @@ type PRDetail struct {
 	Additions, Deletions, ChangedFiles                int
 	Labels                                            []string
 	ChecksPassed, ChecksFailed, ChecksPending         int
+	FailingChecks                                     []string // names of the checks that failed, without repeats, at most maxFailingChecks
 	Comments                                          []Comment
 	Reviews                                           []Review
 }
@@ -87,6 +89,8 @@ func ParsePRDetail(b []byte) (PRDetail, error) {
 		} `json:"reviews"`
 		Rollup []struct {
 			Typename   string `json:"__typename"`
+			Name       string `json:"name"`    // a check run
+			Context    string `json:"context"` // a commit status
 			Status     string `json:"status"`
 			Conclusion string `json:"conclusion"`
 			State      string `json:"state"`
@@ -116,12 +120,22 @@ func ParsePRDetail(b []byte) (PRDetail, error) {
 			d.ChecksPassed++
 		case "fail":
 			d.ChecksFailed++
+			name := CleanText(c.Name)
+			if name == "" {
+				name = CleanText(c.Context)
+			}
+			if name != "" && len(d.FailingChecks) < maxFailingChecks && !slices.Contains(d.FailingChecks, name) {
+				d.FailingChecks = append(d.FailingChecks, name)
+			}
 		default:
 			d.ChecksPending++
 		}
 	}
 	return d, nil
 }
+
+// maxFailingChecks caps how many failing checks are named.
+const maxFailingChecks = 20
 
 // checkOutcome folds a CheckRun (status + conclusion) or a StatusContext (state) into pass/fail/pending.
 func checkOutcome(typename, status, conclusion, state string) string {

@@ -56,7 +56,7 @@ func installIssues(t *testing.T, detail ghcli.IssueDetail) *issueFakes {
 // issuesLoaded is a model on the issue list with the list already fetched.
 func issuesLoaded(t *testing.T) model {
 	t.Helper()
-	m := model{view: viewIssues, width: 130, height: 30, target: acme, prTarget: acme, base: ghcli.RepoRef{}}
+	m := model{view: viewIssues, width: 130, height: 30, target: acme, prTarget: acme, base: ghcli.RepoRef{}, previewOff: true} // the pane has its own tests
 	return pump(m, m.fetch())
 }
 

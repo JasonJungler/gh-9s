@@ -9,9 +9,24 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Update handles one message: data arriving, ticks, and key presses.
+// Update handles one message: data arriving, ticks, and key presses. Afterwards the preview pane
+// follows the selection.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if nm, ok := next.(model); ok {
+		var pc tea.Cmd
+		nm, pc = nm.previewSync()
+		next, cmd = nm, tea.Batch(cmd, pc)
+	}
+	return next, cmd
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case previewTickMsg:
+		return m.previewTick(msg)
+	case previewLoadedMsg:
+		return m.previewLoaded(msg), nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		if m.view == viewDiff {

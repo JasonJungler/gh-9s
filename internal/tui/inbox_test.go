@@ -71,7 +71,7 @@ func prItem(host, repo string, n int, title, updated string) ghcli.InboxItem {
 
 func openInbox(t *testing.T) model {
 	t.Helper()
-	m := model{view: viewRuns, width: 140, height: 30, target: acme, base: acme}
+	m := model{view: viewRuns, width: 140, height: 30, target: acme, base: acme, previewOff: true} // the pane has its own tests
 	return keyAll(m, "0")
 }
 

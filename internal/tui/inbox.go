@@ -322,7 +322,7 @@ func inboxRows(tab int, ts inboxTabState) ([]string, []row) {
 		default:
 			cells = []string{repo, num, it.Kind, age(it.UpdatedAt), it.Author, title}
 		}
-		rows = append(rows, row{id: inboxKey(it), url: it.URL, state: st, cells: cells, tint: tintFor(1, numIcon)})
+		rows = append(rows, row{id: inboxKey(it), url: it.URL, updated: it.UpdatedAt, state: st, cells: cells, tint: tintFor(1, numIcon)})
 	}
 	return cols, rows
 }

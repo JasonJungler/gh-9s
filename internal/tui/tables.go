@@ -12,11 +12,12 @@ import (
 )
 
 type row struct {
-	id    string
-	cells []string
-	state state
-	url   string
-	extra string // view specific: workflow id, PR number, ...
+	id      string
+	cells   []string
+	state   state
+	url     string
+	extra   string // view specific: workflow id, PR number, ...
+	updated string // lists of PRs and issues: when GitHub says the item last changed
 
 	tint []string // a colour (lipgloss) per cell, "" for none: how an icon takes its meaning's colour; empty in the plain set
 
@@ -159,7 +160,7 @@ func fetchIssues(r ghcli.RepoRef, f ghcli.IssueFilter) (table, error) {
 		if i.State != "OPEN" {
 			st = stOther
 		}
-		t.rows = append(t.rows, row{id: fmt.Sprint(i.Number), state: st, url: i.URL, tint: tintFor(0, issueIcon(i.State)),
+		t.rows = append(t.rows, row{id: fmt.Sprint(i.Number), state: st, url: i.URL, updated: i.UpdatedAt, tint: tintFor(0, issueIcon(i.State)),
 			cells: []string{issueNumberCell(i.Number, i.State), i.State, i.Title, author,
 				orDash(strings.Join(labels, ",")), orDash(strings.Join(assignees, ",")), age(i.UpdatedAt)}})
 	}
@@ -223,7 +224,7 @@ func prRows(prs []prListItem, currentBranch string) table {
 		if p.Author != nil && p.Author.Login != "" {
 			author = p.Author.Login
 		}
-		t.rows = append(t.rows, row{id: fmt.Sprint(p.Number), state: st, url: p.URL, tint: tintFor(0, icon),
+		t.rows = append(t.rows, row{id: fmt.Sprint(p.Number), state: st, url: p.URL, updated: p.UpdatedAt, tint: tintFor(0, icon),
 			cells: []string{num, label, title, author, p.Head, review, age(p.UpdatedAt)}})
 	}
 	return t

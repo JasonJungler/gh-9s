@@ -1,7 +1,9 @@
 package ghcli
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -96,5 +98,35 @@ func TestPRFilterArgs(t *testing.T) {
 		if got := PRFilterArgs(c.f); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("PRFilterArgs(%+v) = %v; want %v", c.f, got, c.want)
 		}
+	}
+}
+
+func TestFailingChecksNamesDedupeCapAndSanitise(t *testing.T) {
+	var items []string
+	items = append(items,
+		`{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE"}`,
+		`{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"TIMED_OUT"}`,
+		`{"__typename":"StatusContext","context":"ci/legacy","state":"ERROR"}`,
+		`{"__typename":"CheckRun","name":"bad\u001b[31m name","status":"COMPLETED","conclusion":"CANCELLED"}`,
+		`{"__typename":"CheckRun","name":"ok","status":"COMPLETED","conclusion":"SUCCESS"}`,
+		`{"__typename":"CheckRun","name":"later","status":"IN_PROGRESS"}`)
+	for i := 0; i < 40; i++ {
+		items = append(items, fmt.Sprintf(`{"__typename":"CheckRun","name":"job-%d","status":"COMPLETED","conclusion":"FAILURE"}`, i))
+	}
+	d, err := ParsePRDetail([]byte(`{"number":1,"statusCheckRollup":[` + strings.Join(items, ",") + `]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.FailingChecks) != maxFailingChecks {
+		t.Errorf("capped at %d, got %d", maxFailingChecks, len(d.FailingChecks))
+	}
+	want := []string{"lint", "ci/legacy", "bad name"}
+	for i, w := range want {
+		if d.FailingChecks[i] != w {
+			t.Errorf("failing[%d] = %q, want %q", i, d.FailingChecks[i], w)
+		}
+	}
+	if d.ChecksFailed != 44 { // every failing run counts, however few names are kept
+		t.Errorf("failed count %d, want 44", d.ChecksFailed)
 	}
 }
