@@ -240,11 +240,16 @@ func (m model) rebuildBoard(st boardState, keepID string) model {
 	st.tab = min(max(st.tab, 0), len(tabs)-1)
 	m = m.withScreenData(viewBoard, st)
 	m.tbl = table{cols: []string{"ITEM", "TITLE", "STATE", "ASSIGNEES", "LABELS", "UPDATED"}, rows: boardRows(st.data, tabs[st.tab])}
+	prev := m.cursor
 	m.cursor, m.top = 0, 0
+	found := false
 	for i, r := range m.visible() {
 		if keepID != "" && r.id == keepID {
-			m.cursor = i
+			m.cursor, found = i, true
 		}
+	}
+	if keepID != "" && !found { // the card left this tab: stay near where it was
+		m.cursor = max(0, min(prev, len(m.visible())-1))
 	}
 	m.scroll()
 	if st.cols {

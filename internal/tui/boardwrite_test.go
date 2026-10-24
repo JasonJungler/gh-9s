@@ -291,6 +291,9 @@ func TestParseContentRef(t *testing.T) {
 		{"https://evil.com/acme/app/issues/3", "github.com", false},
 		{"http://github.com/acme/app/issues/3", "github.com", false},
 		{"-x/app#1", "github.com", false},
+		{"acme/.github#3", "github.com", true},
+		{"acme/_x#3", "github.com", true},
+		{"acme/..#3", "github.com", false},
 		{"acme/app", "github.com", false},
 	}
 	for _, c := range cases {
@@ -382,5 +385,55 @@ func TestWriteTimeoutFreesTheBoard(t *testing.T) {
 	m = runCmd(m, cmd)
 	if m.boardBusy || !strings.Contains(ansi.Strip(m.status), "may or may not") {
 		t.Fatalf("busy=%v status=%q", m.boardBusy, m.status)
+	}
+}
+
+func TestAnswersThatCameTooLateLeaveNothingBehind(t *testing.T) {
+	m, _, _ := writeBoard(t)
+	m, cmd := m.startAssign()
+	if m.boardOp == nil || cmd == nil {
+		t.Fatal("no assignee lookup started")
+	}
+	op := m.boardOp
+	m.boardOp = nil // the screen was left meanwhile
+	next, _ := m.Update(boardAssigneesMsg{op: op, names: []string{"ann"}})
+	m = next.(model)
+	if m.dlg != nil || m.status != "" {
+		t.Fatalf("dlg=%v status=%q", m.dlg, m.status)
+	}
+}
+
+func TestWriteFinishedElsewhereForcesRefreshOnReturn(t *testing.T) {
+	m, _, _ := writeBoard(t)
+	key := projectKey(m.board)
+	m.view = viewRuns
+	next, _ := m.Update(boardWriteDoneMsg{key: key, text: "moved"})
+	st, _ := next.(model).screenData(viewBoard).(boardState)
+	if !st.force {
+		t.Error("the board would come back with the old Status")
+	}
+}
+
+func TestMovedCardLeavesTabCursorStaysNear(t *testing.T) {
+	m, _, _ := writeBoard(t)
+	st := m.boardSt()
+	st.tab = 0 // All
+	m = m.withScreenData(viewBoard, st)
+	m.cursor = 1
+	m = m.rebuildBoard(st, "gone")
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want it kept at 1", m.cursor)
+	}
+}
+
+func TestLeavingTheScreenForgetsTheWrite(t *testing.T) {
+	m, _, _ := writeBoard(t)
+	m, _ = m.startAssign()
+	if m.boardOp == nil {
+		t.Fatal("no op started")
+	}
+	_ = (&m).switchTo(viewRuns)
+	if m.boardOp != nil {
+		t.Error("the op survived leaving the screen")
 	}
 }
