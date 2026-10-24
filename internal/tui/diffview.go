@@ -199,7 +199,7 @@ func diffKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	case "o":
 		pd, _ := m.screenData(viewPRDetail).(prDetailState)
 		if pd.d.URL != "" {
-			_ = openURL(pd.d.URL)
+			m = m.open(pd.d.URL)
 		}
 	case "esc":
 		if m.query == "" {

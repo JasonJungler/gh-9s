@@ -231,7 +231,7 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		}, true
 	case "o":
 		if st.d.URL != "" {
-			_ = openURL(st.d.URL)
+			m = m.open(st.d.URL)
 		}
 		return m, nil, true
 	default:

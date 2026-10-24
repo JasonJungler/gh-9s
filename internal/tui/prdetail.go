@@ -18,6 +18,14 @@ var (
 	openURL = ghcli.OpenURL
 )
 
+// open sends url to the browser; when that fails the reason is shown instead of lost.
+func (m model) open(url string) model {
+	if err := openURL(url); err != nil {
+		m.status = "can't open the browser: " + err.Error()
+	}
+	return m
+}
+
 // prDetailState is what the PR detail screen keeps in the model.
 type prDetailState struct {
 	d      ghcli.PRDetail
@@ -77,7 +85,7 @@ func prDetailKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return m.startPRReview(), nil, true
 	case "o":
 		if st.d.URL != "" {
-			_ = openURL(st.d.URL)
+			m = m.open(st.d.URL)
 		}
 		return m, nil, true
 	default:

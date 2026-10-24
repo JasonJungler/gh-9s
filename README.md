@@ -39,6 +39,8 @@ Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release
 
 Everywhere: `j/k` move, `g/G` top/bottom, `/` filter, `:` command bar, `esc` back, `R` refresh, `o` open in browser, `q` quit.
 
+Links (`o`) open in your browser: `$BROWSER` if set, otherwise the system default. Under WSL they open in the Windows browser (`wslview` if installed, else `cmd.exe /c start`). If it can't be opened, the reason is shown in the status line.
+
 The `:` command bar, `/` filter, log search and alias entry open in a box under the header, like k9s. The command bar completes as you type: the rest of the best match shows in grey, `Tab` (or `→`) accepts it and `Tab` again cycles through the other matches. Commands complete from the built-ins, your favorite aliases and (after `:repo `) your recent and cached repos. `Enter` on a unique prefix runs it (`:wo` opens workflows), and `↑`/`↓` walk the commands you typed before. Dialogs, forms and the repo picker are boxed at the top too.
 
 **Runs** — `enter` job graph · `l` full log in pager · `L` failed log · `w` watch (`gh run watch`) · `r` rerun · `F` rerun failed · `c` cancel · `d` delete

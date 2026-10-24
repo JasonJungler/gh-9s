@@ -24,8 +24,7 @@ func (m model) openCheck(r row) (tea.Model, tea.Cmd) {
 	}
 	link, ok := ghcli.ParseActionsURL(r.url)
 	if !ok {
-		_ = openURL(r.url)
-		return m, nil
+		return m.open(r.url), nil
 	}
 	if !sameRepo(link.Repo, m.curTarget()) {
 		m.target = link.Repo
