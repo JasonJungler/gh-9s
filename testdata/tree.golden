@@ -1,0 +1,6 @@
+  ✓ lint 12s
+  ✓ test 48s
+  └─ ✓ build 1m04s (needs lint, test)
+▸    ├─ ● deploy-staging 41s ▸ Apply manifests
+     └─ ● e2e 41s ▸ Run playwright
+        └─ ○ release (needs deploy-staging, e2e)
