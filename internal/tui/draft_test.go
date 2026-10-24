@@ -245,3 +245,15 @@ func TestExistingThreadsShowInTheUnifiedViewToo(t *testing.T) {
 		t.Errorf("threads belong in the unified view too:\n%s", v)
 	}
 }
+
+func TestACommentWrittenForAnotherPRIsDropped(t *testing.T) {
+	m, path := draftModel(t, 100, reviewDiff)
+	m = goToRow(t, m, `+ import "log"`)
+	m = keyAll(m, "c")
+	m = typeAll(m, "for 482")
+	m.pr = "999" // the screen moved on while the dialog was open
+	m = keyAll(m, "enter")
+	if len(diffSt(m).drafts) != 0 || len(stored(t, path)) != 0 {
+		t.Error("the comment must not attach to a different PR")
+	}
+}
