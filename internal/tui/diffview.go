@@ -111,6 +111,9 @@ func init() {
 			old, _ := m.screenData(viewDiff).(diffState)
 			st := diffState{d: p.d, threads: p.threads, sbs: old.sbs}
 			st.head, st.id = p.head, m.itemID(m.pr)
+			if old.id == st.id {
+				st.folded = old.folded // stale keys are harmless: only paths that exist are looked up
+			}
 			if st.head != "" && st.head == old.head {
 				st.viewed = old.viewed
 			}

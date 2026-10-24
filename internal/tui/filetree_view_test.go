@@ -166,3 +166,31 @@ func TestBigTreeScrollsAndKeepsTheSelectionVisible(t *testing.T) {
 		t.Errorf("the last row should be selected and visible:\n%s", strings.Join(rows, "\n"))
 	}
 }
+
+func TestFoldsSurviveARefetchOfTheSamePR(t *testing.T) {
+	m := reviewModel(t, 140, treeDiff("pkg/a.go", "pkg/b.go", "top.go"), nil)
+	m = keys(m, "tab", "g", "enter")
+	next, _ := m.Update(m.fetch()())
+	m = next.(model)
+	if hasRow(listCol(m), "a.go") {
+		t.Errorf("a refetch must keep pkg folded:\n%s", strings.Join(listCol(m), "\n"))
+	}
+}
+
+func TestTreeCacheHoldsItsInputs(t *testing.T) {
+	m := reviewModel(t, 140, treeDiff("a/x.go"), nil)
+	st := m.screenData(viewDiff).(diffState)
+	st = st.toggleViewed(treeRow{path: "a/x.go"})
+	st.treeRows()
+	if len(treeMemo.viewed) != 1 || len(treeMemo.files) != 1 {
+		t.Error("the cache must hold the files and maps its signature is about")
+	}
+}
+
+func TestSelectedNarrowRowKeepsItsHighlight(t *testing.T) {
+	rows := buildTree(tf("a/b/c/d/e/f/g/h/i/j/k/l/m/n.go"), nil, nil, nil, nil)
+	line := treeLine(rows[len(rows)-1], false, true, 12)
+	if ansi.StringWidth(line) != 12 {
+		t.Errorf("width %d", ansi.StringWidth(line))
+	}
+}

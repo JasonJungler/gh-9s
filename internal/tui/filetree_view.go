@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/icons"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
@@ -26,6 +27,11 @@ var treeMemo struct {
 	sig  treeSig
 	rows []treeRow
 	ok   bool
+	// the inputs themselves: holding them keeps their addresses from being reused by new values,
+	// which would make a stale signature look current
+	files  []diff.File
+	viewed map[string]bool
+	folded map[string]bool
 }
 
 func hashStrings(n int, at func(int) string) uint32 {
@@ -55,6 +61,7 @@ func (st diffState) treeRows() []treeRow {
 	}
 	rows := buildTree(st.d.Files, st.viewed, st.threads, st.drafts, st.folded)
 	treeMemo.sig, treeMemo.rows, treeMemo.ok = sig, rows, true
+	treeMemo.files, treeMemo.viewed, treeMemo.folded = st.d.Files, st.viewed, st.folded
 	return rows
 }
 
@@ -225,6 +232,9 @@ func treeLine(r treeRow, folded, selected bool, w int) string {
 		name = "…" + string(rs)
 	}
 	if avail < 1 { // too narrow for anything but the head
+		if selected {
+			return ui.Sel.Render(fit(head, w))
+		}
 		return fit(head, w)
 	}
 	plain := head + fit(name, avail) + stats
