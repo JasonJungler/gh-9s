@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 )
@@ -362,5 +364,54 @@ func TestOutdatedThreadRowsKeepTheKeysInOrder(t *testing.T) {
 		if l.src[i] < l.src[i-1] {
 			t.Fatalf("keys go backwards at row %d: %d after %d", i, l.src[i], l.src[i-1])
 		}
+	}
+}
+
+const goDiff = `diff --git a/main.go b/main.go
+--- a/main.go
++++ b/main.go
+@@ -1,2 +1,2 @@
+ package main
+-var x = 1
++var x = 2
+`
+
+func withColours(t *testing.T) {
+	t.Helper()
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+}
+
+func TestTheScreensColourCodeByLanguage(t *testing.T) {
+	withColours(t)
+	for _, width := range []int{140, 100} {
+		m := reviewModel(t, width, goDiff, nil)
+		v := m.View()
+		if !strings.Contains(v, "38;2;249;38;113") { // monokai keyword colour, for "package"
+			t.Errorf("width %d: keywords are not coloured:\n%q", width, v)
+		}
+		if p := ansi.Strip(v); !strings.Contains(p, "var x = 2") {
+			t.Errorf("width %d: the text itself must be unchanged:\n%s", width, p)
+		}
+	}
+}
+
+func TestUnknownLanguagesKeepThePlainColours(t *testing.T) {
+	withColours(t)
+	text := strings.ReplaceAll(goDiff, "main.go", "notes.zzzz")
+	for _, width := range []int{140, 100} {
+		v := reviewModel(t, width, text, nil).View()
+		if strings.Contains(v, "38;2;249;38;113") {
+			t.Errorf("width %d: no language, no syntax colours", width)
+		}
+	}
+}
+
+func TestSyntaxColoursAreComputedOncePerFetch(t *testing.T) {
+	m := reviewModel(t, 100, goDiff, nil)
+	st := m.screenData(viewDiff).(diffState)
+	if len(st.hl) != 1 || st.hl[0] == nil {
+		t.Fatalf("the highlighting should be kept in the state: %+v", st.hl)
 	}
 }

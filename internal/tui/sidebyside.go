@@ -10,6 +10,7 @@ import (
 
 	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/highlight"
 	"github.com/MurabitoB/gh-9s/internal/markdown"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
@@ -42,6 +43,11 @@ func fit(s string, w int) string {
 // sideBySide lays one file out in two panes of (width-1)/2 columns, old on the left and new on the
 // right, with the review threads other people started shown under the lines they are about.
 func sideBySide(f diff.File, threads []ghcli.Thread, width int) []sbLine {
+	return sideBySideHL(f, threads, width, nil)
+}
+
+// sideBySideHL is sideBySide with the code coloured by language when hl is not nil.
+func sideBySideHL(f diff.File, threads []ghcli.Thread, width int, hl *highlight.File) []sbLine {
 	pw := max((width-1)/2, 10)
 	rows := f.Rows()
 	gw := 2
@@ -97,7 +103,7 @@ func sideBySide(f diff.File, threads []ghcli.Thread, width int) []sbLine {
 				idx2 = max(idx2, n.Idx+1)
 			}
 		}
-		out = append(out, sbLine{left: cell(r.Old, true, spOld, gw, cw), right: cell(r.New, false, spNew, gw, cw), kind: kind, idx: idx, idx2: idx2})
+		out = append(out, sbLine{left: cell(r.Old, true, spOld, gw, cw, hl), right: cell(r.New, false, spNew, gw, cw, hl), kind: kind, idx: idx, idx2: idx2})
 		for _, t := range mine {
 			if (t.Side == "RIGHT" && r.New != nil && r.New.New == t.Line) || (t.Side == "LEFT" && r.Old != nil && r.Old.Old == t.Line) {
 				for _, tr := range threadRows(t, pw) {
@@ -119,7 +125,7 @@ func sideBySide(f diff.File, threads []ghcli.Thread, width int) []sbLine {
 func expandTabs(s string) string { return strings.ReplaceAll(s, "\t", "    ") }
 
 // cell draws one pane of a row: line number, sign, text (with its changed words marked).
-func cell(n *diff.NumLine, left bool, spans []diff.Span, gw, cw int) string {
+func cell(n *diff.NumLine, left bool, spans []diff.Span, gw, cw int, hf *highlight.File) string {
 	if n == nil {
 		return strings.Repeat(" ", gw+3+cw)
 	}
@@ -133,6 +139,9 @@ func cell(n *diff.NumLine, left bool, spans []diff.Span, gw, cw int) string {
 		sign, base, hl = "-", ui.Fail, hlDel
 	case diff.Add:
 		sign, base, hl = "+", ui.OK, hlAdd
+	}
+	if segs := syntaxSegs(hf, n, left); segs != nil {
+		return styDim.Render(fmt.Sprintf("%*d", gw, num)) + " " + base.Render(sign) + " " + syntaxText(segs, spans, n.Kind, cw)
 	}
 	text := []rune(expandTabs(n.Text))
 	var b strings.Builder
@@ -173,4 +182,74 @@ func threadRows(t ghcli.Thread, pw int) []sbLine {
 		out = append(out, row)
 	}
 	return out
+}
+
+func syntaxSegs(hl *highlight.File, n *diff.NumLine, left bool) []highlight.Seg {
+	if left {
+		return hl.Left(n.Idx)
+	}
+	return hl.Right(n.Idx)
+}
+
+// tint is the background of added and deleted lines, and the stronger one under changed words.
+func tint(kind diff.Kind, changed bool) lipgloss.Color {
+	switch {
+	case kind == diff.Add && changed:
+		return "28"
+	case kind == diff.Add:
+		return "22"
+	case kind == diff.Del && changed:
+		return "88"
+	case kind == diff.Del:
+		return "52"
+	}
+	return ""
+}
+
+func segStyle(sg highlight.Seg, kind diff.Kind, changed bool) lipgloss.Style {
+	st := lipgloss.NewStyle().Bold(sg.Bold).Italic(sg.Italic)
+	if sg.FG != "" {
+		st = st.Foreground(lipgloss.Color(sg.FG))
+	}
+	if bg := tint(kind, changed); bg != "" {
+		st = st.Background(bg)
+	}
+	return st
+}
+
+// syntaxText draws a line from its coloured segments: syntax colour in front, the line's tint
+// behind, a stronger tint under the changed words; cut or padded to exactly cw columns.
+func syntaxText(segs []highlight.Seg, spans []diff.Span, kind diff.Kind, cw int) string {
+	changedAt := func(i int) bool {
+		for _, sp := range spans {
+			if i >= sp.Start && i < sp.End {
+				return true
+			}
+		}
+		return false
+	}
+	var b strings.Builder
+	pos := 0
+	for _, sg := range segs {
+		r := []rune(sg.Text)
+		for start := 0; start < len(r); {
+			ch := changedAt(pos + start)
+			end := start + 1
+			for end < len(r) && changedAt(pos+end) == ch {
+				end++
+			}
+			b.WriteString(segStyle(sg, kind, ch).Render(string(r[start:end])))
+			start = end
+		}
+		pos += len(r)
+	}
+	s := b.String()
+	if ansi.StringWidth(s) > cw {
+		s = ansi.Truncate(s, cw, "…")
+	}
+	pad := strings.Repeat(" ", max(cw-ansi.StringWidth(s), 0))
+	if bg := tint(kind, false); bg != "" {
+		pad = lipgloss.NewStyle().Background(bg).Render(pad)
+	}
+	return s + pad
 }

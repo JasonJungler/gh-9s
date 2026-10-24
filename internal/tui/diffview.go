@@ -8,6 +8,7 @@ import (
 
 	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/highlight"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
 
@@ -27,13 +28,14 @@ type diffState struct {
 	listMode bool    // showing the file list instead of the diff
 	sel      int     // selected file in the list
 
-	usrc      []int           // source key of every unified row, to keep the place when the layout changes
-	sb        *sbLayout       // the side-by-side layout for the current width; nil while unified
-	sbs       int             // 0 by width, 1 always side-by-side, 2 always unified
-	focusList bool            // side-by-side: j/k move through the file list
-	threads   []ghcli.Thread  // review comments other people left
-	viewed    map[string]bool // files marked viewed, by path
-	head      string          // the PR head commit the marks belong to
+	usrc      []int             // source key of every unified row, to keep the place when the layout changes
+	sb        *sbLayout         // the side-by-side layout for the current width; nil while unified
+	sbs       int               // 0 by width, 1 always side-by-side, 2 always unified
+	focusList bool              // side-by-side: j/k move through the file list
+	threads   []ghcli.Thread    // review comments other people left
+	viewed    map[string]bool   // files marked viewed, by path
+	head      string            // the PR head commit the marks belong to
+	hl        []*highlight.File // syntax colours of every file, nil where the language is unknown
 }
 
 // diffPayload is what the diff fetch delivers: the diff and, if they could be had, the threads.
@@ -97,6 +99,7 @@ func init() {
 			}
 			lines, starts, src := diffDisplaySrc(st.d)
 			st.lines, st.starts, st.usrc = lines, starts, src
+			st.hl = highlightFiles(st.d)
 			if old.sb != nil && m.top < len(old.sb.src) { // keep the line on top across the refetch
 				m.top = firstAtLeast(src, old.sb.src[m.top])
 			} else if old.sb == nil && m.top < len(old.usrc) {
@@ -323,6 +326,11 @@ func diffBody(m model) string {
 }
 
 func (m model) styledDiffLine(i int, l dline, w int) string {
+	if !m.isMatch(i) {
+		if s, ok := m.syntaxDiffLine(i, l, w); ok {
+			return s
+		}
+	}
 	text := strings.TrimRight(trunc(" "+l.text, w), " ")
 	switch {
 	case m.isMatch(i) && m.matches[m.mi] == i:

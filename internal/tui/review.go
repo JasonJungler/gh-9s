@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/highlight"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
 
@@ -44,6 +46,59 @@ func (m model) sideMode(st diffState) bool {
 	return st.sbs == 1 || (st.sbs == 0 && m.width >= sideMinWidth)
 }
 
+// maxHighlightLines bounds how much of a diff is coloured by language; the rest stays plain.
+const maxHighlightLines = 20000
+
+// highlightFiles colours every file of the diff, once per fetched diff.
+func highlightFiles(d diff.Diff) []*highlight.File {
+	out := make([]*highlight.File, len(d.Files))
+	budget := maxHighlightLines
+	for i, f := range d.Files {
+		if len(f.Lines) > budget {
+			continue
+		}
+		if out[i] = highlight.ForFile(f); out[i] != nil {
+			budget -= len(f.Lines)
+		}
+	}
+	return out
+}
+
+// syntaxDiffLine draws a unified-diff row in syntax colours; ok is false when the row has none.
+func (m model) syntaxDiffLine(i int, l dline, w int) (string, bool) {
+	if l.kind != dAdd && l.kind != dDel && l.kind != dCtx {
+		return "", false
+	}
+	st, _ := m.screenData(viewDiff).(diffState)
+	if i >= len(st.usrc) {
+		return "", false
+	}
+	file, idx := st.usrc[i]>>20, st.usrc[i]&(1<<20-1)-1
+	if file >= len(st.hl) || st.hl[file] == nil || idx < 0 {
+		return "", false
+	}
+	var segs []highlight.Seg
+	kind, sign, signSty := diff.Context, "  ", lipgloss.NewStyle()
+	switch l.kind {
+	case dAdd:
+		kind, sign, signSty = diff.Add, "+ ", ui.OK
+		segs = st.hl[file].Right(idx)
+	case dDel:
+		kind, sign, signSty = diff.Del, "- ", ui.Fail
+		segs = st.hl[file].Left(idx)
+	default:
+		segs = st.hl[file].Right(idx)
+	}
+	var text strings.Builder
+	for _, s := range segs {
+		text.WriteString(s.Text)
+	}
+	if segs == nil || sign+text.String() != l.text { // a line-ending mark or anything else odd: leave it plain
+		return "", false
+	}
+	return " " + signSty.Render(sign) + syntaxText(segs, nil, kind, max(w-3, 1)), true
+}
+
 func buildSB(st diffState, width int) *sbLayout {
 	lw := listWidth(width)
 	rw := width - lw - 1
@@ -69,7 +124,11 @@ func buildSB(st diffState, width int) *sbLayout {
 			name += " (binary)"
 		}
 		add(sbLine{left: fit(ui.Key.Render(fmt.Sprintf("── %s  %s ──", name, plusMinus(f))), pw), right: fit("", pw), kind: dFile}, srcKey(fi, 0))
-		for _, row := range sideBySide(f, st.threads, rw) {
+		var hf *highlight.File
+		if fi < len(st.hl) {
+			hf = st.hl[fi]
+		}
+		for _, row := range sideBySideHL(f, st.threads, rw, hf) {
 			add2(row, srcKey(fi, row.idx), srcKey(fi, row.idx2))
 		}
 	}

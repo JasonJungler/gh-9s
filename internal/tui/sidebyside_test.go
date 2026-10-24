@@ -10,6 +10,7 @@ import (
 
 	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/highlight"
 )
 
 func sbFile(t *testing.T, patch string) diff.File {
@@ -159,5 +160,41 @@ func TestSideBySideHighlightsOnlyTheChangedWords(t *testing.T) {
 	}
 	if strings.Contains(pair.left, hlDel("for")) {
 		t.Errorf("unchanged words must not be marked: %q", pair.left)
+	}
+}
+
+func TestSideBySideSyntaxColoursKeepTheTextAndTheChangedWords(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+	f := sbFile(t, "@@ -1,1 +1,1 @@\n-x := 1\n+x := 2\n")
+	rows := sideBySideHL(f, nil, 120, highlight.ForFile(f))
+	var pair sbLine
+	for _, l := range rows {
+		if strings.Contains(ansi.Strip(l.left), "x :=") {
+			pair = l
+		}
+	}
+	if got := strings.TrimSpace(ansi.Strip(pair.right)); got != "1 + x := 2" {
+		t.Fatalf("plain text changed: %q", got)
+	}
+	if !strings.Contains(pair.right, "38;2;174;129;255") { // monokai's number colour
+		t.Errorf("the number should carry its syntax colour: %q", pair.right)
+	}
+	if !strings.Contains(pair.right, "48;5;28") || !strings.Contains(pair.left, "48;5;88") {
+		t.Errorf("changed words need the stronger tint: %q / %q", pair.left, pair.right)
+	}
+	if !strings.Contains(pair.right, "48;5;22") || !strings.Contains(pair.left, "48;5;52") {
+		t.Errorf("added/deleted lines keep their tint: %q / %q", pair.left, pair.right)
+	}
+}
+
+func TestSideBySideWithoutHighlightingIsUnchanged(t *testing.T) {
+	f := sbFile(t, "@@ -1,1 +1,1 @@\n-a\n+b\n")
+	a, b := sideBySide(f, nil, 120), sideBySideHL(f, nil, 120, nil)
+	for i := range a {
+		if a[i] != b[i] {
+			t.Errorf("row %d differs", i)
+		}
 	}
 }
