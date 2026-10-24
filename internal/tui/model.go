@@ -122,6 +122,9 @@ type model struct {
 	prChecksAt   time.Time          // when they were last asked for
 	prChecksBusy bool
 
+	previewOff bool // the pane was switched off for this session
+	paneList   bool // this model is the list half of a split screen: its selected row fills the width
+
 	confirm    func() tea.Cmd
 	confirmMsg string
 }

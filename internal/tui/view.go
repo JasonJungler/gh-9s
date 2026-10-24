@@ -151,6 +151,9 @@ func (m model) View() string {
 		return b.String() + m.boxed(m.form.view(m.width))
 	}
 	if s, ok := screens[m.view]; ok && s.body != nil {
+		if m.previewShown() {
+			return b.String() + m.withPane(s.body) + m.footer()
+		}
 		return b.String() + s.body(m) + m.footer()
 	}
 	if m.view == viewGraph {
@@ -267,6 +270,11 @@ func (m model) tableBody() string {
 			line.WriteString(s)
 		}
 		if i == m.cursor {
+			if m.paneList {
+				b.WriteString(stySel.Render(padTo(line.String(), m.width)) + "\n")
+				lines++
+				continue
+			}
 			b.WriteString(stySel.Render(line.String()) + "\n")
 		} else {
 			b.WriteString(line.String() + "\n")
