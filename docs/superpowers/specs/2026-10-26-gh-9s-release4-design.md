@@ -29,7 +29,7 @@ These already exist on the run list: `r` re-runs the run, `F` re-runs the failed
 
 ## Part 2 — the inbox
 
-- A new screen, `:inbox` (also `0`), listed in the hint line. Tabs, switched with `tab`/`shift+tab` or `1`–`4` inside the screen, in this order and opening on the first:
+- A new screen, `:inbox` (also `0`), listed in the hint line. Tabs, switched with `tab`/`shift+tab` or `h`/`l` (the global `1`–`4` keep their meaning of runs/workflows/pulls/issues), in this order and opening on the first:
   1. **Assigned issues:** open issues assigned to me, any repo.
   2. **Review requested:** open PRs where my review is requested.
   3. **My PRs:** open PRs I authored, with the review decision and check state shown.

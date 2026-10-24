@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseAuthHosts(t *testing.T) {
@@ -50,10 +51,8 @@ func TestInboxArgs(t *testing.T) {
 	if got[0] != "api" || got[1] != "graphql" {
 		t.Fatalf("args = %q", got)
 	}
-	for _, a := range got {
-		if a == "--hostname" {
-			t.Error("github.com needs no --hostname")
-		}
+	if !reflect.DeepEqual(got[2:4], []string{"--hostname", "github.com"}) {
+		t.Errorf("github.com is named too: a GH_HOST in the environment must not redirect the search (%q)", got)
 	}
 	has := func(args []string, s string) bool {
 		for i, a := range args {
@@ -140,5 +139,15 @@ func TestLoginArgs(t *testing.T) {
 	}
 	if _, err := ParseLogin([]byte(`{"errors":[{"message":"Bad credentials"}]}`)); err == nil || !strings.Contains(err.Error(), "Bad credentials") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestRunWithTimeoutGivesUp(t *testing.T) {
+	start := time.Now()
+	if _, err := RunWithTimeout(time.Nanosecond, "version"); err == nil {
+		t.Error("a command that cannot finish in time is an error")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Error("it must not wait")
 	}
 }

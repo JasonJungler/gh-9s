@@ -215,6 +215,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if nm, ok := next.(model); ok && nm.view == viewDiff {
 			next = nm.keepCursorVisible()
 		}
+		if nm, ok := next.(model); ok && nm.view == viewInbox {
+			next = nm.rememberInboxCursor()
+		}
 		return next, cmd
 	}
 	return m, nil

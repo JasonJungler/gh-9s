@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +27,20 @@ const (
 	inboxManual = 5 * time.Second // and R at most this often
 	inboxID     = "inbox"         // the inbox shows one thing: results for another identity are dropped
 )
+
+// Only one round of searches runs at a time: a tick or an R while one is still going (a slow host)
+// must not start another. A round that has run longer than inboxStuck is given up on.
+var (
+	inboxBusy      atomic.Bool
+	inboxBusySince atomic.Int64 // unix nanoseconds
+	inboxRounds    atomic.Int64
+)
+
+const inboxStuck = 2 * time.Minute
+
+func inboxRunning() bool {
+	return inboxBusy.Load() && inboxNow().UnixNano()-inboxBusySince.Load() < int64(inboxStuck)
+}
 
 var inboxTabNames = [4]string{"Assigned", "Review requested", "My PRs", "Mentions"}
 
@@ -49,6 +64,7 @@ type inboxPayload struct {
 	hosts     []string
 	results   map[string]hostResult
 	notes     []string
+	round     int64
 	unchanged bool // a throttled round: nothing was asked, just show what we have
 }
 
@@ -66,6 +82,7 @@ type inboxState struct {
 	byHost   map[string][4]hostTab
 	notes    []string
 	loaded   bool
+	round    int64 // the newest round applied: an older one arriving later is dropped
 	loadedAt time.Time
 	force    bool // the next fetch ignores the throttle (R)
 }
@@ -91,12 +108,20 @@ func unchangedMsg() tea.Msg {
 
 func inboxFetchCmd(m model) tea.Cmd {
 	st, _ := m.screenData(viewInbox).(inboxState)
-	if st.loaded && !st.force && inboxNow().Sub(st.loadedAt) < inboxEvery {
+	if inboxRunning() || (st.loaded && !st.force && inboxNow().Sub(st.loadedAt) < inboxEvery) {
 		return func() tea.Msg { return unchangedMsg() }
 	}
+	round := inboxRounds.Add(1)
+	inboxBusy.Store(true)
+	inboxBusySince.Store(inboxNow().UnixNano())
 	return func() tea.Msg {
+		defer func() {
+			if inboxRounds.Load() == round { // a newer round took over: leave its flag alone
+				inboxBusy.Store(false)
+			}
+		}()
 		hosts, herr := inboxHosts()
-		p := inboxPayload{hosts: hosts, results: map[string]hostResult{}}
+		p := inboxPayload{round: round, hosts: hosts, results: map[string]hostResult{}}
 		if herr != nil {
 			p.notes = append(p.notes, "couldn't list the logged-in hosts: "+herr.Error())
 		}
@@ -142,7 +167,17 @@ func inboxApply(m model, msg screenMsg) model {
 	p := msg.data.(inboxPayload)
 	st, _ := m.screenData(viewInbox).(inboxState)
 	if p.unchanged {
-		return m.rebuildInbox(st, "")
+		m.loading = inboxBusy.Load() // a forced round may still be on its way
+		if len(m.tbl.cols) == 0 {    // coming back to the screen: show the tab where it was left
+			for i := range st.tabs {
+				st.tabs[i].fresh = map[string]bool{} // and what was new is old now
+			}
+			return m.rebuildInbox(st, "")
+		}
+		return m
+	}
+	if p.round < st.round {
+		return m // an older round that arrived after a newer one
 	}
 	keepID := ""
 	if r, ok := m.selected(); ok && m.view == viewInbox {
@@ -181,14 +216,15 @@ func inboxApply(m model, msg screenMsg) model {
 		fresh := map[string]bool{}
 		for _, it := range items {
 			k := inboxKey(it)
-			if st.tabs[i].fresh[k] || (st.loaded && !prev[k]) {
+			_, hostKnown := st.byHost[it.Host] // a host with no earlier answer has nothing to be new against
+			if st.tabs[i].fresh[k] || (st.loaded && hostKnown && !prev[k]) {
 				fresh[k] = true
 			}
 		}
 		st.tabs[i].items, st.tabs[i].total, st.tabs[i].fresh = items, total, fresh
 	}
 	st.byHost, st.notes = byHost, notes
-	st.loaded, st.loadedAt, st.force = true, inboxNow(), false
+	st.loaded, st.loadedAt, st.force, st.round = true, inboxNow(), false, p.round
 	return m.rebuildInbox(st, keepID)
 }
 
@@ -337,6 +373,10 @@ func inboxKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	case "shift+tab", "h", "left":
 		return m.switchInboxTab(-1), nil, true
 	case "R", "ctrl+r":
+		if inboxRunning() {
+			m.status = styDim.Render("still refreshing")
+			return m, nil, true
+		}
 		if st.loaded && inboxNow().Sub(st.loadedAt) < inboxManual {
 			m.status = styDim.Render("just refreshed")
 			return m, nil, true
@@ -388,4 +428,14 @@ func (m model) openInboxItem(st inboxState, id string) (model, tea.Cmd, bool) {
 	m = m.withScreenData(viewIssue, issueState{})
 	cmd := m.push(viewIssue)
 	return m, cmd, true
+}
+
+// rememberInboxCursor keeps the active tab's row and scroll, so coming back to the inbox lands on them.
+func (m model) rememberInboxCursor() model {
+	st, ok := m.screenData(viewInbox).(inboxState)
+	if !ok || len(m.tbl.cols) == 0 { // not shown yet: the cursor is the reset one, not the user's
+		return m
+	}
+	st.tabs[st.tab].cursor, st.tabs[st.tab].top = m.cursor, m.top
+	return m.withScreenData(viewInbox, st)
 }

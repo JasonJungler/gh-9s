@@ -29,6 +29,7 @@ func installInbox(t *testing.T) *inboxFakes {
 	t.Helper()
 	f := &inboxFakes{hosts: []string{"github.com"}, items: map[string][]ghcli.InboxItem{}, totals: map[string]int{},
 		failing: map[string]error{}, now: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	inboxBusy.Store(false)
 	oldH, oldL, oldF, oldN := inboxHosts, inboxLogin, inboxFetch, inboxNow
 	inboxHosts = func() ([]string, error) { return f.hosts, nil }
 	inboxLogin = func(host string) (string, error) {
@@ -54,7 +55,7 @@ func installInbox(t *testing.T) *inboxFakes {
 		return items, total, nil
 	}
 	inboxNow = func() time.Time { return f.now }
-	t.Cleanup(func() { inboxHosts, inboxLogin, inboxFetch, inboxNow = oldH, oldL, oldF, oldN })
+	t.Cleanup(func() { inboxHosts, inboxLogin, inboxFetch, inboxNow = oldH, oldL, oldF, oldN; inboxBusy.Store(false) })
 	return f
 }
 
@@ -409,5 +410,116 @@ func TestOOpensTheItemInTheBrowserAndAVanishedRowDoesNothing(t *testing.T) {
 	m = keys(m, "enter")
 	if m.view != viewInbox {
 		t.Errorf("view = %v; a row that is gone opens nothing", m.view)
+	}
+}
+
+// ---- findings of the review of release 4b ----
+
+func manyIssues(f *inboxFakes, n int) {
+	var items []ghcli.InboxItem
+	for i := 0; i < n; i++ {
+		items = append(items, issueItem("github.com", "acme/api", i+1, fmt.Sprintf("issue %02d", i+1), fmt.Sprintf("2026-10-24T10:%02d:00Z", 59-i)))
+	}
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = items
+}
+
+func TestTheCursorStaysPutWhenAThrottledPollArrives(t *testing.T) {
+	f := installInbox(t)
+	manyIssues(f, 8)
+	m := openInbox(t)
+	m = keys(m, "j", "j", "j")
+	before := m.cursor
+	m = poll(t, m)
+	if m.cursor != before || before != 3 {
+		t.Errorf("cursor %d -> %d after a poll that changed nothing", before, m.cursor)
+	}
+}
+
+func TestComingBackToTheInboxRestoresTheRow(t *testing.T) {
+	f := installInbox(t)
+	manyIssues(f, 8)
+	m := openInbox(t)
+	m = keys(m, "j", "j")
+	m = keyAll(m, "1") // away to the runs
+	m = keyAll(m, "0") // and back
+	m = pump(m, m.fetch())
+	if m.view != viewInbox || m.cursor != 2 {
+		t.Errorf("view=%v cursor=%d; want the inbox on the third row", m.view, m.cursor)
+	}
+}
+
+func TestOnlyOneRoundRunsAtATime(t *testing.T) {
+	f := installInbox(t)
+	m := model{view: viewInbox, width: 140, height: 30}
+	first, second := m.fetch(), m.fetch() // two ticks before the first round came back
+	next, _ := m.Update(first())
+	m = next.(model)
+	calls := f.calls
+	next, _ = m.Update(second())
+	m = next.(model)
+	if f.calls != calls || calls != 4 {
+		t.Errorf("calls = %d then %d; the second round must not search again", calls, f.calls)
+	}
+	// and the next one is free to run again once the first is done (after the throttle)
+	f.now = f.now.Add(2 * time.Minute)
+	m = pump(m, m.fetch())
+	if f.calls != 8 {
+		t.Errorf("calls = %d; a later round runs normally", f.calls)
+	}
+}
+
+func TestAnOlderRoundNeverOverwritesANewerOne(t *testing.T) {
+	f := installInbox(t)
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 1, "new answer", "2026-10-24T10:00:00Z")}
+	m := openInbox(t)
+	stale := inboxPayload{hosts: []string{"github.com"}, round: 0, results: map[string]hostResult{"github.com": {}}}
+	next, _ := m.Update(screenMsg{view: viewInbox, id: inboxID, data: stale})
+	if v := ansi.Strip(next.(model).View()); !strings.Contains(v, "new answer") {
+		t.Errorf("an old round replaced the new answer:\n%s", v)
+	}
+}
+
+func TestRDuringARoundSaysSo(t *testing.T) {
+	f := installInbox(t)
+	m := openInbox(t)
+	f.now = f.now.Add(time.Minute)
+	_ = m.fetch() // a round is on its way
+	m = keyAll(m, "R")
+	if !strings.Contains(m.status, "refreshing") {
+		t.Errorf("status = %q", m.status)
+	}
+	inboxBusy.Store(false)
+}
+
+func TestARecoveredHostIsNotAllNew(t *testing.T) {
+	f := installInbox(t)
+	f.hosts = []string{"github.com", "ghe.corp"}
+	f.failing["ghe.corp"] = errors.New("timeout")
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 1, "gh", "2026-10-24T10:00:00Z")}
+	m := openInbox(t)
+	delete(f.failing, "ghe.corp")
+	f.items[inboxKeyOf("ghe.corp", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("ghe.corp", "corp/x", 5, "old ghe row", "2026-10-20T10:00:00Z")}
+	f.now = f.now.Add(2 * time.Minute)
+	m = poll(t, m)
+	if v := ansi.Strip(m.View()); strings.Contains(v, "●") || !strings.Contains(v, "old ghe row") {
+		t.Errorf("a host that was unreachable the first time has no 'before' to be new against:\n%s", v)
+	}
+}
+
+func TestLeavingTheInboxClearsTheNewMarks(t *testing.T) {
+	f := installInbox(t)
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 1, "one", "2026-10-24T10:00:00Z")}
+	m := openInbox(t)
+	f.now = f.now.Add(2 * time.Minute)
+	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 2, "two", "2026-10-24T11:00:00Z"), issueItem("github.com", "acme/api", 1, "one", "2026-10-24T10:00:00Z")}
+	m = poll(t, m)
+	if !strings.Contains(ansi.Strip(m.View()), "●") {
+		t.Fatal("setup: a newcomer should be marked")
+	}
+	m = keyAll(m, "1")
+	m = keyAll(m, "0")
+	m = pump(m, m.fetch())
+	if strings.Contains(ansi.Strip(m.View()), "●") {
+		t.Errorf("the marks are gone once the user has left the inbox:\n%s", ansi.Strip(m.View()))
 	}
 }

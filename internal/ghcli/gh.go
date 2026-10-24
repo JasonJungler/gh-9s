@@ -4,6 +4,7 @@ package ghcli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,6 +42,23 @@ func RunInput(stdin []byte, args ...string) ([]byte, error) {
 	cmd.Stdin = bytes.NewReader(stdin)
 	out, err := cmd.Output()
 	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+			return out, fmt.Errorf("%s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return out, err
+	}
+	return out, nil
+}
+
+// RunWithTimeout is Run that gives up (and kills gh) after d: for calls to hosts that may not answer.
+func RunWithTimeout(d time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gh", args...).Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return out, fmt.Errorf("gh did not answer within %s", d)
+		}
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
 			return out, fmt.Errorf("%s", strings.TrimSpace(string(ee.Stderr)))
 		}

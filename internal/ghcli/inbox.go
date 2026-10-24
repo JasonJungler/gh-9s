@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"time"
 )
 
 // InboxTab is one of the lists of the inbox.
@@ -64,7 +65,7 @@ func ParseAuthHosts(b []byte) []string {
 // InboxHosts lists the hosts to search. If gh cannot say (an older gh, nothing logged in) it is
 // just github.com and the error says why.
 func InboxHosts() ([]string, error) {
-	out, err := Run("auth", "status", "--json", "hosts")
+	out, err := RunWithTimeout(inboxTimeout, "auth", "status", "--json", "hosts")
 	if hosts := ParseAuthHosts(out); len(hosts) > 0 {
 		return hosts, nil
 	}
@@ -99,12 +100,15 @@ const inboxQuery = `query($q:String!,$n:Int!){search(query:$q,type:ISSUE,first:$
 	`... on PullRequest{number title url updatedAt isDraft reviewDecision author{login} repository{nameWithOwner} ` +
 	`commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}}`
 
+// inboxTimeout is how long one call to a host may take.
+const inboxTimeout = 30 * time.Second
+
 // InboxLimit is how many rows one search asks for.
 const InboxLimit = 100
 
 func graphqlArgs(host string) []string {
 	args := []string{"api", "graphql"}
-	if host != "" && host != "github.com" {
+	if host != "" { // always named, github.com too: a GH_HOST in the environment must not redirect the search
 		args = append(args, "--hostname", host)
 	}
 	return args
@@ -197,7 +201,7 @@ func FetchInbox(host string, tab InboxTab, login string) ([]InboxItem, int, erro
 	if search == "" {
 		return nil, 0, errors.New("no usable login for this host")
 	}
-	out, err := Run(InboxArgs(host, search)...)
+	out, err := RunWithTimeout(inboxTimeout, InboxArgs(host, search)...)
 	if err != nil && len(out) == 0 {
 		return nil, 0, err
 	}
@@ -236,7 +240,7 @@ func ParseLogin(b []byte) (string, error) {
 
 // FetchLogin is the logged-in user's login on a host.
 func FetchLogin(host string) (string, error) {
-	out, err := Run(LoginArgs(host)...)
+	out, err := RunWithTimeout(inboxTimeout, LoginArgs(host)...)
 	if err != nil && len(out) == 0 {
 		return "", err
 	}
