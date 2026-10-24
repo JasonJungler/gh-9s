@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -40,6 +42,7 @@ type boardOp struct {
 	current    []string
 	add, drop  []string
 	inColumn   string // add: the Status of the column the cursor was in
+	confirming bool   // its confirm question is on screen or its answer is on the way
 }
 
 // boardWriteDoneMsg is the outcome of a write.
@@ -74,7 +77,7 @@ func init() {
 	dialogHandlers["board.status.ok"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		op := m.boardOp
 		m.boardOp = nil
-		if !r.ok || op == nil || !m.opAlive(op) {
+		if !r.ok || op == nil || !op.confirming || !m.opAlive(op) {
 			return m, nil
 		}
 		return m.startWrite("moved "+op.title+" to "+op.optionName, func() error {
@@ -100,6 +103,7 @@ func init() {
 		if len(op.drop) > 0 {
 			parts = append(parts, "unassign "+strings.Join(op.drop, ", "))
 		}
+		op.confirming = true
 		d := newConfirmDialog("board.assignees.ok", strings.ToUpper(parts[0][:1])+strings.Join(parts, " and ")[1:]+" on "+displayRef(op.target)+"#"+op.number+"?", op.title)
 		m.dlg = &d
 		return m, nil
@@ -107,7 +111,7 @@ func init() {
 	dialogHandlers["board.assignees.ok"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		op := m.boardOp
 		m.boardOp = nil
-		if !r.ok || op == nil || !m.opAlive(op) {
+		if !r.ok || op == nil || !op.confirming || !m.opAlive(op) {
 			return m, nil
 		}
 		return m.startWrite("updated assignees on "+displayRef(op.target)+"#"+op.number, func() error {
@@ -142,7 +146,7 @@ func init() {
 	dialogHandlers["board.add.ok"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		op := m.boardOp
 		m.boardOp = nil
-		if !r.ok || op == nil || !m.opAlive(op) {
+		if !r.ok || op == nil || !op.confirming || !m.opAlive(op) {
 			return m, nil
 		}
 		return m.startWrite("added "+op.content.Title, func() error {
@@ -173,11 +177,26 @@ func (m model) startWrite(done string, fn func() error) (model, tea.Cmd) {
 	m.status = styDim.Render("working…")
 	key := projectKey(m.board)
 	return m, func() tea.Msg {
-		err := fn()
+		err := runWithin(writeTimeout, fn)
 		if errors.Is(err, ghcli.ErrNeedsProjectScope) {
 			err = errors.New(ghcli.WriteScopeHint(hostOfKey(key)))
 		}
 		return boardWriteDoneMsg{key: key, text: done, err: err}
+	}
+}
+
+// writeTimeout is how long a write may take before the screen stops waiting for it.
+var writeTimeout = 90 * time.Second
+
+// runWithin runs fn and gives up waiting after d; a write that gives up may still have happened.
+func runWithin(d time.Duration, fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(d):
+		return errors.New("no answer from gh; the change may or may not have happened")
 	}
 }
 
@@ -221,6 +240,10 @@ func (m model) selectedCard() (ghcli.ProjectItem, bool) {
 
 // startStatus is s: pick the Status to move the selected card to.
 func (m model) startStatus() (model, tea.Cmd) {
+	if m.boardOp != nil && m.boardOp.confirming {
+		m.status = styDim.Render("answer the question first")
+		return m, nil
+	}
 	st := m.boardSt()
 	it, ok := m.selectedCard()
 	if !ok || len(st.data.StatusIDs) == 0 {
@@ -257,6 +280,7 @@ func (m model) askStatus(op *boardOp, name string) (model, tea.Cmd) {
 		return m, nil
 	}
 	op.optionName, op.optionID = name, id
+	op.confirming = true
 	m.boardOp = op
 	d := newConfirmDialog("board.status.ok", "Move “"+op.title+"” to "+name+"?", ghcli.CleanText(st.data.Title))
 	m.dlg = &d
@@ -265,6 +289,10 @@ func (m model) askStatus(op *boardOp, name string) (model, tea.Cmd) {
 
 // moveCardSideways is H and L in the columns: move the selected card one column left or right.
 func (m model) moveCardSideways(delta int) (model, tea.Cmd) {
+	if m.boardOp != nil && m.boardOp.confirming {
+		m.status = styDim.Render("answer the question first")
+		return m, nil
+	}
 	st := m.boardSt()
 	it, ok := m.selectedCard()
 	cols := m.boardColumns(st)
@@ -287,6 +315,10 @@ func (m model) moveCardSideways(delta int) (model, tea.Cmd) {
 
 // startAssign is a: list who can be assigned in the card's repo.
 func (m model) startAssign() (model, tea.Cmd) {
+	if m.boardOp != nil && m.boardOp.confirming {
+		m.status = styDim.Render("answer the question first")
+		return m, nil
+	}
 	it, ok := m.selectedCard()
 	if !ok || (it.Type != "Issue" && it.Type != "PullRequest") {
 		m.status = styDim.Render("only issues and pull requests have assignees here")
@@ -341,6 +373,10 @@ func (m model) onBoardAssignees(msg boardAssigneesMsg) (model, tea.Cmd) {
 
 // startAdd is n: ask for the issue or PR to add.
 func (m model) startAdd() (model, tea.Cmd) {
+	if m.boardOp != nil && m.boardOp.confirming {
+		m.status = styDim.Render("answer the question first")
+		return m, nil
+	}
 	st := m.boardSt()
 	if st.data.ID == "" {
 		m.status = styErr.Render("this Project was read without its id; press R and try again")
@@ -374,6 +410,12 @@ func (m model) onBoardResolved(msg boardResolvedMsg) (model, tea.Cmd) {
 		return m, nil
 	}
 	op := msg.op
+	if slices.Contains(op.content.OnProjects, op.projectID) {
+		m.boardOp = nil
+		m.status = styErr.Render("✗ " + ghcli.CleanText(op.content.Title) + " is already on this Project; find it and press s to change its Status")
+		return m, nil
+	}
+	op.confirming = true
 	q := "Add “" + op.content.Title + "” (" + displayRef(op.target) + "#" + op.number + ") to the Project"
 	if op.inColumn != "" {
 		q += ", Status " + op.inColumn

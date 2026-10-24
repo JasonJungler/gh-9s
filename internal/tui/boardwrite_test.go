@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -335,5 +336,51 @@ func TestAssigneesRefuseOddRepoNames(t *testing.T) {
 	m, cmd := m.startAssign()
 	if cmd != nil || m.dlg != nil || !strings.Contains(ansi.Strip(m.status), "will not use") {
 		t.Fatalf("cmd=%v dlg=%v status=%q", cmd != nil, m.dlg, m.status)
+	}
+}
+
+func TestSecondQuestionRefusedWhileConfirmAnswerPending(t *testing.T) {
+	m, _, wf := writeBoard(t)
+	m = keyAll(m, "b")
+	m = keyAll(m, "L") // confirm for the first card
+	m.dlg = nil        // y was pressed: the dialog is gone, the answer is queued
+	m = keyAll(m, "L")
+	if m.dlg != nil || !strings.Contains(ansi.Strip(m.status), "answer the question first") {
+		t.Fatalf("a second question opened: dlg=%v status=%q", m.dlg, m.status)
+	}
+	m, cmd := answer(m, "board.status.ok", true, "")
+	runCmd(m, cmd)
+	if len(wf.status) != 1 || wf.status[0] != "P1|it0|F1|o2" {
+		t.Fatalf("the confirmed card was not the one written: %v", wf.status)
+	}
+}
+
+func TestAddRefusedWhenAlreadyOnProject(t *testing.T) {
+	m, _, wf := writeBoard(t)
+	wf.content.OnProjects = []string{"P1"}
+	m = keyAll(m, "n")
+	m, cmd := answer(m, "board.add", true, "acme/app#9")
+	m = runCmd(m, cmd)
+	if m.dlg != nil || !strings.Contains(ansi.Strip(m.status), "already on this Project") {
+		t.Fatalf("dlg=%v status=%q", m.dlg, m.status)
+	}
+	if len(wf.added) != 0 || len(wf.status) != 0 {
+		t.Fatalf("wrote anyway: %v %v", wf.added, wf.status)
+	}
+}
+
+func TestWriteTimeoutFreesTheBoard(t *testing.T) {
+	old := writeTimeout
+	writeTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { writeTimeout = old })
+	m, _, wf := writeBoard(t)
+	setProjectStatus = func(string, string, string, string, string) error { time.Sleep(500 * time.Millisecond); return nil }
+	_ = wf
+	m = keyAll(m, "s")
+	m, _ = answer(m, "board.status", true, "", "Done")
+	m, cmd := answer(m, "board.status.ok", true, "")
+	m = runCmd(m, cmd)
+	if m.boardBusy || !strings.Contains(ansi.Strip(m.status), "may or may not") {
+		t.Fatalf("busy=%v status=%q", m.boardBusy, m.status)
 	}
 }
