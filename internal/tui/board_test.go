@@ -966,7 +966,7 @@ func TestDraftCardTextScrollsInThePane(t *testing.T) {
 		long = append(long, fmt.Sprintf("line %d of the draft", i))
 	}
 	f.project.Items[3].Body = strings.Join(long, "\n")
-	f.project.Items[4] = ghcli.ProjectItem{Type: "DraftIssue", Title: "Other idea", Draft: true, Body: "second draft text"}
+	f.project.Items[4] = ghcli.ProjectItem{Type: "DraftIssue", Title: "Other idea", Draft: true, Body: "second draft text\n" + strings.Join(long, "\n")}
 	f.now = f.now.Add(10 * time.Second)
 	m.previewOff, m.width, m.height = false, 160, 30
 	m = keyAll(m, "R")
