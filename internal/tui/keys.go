@@ -48,7 +48,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen, m.helpTop = true, 0
 		return m, nil
 	}
-	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox) {
+	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox || m.view == viewBoard) {
 		m.previewOff = !m.previewOff // for this session; the setting `preview` is the lasting choice
 		if m.previewOff {
 			m.status = styDim.Render("preview pane off (p brings it back)")
@@ -607,7 +607,7 @@ func (m model) popBack() (model, tea.Cmd, bool) {
 	if prev == viewFavs {
 		m.target = m.base
 	}
-	if prev == viewInbox {
+	if prev == viewInbox || prev == viewBoard {
 		m.target, m.prTarget = m.base, m.base // the inbox is not about one repo
 	}
 	if prev == viewChecks || prev == viewPRDetail {

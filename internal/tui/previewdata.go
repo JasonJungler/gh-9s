@@ -144,6 +144,22 @@ func (m model) previewTarget() (key previewKey, tg ghcli.RepoRef, updated string
 			kind = "issue"
 		}
 		return previewKey{normHost(tg.Host), tg.Owner + "/" + tg.Name, kind, n}, tg, r.updated, true
+	case viewBoard:
+		st := m.boardSt()
+		it, found := boardItem(st.data, r.id)
+		owner, name, cut := strings.Cut(it.Repo, "/")
+		if !found || !cut || owner == "" || name == "" || (it.Type != "Issue" && it.Type != "PullRequest") {
+			return
+		}
+		host := m.board.Host
+		if host == "github.com" {
+			host = ""
+		}
+		kind := "issue"
+		if it.Type == "PullRequest" {
+			kind = "pr"
+		}
+		return previewKey{normHost(host), it.Repo, kind, it.Number}, ghcli.RepoRef{Host: host, Owner: owner, Name: name}, it.Updated, true
 	case viewInbox:
 		st, _ := m.screenData(viewInbox).(inboxState)
 		for _, it := range st.tabs[st.tab].items {

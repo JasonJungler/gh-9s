@@ -74,7 +74,7 @@ The `:` command bar, `/` filter, log search and alias entry open in a box under 
 
 **Workflows / favorites** — `enter` runs · `t` trigger form · `f` favorite/unfavorite · `a` set alias · `e` enable/disable
 
-**Favorites tabs (`:fav`)** — `tab`/`l` next tab · `shift+tab`/`h` previous · Repos: `enter` switch to the repo · `a` pin · `f`/`d` unpin · `o` open. In the `:repo` picker pinned repos carry a ★ and `ctrl+f` pins or unpins the selected one.
+**Favorites tabs (`:fav`)** — `tab`/`l` next tab · `shift+tab`/`h` previous · Repos: `enter` switch to the repo · `a` pin · `f`/`d` unpin · `o` open. Projects: `enter` open the board · `a` pin (`[HOST/]OWNER/NUMBER`) · `f`/`d` unpin · `o` open. In the `:repo` picker pinned repos carry a ★ and `ctrl+f` pins or unpins the selected one.
 
 **Job graph** (watching a run)
 - `hjkl` or arrows move between jobs, `enter` opens the job's log, `v` switches style, `ctrl-d/u` scroll
@@ -114,6 +114,10 @@ Every dialog names the repo and number it acts on (`acme/api#482`). Approving, r
 ## Trigger
 
 `t` opens a form built from the workflow's declared `workflow_dispatch` inputs: text fields, dropdowns (`←/→`), booleans (`space`), and a branch picker. Required inputs block submission. After you submit, gh-9s finds the run that was created and opens its graph. If it cannot identify the run within 30s it says so and leaves you on the list; the workflow has still been dispatched.
+
+## Project boards (read-only)
+
+Pin a GitHub Project (v2) in `:fav` → Projects (`a`, then `OWNER/NUMBER`) and press `enter` to see its board: one tab per Status column in the Project's order (`All` first, `No status` when some card has none), the first 200 cards, with `enter` opening an issue or PR in its own repo (Enterprise hosts too), `o` the browser, `/` filter, `R` refresh. The preview pane works on the cards. Nothing is ever changed from here. Projects need the `read:project` permission: `gh auth refresh -s read:project` (add `--hostname HOST` for Enterprise).
 
 ## Favorites
 

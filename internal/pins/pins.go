@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +29,7 @@ type Project struct {
 	Owner  string `json:"owner"`
 	Number int    `json:"number"`
 	Title  string `json:"title"`
+	URL    string `json:"url,omitempty"` // where the Project is on the web, as GitHub reported it when it was pinned
 }
 
 type file struct {
@@ -76,8 +78,16 @@ func (p Project) validate() error {
 		return fmt.Errorf("invalid project number %d", p.Number)
 	case p.Host != "" && !okToken(p.Host):
 		return fmt.Errorf("invalid host %q", p.Host)
+	case p.URL != "" && !webURL(p.URL):
+		return fmt.Errorf("invalid project url %q", p.URL)
 	}
 	return nil
+}
+
+// webURL accepts only plain https addresses: the URL is handed to the browser.
+func webURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && !strings.ContainsAny(s, " \t\r\n\x1b")
 }
 
 func (r Repo) same(o Repo) bool {

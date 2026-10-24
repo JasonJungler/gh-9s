@@ -23,7 +23,7 @@ func (m model) maxTop() int { return max(0, len(m.logs)-m.logHeight()) }
 
 // bodyHeight is how many table rows fit; the prompt box, when open, takes three lines of the screen.
 func (m model) bodyHeight() int {
-	h := m.height - 5 - m.promptRows() - m.inboxExtraRows() - m.favExtraRows()
+	h := m.height - 5 - m.promptRows() - m.inboxExtraRows() - m.favExtraRows() - m.boardExtraRows()
 	if !m.paneList && m.previewShown() {
 		h -= 2 // the list sits in a box
 	}
@@ -101,6 +101,9 @@ func (m model) View() string {
 	}
 	if m.view == viewIssue {
 		title += " issue=#" + m.issue
+	}
+	if m.view == viewBoard {
+		title = " gh9s  <board>  " + m.boardTitle()
 	}
 	if m.view == viewJobs || m.view == viewLogs || m.view == viewGraph {
 		title += " run=" + m.runID

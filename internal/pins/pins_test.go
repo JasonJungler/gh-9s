@@ -154,3 +154,15 @@ func TestDefaultPathEnv(t *testing.T) {
 		t.Fatal(DefaultPath())
 	}
 }
+
+func TestProjectURLMustBePlainHTTPS(t *testing.T) {
+	for _, bad := range []string{"javascript:alert(1)", "http://github.com/orgs/a/projects/1", "https://u:p@github.com/x", "https://github.com/a b", "file:///etc/passwd"} {
+		p := Project{Owner: "acme", Number: 1, URL: bad}
+		if err := p.validate(); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if err := (Project{Owner: "acme", Number: 1, URL: "https://github.com/orgs/acme/projects/1"}).validate(); err != nil {
+		t.Error(err)
+	}
+}

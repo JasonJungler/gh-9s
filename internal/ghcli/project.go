@@ -23,6 +23,7 @@ type ProjectItem struct {
 type Project struct {
 	Title       string
 	Closed      bool
+	URL         string   // the Project on the web
 	StatusOrder []string // the options of the Status field, in the Project's order
 	Total       int      // how many items the Project has, which can be more than Items
 	Items       []ProjectItem
@@ -45,7 +46,7 @@ const projectPageSize = 100
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:5){nodes{login}} labels(first:5){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title}}}}}}}}`
+const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed url field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title}}}}}}}}`
 
 type nameNodes struct {
 	Nodes []struct {
@@ -88,6 +89,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 				Project *struct {
 					Title  string `json:"title"`
 					Closed bool   `json:"closed"`
+					URL    string `json:"url"`
 					Field  *struct {
 						Options []struct {
 							Name string `json:"name"`
@@ -139,7 +141,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		return Project{}, false, "", errors.New("project not found or no access")
 	}
 	pr := resp.Data.Owner.Project
-	p = Project{Title: oneLine(CleanText(pr.Title)), Closed: pr.Closed, Total: pr.Items.TotalCount}
+	p = Project{Title: oneLine(CleanText(pr.Title)), Closed: pr.Closed, URL: CleanText(pr.URL), Total: pr.Items.TotalCount}
 	if pr.Field != nil {
 		for _, o := range pr.Field.Options {
 			p.StatusOrder = append(p.StatusOrder, oneLine(CleanText(o.Name)))
