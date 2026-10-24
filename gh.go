@@ -301,7 +301,7 @@ func fetchJobs(r repoRef, runID string) (table, error) {
 		// Show the step that is running, or the one that failed.
 		step := "-"
 		for _, s := range j.Steps {
-			if s.Status == "in_progress" || s.Conclusion == "failure" {
+			if isActiveStep(s.Status, s.Conclusion) {
 				step = s.Name
 				break
 			}
@@ -353,4 +353,59 @@ func cleanLog(s string) []string {
 		lines = append(lines, strings.ReplaceAll(l, "\t", "    "))
 	}
 	return lines
+}
+
+// isActiveStep marks the step worth showing next to a job: the one running or the one that failed.
+func isActiveStep(status, conclusion string) bool {
+	return status == "in_progress" || conclusion == "failure"
+}
+
+// fetchRunJobs returns a run's jobs together with the commit and workflow file
+// path they ran from (needed to read the job dependencies).
+func fetchRunJobs(r repoRef, runID string) (jobs []runJob, headSHA, workflowPath string, err error) {
+	var v struct {
+		HeadSHA    string `json:"headSha"`
+		WorkflowID int64  `json:"workflowDatabaseId"`
+		Jobs       []struct {
+			ID          int64     `json:"databaseId"`
+			Name        string    `json:"name"`
+			Status      string    `json:"status"`
+			Conclusion  string    `json:"conclusion"`
+			StartedAt   time.Time `json:"startedAt"`
+			CompletedAt time.Time `json:"completedAt"`
+			URL         string    `json:"url"`
+			Steps       []struct {
+				Name       string `json:"name"`
+				Status     string `json:"status"`
+				Conclusion string `json:"conclusion"`
+			} `json:"steps"`
+		} `json:"jobs"`
+	}
+	if err = ghJSON(&v, scoped(r, "run", "view", runID, "--json", "jobs,headSha,workflowDatabaseId")...); err != nil {
+		return nil, "", "", err
+	}
+	for _, j := range v.Jobs {
+		rj := runJob{ID: fmt.Sprint(j.ID), Name: j.Name, Status: j.Status, Conclusion: j.Conclusion,
+			URL: j.URL, Start: j.StartedAt, End: j.CompletedAt}
+		for _, s := range j.Steps {
+			if isActiveStep(s.Status, s.Conclusion) {
+				rj.Step = s.Name
+				break
+			}
+		}
+		jobs = append(jobs, rj)
+	}
+	var wfs []struct {
+		ID   int64  `json:"id"`
+		Path string `json:"path"`
+	}
+	if err = ghJSON(&wfs, scoped(r, "workflow", "list", "--all", "--json", "id,path")...); err != nil {
+		return jobs, v.HeadSHA, "", err
+	}
+	for _, w := range wfs {
+		if w.ID == v.WorkflowID {
+			workflowPath = w.Path
+		}
+	}
+	return jobs, v.HeadSHA, workflowPath, nil
 }
