@@ -19,10 +19,12 @@ const (
 	viewWorkflows
 	viewPRs
 	viewChecks
+	viewJobs
+	viewLogs
 )
 
 var viewNames = map[viewKind]string{
-	viewRuns: "runs", viewWorkflows: "workflows", viewPRs: "pulls", viewChecks: "checks",
+	viewRuns: "runs", viewWorkflows: "workflows", viewPRs: "pulls", viewChecks: "checks", viewJobs: "jobs", viewLogs: "logs",
 }
 
 type inputMode int
@@ -50,9 +52,13 @@ type model struct {
 	wfID, wfName string // runs filtered by workflow
 	pr           string // checks for a PR ("" = current branch)
 
-	mode       inputMode
-	input      string
-	filter     string
+	mode                          inputMode
+	input                         string
+	filter                        string
+	runID, jobID, jobName, jobURL string // jobs / logs scope
+	logs                          []string
+	follow                        bool
+
 	confirm    func() tea.Cmd
 	confirmMsg string
 }
@@ -60,6 +66,7 @@ type model struct {
 type dataMsg struct {
 	view viewKind
 	tbl  table
+	logs []string
 	err  error
 }
 type actionMsg struct {
@@ -106,9 +113,10 @@ func tick() tea.Cmd {
 }
 
 func (m model) fetch() tea.Cmd {
-	v, wf, pr, br := m.view, m.wfID, m.pr, m.branch
+	v, wf, pr, br, run, job := m.view, m.wfID, m.pr, m.branch, m.runID, m.jobID
 	return func() tea.Msg {
 		var t table
+		var logs []string
 		var err error
 		switch v {
 		case viewRuns:
@@ -119,8 +127,12 @@ func (m model) fetch() tea.Cmd {
 			t, err = fetchPRs(br)
 		case viewChecks:
 			t, err = fetchChecks(pr)
+		case viewJobs:
+			t, err = fetchJobs(run)
+		case viewLogs:
+			logs, err = fetchJobLog(run, job)
 		}
-		return dataMsg{v, t, err}
+		return dataMsg{v, t, logs, err}
 	}
 }
 
@@ -131,6 +143,7 @@ func (m *model) push(v viewKind) tea.Cmd {
 
 func (m *model) switchTo(v viewKind) tea.Cmd {
 	m.view, m.tbl, m.cursor, m.top, m.filter, m.err = v, table{}, 0, 0, "", nil
+	m.logs, m.follow = nil, false
 	m.loading = true
 	return m.fetch()
 }
@@ -164,6 +177,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case infoMsg:
 		m.repo, m.branch = msg.repo, msg.branch
 	case tickMsg:
+		if m.view == viewLogs && !m.follow {
+			return m, tick() // logs are static unless following
+		}
 		return m, tea.Batch(m.fetch(), tick())
 	case dataMsg:
 		if msg.view != m.view {
@@ -171,7 +187,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.err = msg.err
-		if msg.err == nil {
+		if msg.err == nil && m.view == viewLogs {
+			m.logs = msg.logs
+			if m.follow {
+				m.top = m.maxTop()
+			}
+		} else if msg.err == nil {
 			m.tbl = msg.tbl
 			if n := len(m.visible()); m.cursor >= n {
 				m.cursor = max(0, n-1)
@@ -215,6 +236,11 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.status = ""
+	if m.view == viewLogs {
+		if next, cmd, ok := m.logKey(k); ok {
+			return next, cmd
+		}
+	}
 	n := len(m.visible())
 	switch k.String() {
 	case "q":
@@ -336,7 +362,11 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 		m.wfID, m.wfName = r.id, r.extra
 		return m, m.push(viewRuns)
 	case viewRuns:
-		return m, logsCmd(r.id, false)
+		m.runID = r.id
+		return m, m.push(viewJobs)
+	case viewJobs:
+		m.jobID, m.jobName, m.jobURL = r.id, r.extra, r.url
+		return m, m.push(viewLogs)
 	case viewPRs:
 		m.pr = r.id
 		return m, m.push(viewChecks)
@@ -446,6 +476,49 @@ func (m *model) scroll() {
 	}
 }
 
+// logKey handles scrolling keys in the log viewer; ok=false falls through
+// to the shared handler (quit, esc, filter-less navigation, ...).
+func (m model) logKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	h := m.logHeight()
+	switch k.String() {
+	case "j", "down":
+		m.top = min(m.top+1, m.maxTop())
+	case "k", "up":
+		m.top = max(m.top-1, 0)
+	case "ctrl+d", "pgdown", " ":
+		m.top = min(m.top+h/2, m.maxTop())
+	case "ctrl+u", "pgup":
+		m.top = max(m.top-h/2, 0)
+	case "g", "home":
+		m.top = 0
+	case "G", "end":
+		m.top = m.maxTop()
+	case "f":
+		m.follow = !m.follow
+		if m.follow {
+			m.top = m.maxTop()
+			return m, m.fetch(), true
+		}
+	case "o":
+		if m.jobURL != "" {
+			_ = openURL(m.jobURL)
+		}
+	case "esc", "backspace", "q", "ctrl+c", "R":
+		return m, nil, false
+	default:
+		return m, nil, true // ignore table-only keys such as r/c/d/t
+	}
+	if m.top < m.maxTop() && (k.String() == "k" || k.String() == "up" || k.String() == "g") {
+		m.follow = false
+	}
+	return m, nil, true
+}
+
+// logHeight is the log window size: the table body plus the unused column header row.
+func (m model) logHeight() int { return m.bodyHeight() + 1 }
+
+func (m model) maxTop() int { return max(0, len(m.logs)-m.logHeight()) }
+
 func (m model) bodyHeight() int { return max(1, m.height-5) }
 
 func trunc(s string, w int) string {
@@ -502,8 +575,21 @@ func (m model) View() string {
 			title += " pr=#" + m.pr
 		}
 	}
+	if m.view == viewJobs || m.view == viewLogs {
+		title += " run=" + m.runID
+	}
+	if m.view == viewLogs {
+		title += " job=" + m.jobName
+		if m.follow {
+			title += " (following)"
+		}
+	}
 	vis := m.visible()
-	title += fmt.Sprintf("  [%d]", len(vis))
+	count := len(vis)
+	if m.view == viewLogs {
+		count = len(m.logs)
+	}
+	title += fmt.Sprintf("  [%d]", count)
 	if m.filter != "" {
 		title += "  /" + m.filter
 	}
@@ -511,7 +597,11 @@ func (m model) View() string {
 		title += "  loading…"
 	}
 	b.WriteString(styHeader.Render(strings.TrimSpace(title)) + "\n")
-	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <P>current-PR <:>cmd </>filter <?>keys below") + "\n")
+	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <P>current-PR <:>cmd </>filter") + "\n")
+
+	if m.view == viewLogs {
+		return b.String() + m.logBody() + m.footer()
+	}
 
 	w := m.widths()
 	var hdr strings.Builder
@@ -550,6 +640,41 @@ func (m model) View() string {
 	return b.String()
 }
 
+// logBody renders the visible window of the log, padded to the body height.
+func (m model) logBody() string {
+	var b strings.Builder
+	h := m.logHeight()
+	if m.err != nil {
+		b.WriteString(styErr.Render(m.err.Error()) + "\n")
+		h--
+	} else if m.loading && len(m.logs) == 0 {
+		b.WriteString(styDim.Render("loading logs…") + "\n")
+		h--
+	}
+	end := min(len(m.logs), m.top+h)
+	n := 0
+	for i := m.top; i < end; i++ {
+		l := m.logs[i]
+		if m.width > 0 {
+			l = strings.TrimRight(trunc(l, m.width), " ")
+		}
+		switch {
+		case strings.Contains(l, "##[error]") || strings.Contains(l, "Error:"):
+			l = styFail.Render(l)
+		case strings.Contains(l, "##[warning]"):
+			l = styRun.Render(l)
+		case strings.Contains(l, "##[group]"):
+			l = styCols.Render(l)
+		}
+		b.WriteString(l + "\n")
+		n++
+	}
+	for ; n < h; n++ {
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -559,7 +684,7 @@ func boolToInt(b bool) int {
 
 func statusCol(v viewKind) int {
 	switch v {
-	case viewRuns, viewPRs:
+	case viewRuns, viewPRs, viewJobs:
 		return 1
 	case viewChecks:
 		return 0
@@ -593,13 +718,17 @@ func (m model) footer() string {
 	var keys string
 	switch m.view {
 	case viewRuns:
-		keys = "enter/l logs  L failed-logs  w watch  r rerun  F rerun-failed  c cancel  d delete  o open"
+		keys = "enter jobs  l pager-logs  L failed-logs  w watch  r rerun  F rerun-failed  c cancel  d delete  o open"
 	case viewWorkflows:
 		keys = "enter runs  t trigger  e enable/disable  o open"
 	case viewPRs:
 		keys = "enter checks  o open"
 	case viewChecks:
 		keys = "enter/o open check  esc back"
+	case viewJobs:
+		keys = "enter logs  o open  esc back"
+	case viewLogs:
+		keys = "j/k scroll  space/ctrl-d page  g/G top/bottom  f follow  esc back"
 	}
 	keys += "  R refresh  q quit"
 	if m.status != "" {

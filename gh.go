@@ -274,3 +274,83 @@ func openURL(url string) error {
 		return exec.Command("xdg-open", url).Start()
 	}
 }
+
+func fetchJobs(runID string) (table, error) {
+	var v struct {
+		Jobs []struct {
+			ID          int64  `json:"databaseId"`
+			Name        string `json:"name"`
+			Status      string `json:"status"`
+			Conclusion  string `json:"conclusion"`
+			StartedAt   string `json:"startedAt"`
+			CompletedAt string `json:"completedAt"`
+			URL         string `json:"url"`
+			Steps       []struct {
+				Name       string `json:"name"`
+				Status     string `json:"status"`
+				Conclusion string `json:"conclusion"`
+			} `json:"steps"`
+		} `json:"jobs"`
+	}
+	if err := ghJSON(&v, "run", "view", runID, "--json", "jobs"); err != nil {
+		return table{}, err
+	}
+	t := table{cols: []string{"ID", "STATUS", "JOB", "STEP", "DURATION"}}
+	for _, j := range v.Jobs {
+		label, st := runState(j.Status, j.Conclusion)
+		// Show the step that is running, or the one that failed.
+		step := "-"
+		for _, s := range j.Steps {
+			if s.Status == "in_progress" || s.Conclusion == "failure" {
+				step = s.Name
+				break
+			}
+		}
+		id := fmt.Sprint(j.ID)
+		t.rows = append(t.rows, row{id: id, state: st, url: j.URL, extra: j.Name,
+			cells: []string{id, label, j.Name, step, duration(j.StartedAt, j.CompletedAt)}})
+	}
+	return t, nil
+}
+
+func duration(start, end string) string {
+	s, err := time.Parse(time.RFC3339, start)
+	if err != nil || s.IsZero() {
+		return "-"
+	}
+	e, err := time.Parse(time.RFC3339, end)
+	if err != nil || e.IsZero() || e.Before(s) {
+		e = time.Now()
+	}
+	d := e.Sub(s).Round(time.Second)
+	if d >= time.Minute {
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%ds", int(d.Seconds()))
+}
+
+// fetchJobLog returns the log of one job as display lines, dropping the
+// job-name column and timestamps that `gh run view --log` prefixes.
+func fetchJobLog(runID, jobID string) ([]string, error) {
+	out, err := gh("run", "view", runID, "--job", jobID, "--log")
+	if err != nil {
+		return nil, err
+	}
+	return cleanLog(string(out)), nil
+}
+
+func cleanLog(s string) []string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		parts := strings.SplitN(l, "\t", 3)
+		if len(parts) == 3 {
+			msg := parts[2]
+			if i := strings.IndexByte(msg, ' '); i > 0 && strings.HasSuffix(msg[:i], "Z") {
+				msg = msg[i+1:]
+			}
+			l = parts[1] + "  " + msg
+		}
+		lines = append(lines, strings.ReplaceAll(l, "\t", "    "))
+	}
+	return lines
+}
