@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -194,8 +195,8 @@ func TestFencedCodeIsColouredByItsLanguage(t *testing.T) {
 	if !strings.Contains(raw, "38;2;249;38;113") { // monokai keyword colour
 		t.Errorf("a go block should carry syntax colours: %q", raw)
 	}
-	if got := plain(d); got != "  package main\n  \n  func main() {\n      x := 1\n  }" && !strings.Contains(got, "func main() {") {
-		t.Errorf("text changed: %q", got)
+	if got, want := strings.TrimRight(plain(d), " \n"), "  package main\n  \n  func main() {\n      x := 1\n  }"; got != want {
+		t.Errorf("text changed:\n%q\nwant\n%q", got, want)
 	}
 	for _, l := range d.Lines {
 		if ansi.StringWidth(l) > 60 {
@@ -253,5 +254,19 @@ func TestTheCacheKnowsTheColourProfile(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	if !strings.Contains(strings.Join(Render(src, 60).Lines, ""), "38;2;") {
 		t.Error("the same text under a colour profile must not reuse the plain rendering")
+	}
+}
+
+func TestManyDocumentsStayCached(t *testing.T) {
+	parses = 0
+	for i := 0; i < 200; i++ {
+		Render(fmt.Sprintf("doc %d of %s", i, t.Name()), 40)
+	}
+	before := parses
+	for i := 0; i < 200; i++ {
+		Render(fmt.Sprintf("doc %d of %s", i, t.Name()), 40)
+	}
+	if parses != before {
+		t.Errorf("%d re-parses; 200 documents fit in the cache", parses-before)
 	}
 }

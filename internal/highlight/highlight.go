@@ -6,7 +6,10 @@
 package highlight
 
 import (
+	"crypto/sha256"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alecthomas/chroma/v2"
@@ -47,8 +50,107 @@ func (f *File) Right(i int) []Seg {
 	return f.right[i]
 }
 
-// denied lists lexers that are known to loop forever on ordinary text (chroma v2.14.0).
-var denied = map[string]bool{"Jungle": true}
+// denied lists lexers we do not use: Jungle loops forever on ordinary text (chroma v2.14.0), and
+// Markdown hands its code blocks to other lexers, which would get Jungle back in by the side door.
+var denied = map[string]bool{"jungle": true, "markdown": true}
+
+// Lexers are third-party code run on hostile text, and a lexer that is stuck cannot be stopped. So
+// at most maxRunning of them may run at once (stuck ones keep their slot, which stops us feeding
+// the loop), and Code is held to a time budget that refills as time passes.
+const (
+	maxRunning = 2
+	codeBudget = 600 * time.Millisecond
+	codeMin    = 50 * time.Millisecond
+)
+
+var (
+	slots     = make(chan struct{}, maxRunning) // a token per lexer that is running
+	tokenised atomic.Int32                      // how many times Code really ran a lexer; for the tests
+	bucket    = &timeBudget{left: codeBudget, last: time.Now()}
+)
+
+type timeBudget struct {
+	mu   sync.Mutex
+	left time.Duration
+	last time.Time
+}
+
+func (b *timeBudget) refill() {
+	now := time.Now()
+	b.left = min(b.left+now.Sub(b.last), codeBudget)
+	b.last = now
+}
+
+// take reports whether there is enough budget to start something.
+func (b *timeBudget) take() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.refill()
+	return b.left >= codeMin
+}
+
+func (b *timeBudget) spend(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.refill()
+	b.left -= d
+}
+
+func (b *timeBudget) set(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.left, b.last = d, time.Now()
+}
+
+// withLimit runs fn on its own goroutine and waits at most limit for it. A panic, a timeout, or no
+// free slot gives ok == false.
+func withLimit[T any](limit time.Duration, fn func() T) (out T, ok bool) {
+	select {
+	case slots <- struct{}{}:
+	default:
+		return out, false
+	}
+	done := make(chan T, 1)
+	go func() {
+		defer func() { <-slots }()
+		defer func() {
+			if recover() != nil {
+				var zero T
+				done <- zero
+			}
+		}()
+		done <- fn()
+	}()
+	select {
+	case v := <-done:
+		return v, true
+	case <-time.After(limit):
+		return out, false
+	}
+}
+
+// validLang accepts only names that look like a language: short, ASCII letters, digits and _+#.-
+// (a long or odd name makes chroma's name lookup slow).
+func validLang(s string) bool {
+	if s == "" || len(s) > 32 {
+		return false
+	}
+	for _, c := range []byte(s) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '+', c == '#', c == '.', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+var (
+	codeMu    sync.Mutex
+	codeCache = map[[32]byte][][]Seg{}
+)
+
+const maxCodeCache = 256
 
 // ForFile highlights a file's diff within a second; see ForFileWithin.
 func ForFile(f diff.File) *File { return ForFileWithin(f, time.Second) }
@@ -72,24 +174,11 @@ func ForFileWithin(f diff.File, limit time.Duration) *File {
 		return nil
 	}
 	lexer := lexers.Match(f.Path)
-	if lexer == nil || denied[lexer.Config().Name] {
+	if lexer == nil || denied[strings.ToLower(lexer.Config().Name)] {
 		return nil
 	}
-	done := make(chan *File, 1)
-	go func() {
-		defer func() {
-			if recover() != nil {
-				done <- nil
-			}
-		}()
-		done <- build(f, chroma.Coalesce(lexer))
-	}()
-	select {
-	case h := <-done:
-		return h
-	case <-time.After(limit):
-		return nil
-	}
+	h, _ := withLimit(limit, func() *File { return build(f, chroma.Coalesce(lexer)) })
+	return h
 }
 
 func build(f diff.File, lexer chroma.Lexer) *File {
@@ -187,8 +276,19 @@ func side(f diff.File, lexer chroma.Lexer, style *chroma.Style, idx []int, into 
 // entry per line; a line that stays plain is nil. nil comes back for an unknown, empty or risky
 // language, and when the lexer fails, panics or takes longer than limit.
 func Code(lang, text string, limit time.Duration) [][]Seg {
-	lexer := lexers.Get(strings.ToLower(strings.TrimSpace(lang)))
-	if lang == "" || lexer == nil || denied[lexer.Config().Name] {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	if !validLang(lang) {
+		return nil
+	}
+	key := sha256.Sum256([]byte(lang + "\x00" + text))
+	codeMu.Lock()
+	cached, ok := codeCache[key]
+	codeMu.Unlock()
+	if ok {
+		return cached
+	}
+	lexer := lexers.Get(lang)
+	if lexer == nil || denied[strings.ToLower(lexer.Config().Name)] || !bucket.take() {
 		return nil
 	}
 	src := strings.Split(text, "\n")
@@ -198,28 +298,27 @@ func Code(lang, text string, limit time.Duration) [][]Seg {
 			shown[i] = l
 		}
 	}
-	done := make(chan [][]Seg, 1)
-	go func() {
-		defer func() {
-			if recover() != nil {
-				done <- nil
-			}
-		}()
+	start := time.Now()
+	out, _ := withLimit(limit, func() [][]Seg {
+		tokenised.Add(1)
 		lines, err := tokenLines(chroma.Coalesce(lexer), styles.Get("monokai"), strings.Join(shown, "\n")+"\n")
 		if err != nil {
-			done <- nil
-			return
+			return nil
 		}
-		out := make([][]Seg, len(src))
+		res := make([][]Seg, len(src))
 		for i, l := range src {
-			out[i] = segsFor(lines, i, l)
+			res[i] = segsFor(lines, i, l)
 		}
-		done <- out
-	}()
-	select {
-	case out := <-done:
-		return out
-	case <-time.After(limit):
-		return nil
+		return res
+	})
+	bucket.spend(time.Since(start))
+	if out != nil {
+		codeMu.Lock()
+		if len(codeCache) >= maxCodeCache {
+			codeCache = map[[32]byte][][]Seg{}
+		}
+		codeCache[key] = out
+		codeMu.Unlock()
 	}
+	return out
 }

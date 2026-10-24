@@ -179,11 +179,16 @@ func TestCodeLeavesUnknownAndRiskyLanguagesPlain(t *testing.T) {
 			t.Errorf("%q: got %v after %v; want nothing, quickly", lang, got != nil, time.Since(start))
 		}
 	}
-	if Code("go", strings.Repeat("a := 1\n", 5), time.Nanosecond) != nil {
-		t.Log("a tiny limit may or may not finish; only checking that it returns")
+	if got := Code("go", strings.Repeat("a := 1\n", 5), time.Nanosecond); got != nil {
+		t.Errorf("a limit that cannot be met gives nothing, got %d lines", len(got))
 	}
-	if got := Code("yang", "/* a\n/* b */", time.Second); got != nil && len(got) == 0 {
-		t.Error("a panicking lexer must not crash")
+	// a lexer that panics must neither crash nor return garbage
+	if got := Code("yang", "/* a\n/* b */", time.Second); got != nil {
+		for i, l := range got {
+			if join(l) != []string{"/* a", "/* b */"}[i] && l != nil {
+				t.Errorf("garbage from a panicking lexer: %+v", got)
+			}
+		}
 	}
 }
 
@@ -191,5 +196,70 @@ func TestCodeLongLinesStayPlain(t *testing.T) {
 	lines := Code("go", "x := 1\n"+strings.Repeat("a", 500)+"\ny := 2", time.Second)
 	if lines == nil || lines[1] != nil || lines[0] == nil || lines[2] == nil {
 		t.Errorf("only the long line stays plain: %v", lines)
+	}
+}
+
+func TestCodeRefusesLanguageNamesThatCouldBeAttacks(t *testing.T) {
+	for _, lang := range []string{strings.Repeat("a", 100000), strings.Repeat("a", 33), "go\x00", "变量", "../etc", "a b", "go;rm"} {
+		start := time.Now()
+		if Code(lang, "x := 1", time.Second) != nil || time.Since(start) > 100*time.Millisecond {
+			t.Errorf("%.20q (%d bytes): must be refused at once (took %v)", lang, len(lang), time.Since(start))
+		}
+	}
+	for _, lang := range []string{"go", "c++", "c#", "objective-c", "f#", "Go", "shell-session", "x86asm", "vim"} {
+		if !validLang(lang) {
+			t.Errorf("%q is an ordinary language name", lang)
+		}
+	}
+}
+
+func TestLexersThatEmbedOthersAreNotUsed(t *testing.T) {
+	if Code("markdown", "```jungle\nproject.manifest = manifest.xml\n```", 10*time.Second) != nil {
+		t.Error("markdown hands code to other lexers, including the ones we refuse")
+	}
+}
+
+func TestAStuckLexerKeepsItsSlotAndNewWorkIsRefusedWhenTheyAreAllTaken(t *testing.T) {
+	release := make(chan struct{})
+	stuck := func() int { <-release; return 1 }
+	for i := 0; i < maxRunning; i++ {
+		if _, ok := withLimit(20*time.Millisecond, stuck); ok {
+			t.Fatal("a lexer that does not finish must time out")
+		}
+	}
+	if _, ok := withLimit(time.Second, func() int { return 1 }); ok {
+		t.Error("with every slot held by a stuck lexer, new work is refused")
+	}
+	if Code("go", "x := 1 // "+t.Name(), time.Second) != nil {
+		t.Error("Code is refused too")
+	}
+	if ForFile(fileOf(t, "a.go", "@@ -1,1 +1,1 @@\n-a := 1\n+a := 2\n")) != nil {
+		t.Error("and so are diffs")
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if v, ok := withLimit(time.Second, func() int { return 7 }); ok && v == 7 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Error("slots must come back when the lexers finally end")
+}
+
+func TestCodeShortOnBudgetIsRefused(t *testing.T) {
+	bucket.set(0)
+	t.Cleanup(func() { bucket.set(codeBudget) })
+	if Code("go", "x := 1 // "+t.Name(), time.Second) != nil {
+		t.Error("an exhausted time budget refuses new work")
+	}
+}
+
+func TestCodeResultsAreCached(t *testing.T) {
+	tokenised.Store(0)
+	text := "func cached() {}" + t.Name() + time.Now().String()
+	a, b := Code("go", text, time.Second), Code("go", text, time.Second)
+	if a == nil || b == nil || tokenised.Load() != 1 {
+		t.Errorf("tokenised %d times", tokenised.Load())
 	}
 }

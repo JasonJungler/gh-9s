@@ -3,6 +3,7 @@
 package markdown
 
 import (
+	"container/list"
 	"crypto/sha256"
 	"fmt"
 	"regexp"
@@ -61,11 +62,17 @@ var (
 var (
 	parses     int // how many times Render really parsed; for the tests
 	cacheMu    sync.Mutex
-	cache      = map[[32]byte]Doc{}
+	cache      = map[[32]byte]*list.Element{} // value: *cacheEntry; least recently used at the back
+	cacheOrder = list.New()
 	blockStart = regexp.MustCompile(`^ {0,3}(?:>[ ]?|[-*+] |[0-9]{1,9}[.)] )`)
 )
 
-const maxCache = 64
+const maxCache = 512
+
+type cacheEntry struct {
+	key [32]byte
+	doc Doc
+}
 
 // limitNesting keeps at most maxDepth block markers (">", "-", "1.") at the start of a line and
 // at most 64 columns of indent: deeper nesting costs the parser quadratic time and is shown flat.
@@ -186,17 +193,23 @@ func Render(src string, width int) Doc {
 	}
 	key := sha256.Sum256([]byte(fmt.Sprint(width, lipgloss.ColorProfile()) + "\x00" + src))
 	cacheMu.Lock()
-	if d, ok := cache[key]; ok {
+	if e, ok := cache[key]; ok {
+		cacheOrder.MoveToFront(e)
+		d := e.Value.(*cacheEntry).doc
 		cacheMu.Unlock()
 		return d
 	}
 	cacheMu.Unlock()
 	doc := render(src, width)
 	cacheMu.Lock()
-	if len(cache) >= maxCache {
-		cache = map[[32]byte]Doc{}
+	if _, ok := cache[key]; !ok {
+		cache[key] = cacheOrder.PushFront(&cacheEntry{key, doc})
+		for cacheOrder.Len() > maxCache {
+			last := cacheOrder.Back()
+			delete(cache, last.Value.(*cacheEntry).key)
+			cacheOrder.Remove(last)
+		}
 	}
-	cache[key] = doc
 	cacheMu.Unlock()
 	return doc
 }
