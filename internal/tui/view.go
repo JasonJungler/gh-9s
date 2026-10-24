@@ -147,6 +147,9 @@ func (m model) View() string {
 		b.WriteString(m.promptBox() + "\n")
 	}
 
+	if m.helpOpen {
+		return b.String() + m.helpView()
+	}
 	if m.dlg != nil {
 		return b.String() + m.boxed(m.dialogView())
 	}
@@ -335,7 +338,7 @@ func (m model) footer() string {
 	if m.previewShown() {
 		keys += "  J/K scroll pane  p hide pane"
 	}
-	keys += "  R refresh  q quit"
+	keys += "  ? help  R refresh  q quit"
 	line := m.status
 	if line == "" && m.note != "" {
 		line = styDim.Render(m.note)

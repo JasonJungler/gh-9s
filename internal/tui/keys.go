@@ -18,6 +18,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.askIcons {
 		return m.iconAskKey(k)
 	}
+	if m.helpOpen {
+		return m.helpKeyPress(k)
+	}
 	if m.dlg != nil {
 		return m.dialogKey(k)
 	}
@@ -41,6 +44,10 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.status = ""
+	if k.String() == "?" {
+		m.helpOpen, m.helpTop = true, 0
+		return m, nil
+	}
 	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox) {
 		m.previewOff = !m.previewOff // for this session; the setting `preview` is the lasting choice
 		if m.previewOff {

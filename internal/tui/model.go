@@ -123,8 +123,10 @@ type model struct {
 	prChecksBusy bool
 
 	preview    *previewState // what the pane shows and has loaded; nil until the first list is drawn
-	previewOff bool          // the pane was switched off for this session
-	paneList   bool          // this model is the list half of a split screen: its selected row fills the width
+	helpOpen   bool          // the ? overlay is showing
+	helpTop    int
+	previewOff bool // the pane was switched off for this session
+	paneList   bool // this model is the list half of a split screen: its selected row fills the width
 
 	confirm    func() tea.Cmd
 	confirmMsg string
