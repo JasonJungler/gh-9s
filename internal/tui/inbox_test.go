@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ type inboxFakes struct {
 	failing map[string]error // host -> error
 	calls   int
 	now     time.Time
+	mu      sync.Mutex // the fetches run on several goroutines
 }
 
 func inboxKeyOf(host string, tab ghcli.InboxTab) string { return fmt.Sprintf("%s/%d", host, tab) }
@@ -30,12 +32,16 @@ func installInbox(t *testing.T) *inboxFakes {
 	oldH, oldL, oldF, oldN := inboxHosts, inboxLogin, inboxFetch, inboxNow
 	inboxHosts = func() ([]string, error) { return f.hosts, nil }
 	inboxLogin = func(host string) (string, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
 		if err := f.failing[host]; err != nil {
 			return "", err
 		}
 		return "dana", nil
 	}
 	inboxFetch = func(host string, tab ghcli.InboxTab, login string) ([]ghcli.InboxItem, int, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
 		f.calls++
 		if err := f.failing[host]; err != nil {
 			return nil, 0, err
