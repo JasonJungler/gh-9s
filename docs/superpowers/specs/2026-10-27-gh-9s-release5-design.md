@@ -1,6 +1,6 @@
-# gh-9s release 5 — settings, Nerd Font icons, a preview pane
+# gh-9s release 5 — settings, Nerd Font icons, a file tree, a preview pane
 
-Three changes that build on each other, one version each, in this order: (1) a settings system and `:settings`, (2) Nerd Font icons with a first-run question, (3) a gh-dash-style layout with a preview pane on the right.
+Four changes that build on each other, one version each, in this order: (1) a settings system and `:settings`, (2) Nerd Font icons with a first-run question, (3) the diff screen's file list as a nested tree with file-type icons, (4) a gh-dash-style layout with a preview pane on the right. Parts 1 and 2 are released (v0.9.0).
 
 ## Why
 
@@ -31,7 +31,15 @@ The user finds gh-dash's UI well designed and wants gh-9s to look and feel like 
 - `:settings` is how the choice is changed later, and a command `:icons` re-runs the question.
 - Width: Nerd Font icons are treated as one column wide everywhere the layout counts columns; a layout test pins this so alignment does not drift. (Some terminals draw them two columns wide; the builder decides whether to add a setting for that. It must not break the plain set.)
 
-## Part 3 — the preview pane
+## Part 3 — the diff file tree (requested after v0.9.0)
+
+- The file list of the review screen (the left column in side-by-side mode, and the full-screen list `f` in the single-column view) becomes a nested tree of directories and files, like GitHub's file tree, for everyone (not only with icons).
+- Directories sort before files, each alphabetically. A directory that has exactly one child and that child is a directory is shown merged with it on one row (`internal/tui`, not two rows), as GitHub does. A directory row shows its aggregate `+n −m`, how many files in it are viewed, and the comment/draft counts of what is inside.
+- `j/k` move over the rows; `enter` on a file jumps the diff to it; `enter` or `space` on a directory folds or unfolds it (everything starts unfolded); `v` on a file toggles viewed, `v` on a directory toggles all files under it; folded directories hide their files from the list but the diff itself is unchanged. The cursor follows the file the diff is showing when the diff pane has the focus.
+- Plain set: indentation by two columns per level, directories drawn `name/` with a fold marker (`▾` open, `▸` folded) and files with no icon. Nerd set: folder icons (closed/open) and a file icon chosen by the file's language or kind: by extension and by special file names (`Dockerfile`, `Makefile`, `go.mod`, `package.json`, `.gitignore`, `README`, …), from the Seti-UI/devicons glyphs in the Nerd Font (Go, Python, JavaScript, TypeScript, Rust, Java, C/C++, C#, Ruby, PHP, Swift, Kotlin, Shell, Lua, Markdown, JSON, YAML, TOML, HTML, CSS/SCSS, SQL, Docker, Git, lock files, images, text, and a generic file icon for the rest), each in its language's usual colour; renamed files use the new name's icon.
+- The icon table (`internal/icons`) gets `FileIcon(path)` and `FolderIcon(open bool)`; the same glyph rules (one column, BMP private use) apply and are tested for every mapped extension.
+
+## Part 4 — the preview pane
 
 - Lists get a pane on the right that shows the selected row, like gh-dash: on the PR list, the issue list, and the inbox (every tab). The runs list and the others are not changed in this release.
 - Layout: when the terminal is at least `preview_min_columns` wide and `preview` is on, the list takes the left part and the pane the right `preview_width` percent, separated by a border; below that width the list is full width as today. `preview` is on by default for everyone. A key (the builder's choice) toggles the pane for the session; `:settings` changes it for good.
