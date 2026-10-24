@@ -26,6 +26,7 @@ func Text(s string) string {
 		case c == '\n' || c == '\t':
 			b.WriteRune(c)
 		case c < 0x20, c == 0x7f, c >= 0x80 && c <= 0x9f:
+		case c >= 0x202a && c <= 0x202e, c >= 0x2066 && c <= 0x2069: // bidi embeddings, overrides and isolates: they reorder what is shown
 		default:
 			b.WriteRune(c)
 		}

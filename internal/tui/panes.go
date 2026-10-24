@@ -78,11 +78,6 @@ func (m model) withPane(body func(model) string) string {
 	return joinPanes(list, m.previewContent(rw-2, h-2), lw, rw, h) + "\n"
 }
 
-// previewContent is the text of the pane, h lines of w columns (see previewview.go).
-func (m model) previewContent(w, h int) string {
-	return strings.Repeat("\n", max(h-1, 0))
-}
-
 // padTo pads s with spaces to w columns (never cuts).
 func padTo(s string, w int) string {
 	if d := w - ansi.StringWidth(s); d > 0 {

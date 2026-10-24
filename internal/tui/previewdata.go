@@ -48,6 +48,13 @@ type previewState struct {
 	order    []previewKey // least recently used first
 	inflight map[previewKey]bool
 	top      int // the pane's scroll
+	paneW    int // the size the pane was last drawn at, which scrolling needs
+	paneH    int
+
+	lines    []string // the selected entry laid out, kept until the entry or the width changes
+	linesKey previewKey
+	linesAt  time.Time
+	linesW   int
 }
 
 func newPreviewState() *previewState {
@@ -216,6 +223,9 @@ func (m model) previewLoaded(msg previewLoadedMsg) model {
 	}
 	delete(m.preview.inflight, msg.key)
 	msg.entry.at = previewNow()
+	if m.preview.has && m.preview.sel == msg.key {
+		m.preview.top = 0 // what the pane holds changed: start at its top
+	}
 	m.preview.put(msg.key, msg.entry)
 	return m
 }

@@ -48,6 +48,13 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if (k.String() == "J" || k.String() == "K") && m.previewShown() {
+		step := previewScrollStep
+		if k.String() == "K" {
+			step = -step
+		}
+		return m.previewScroll(step), nil
+	}
 	if m.view == viewLogs {
 		if next, cmd, ok := m.logKey(k); ok {
 			return next, cmd

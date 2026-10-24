@@ -27,3 +27,13 @@ func TestText(t *testing.T) {
 		}
 	}
 }
+
+func TestTextDropsBidiOverrides(t *testing.T) {
+	in := "a‮b‪c⁦d⁩e"
+	if got := Text(in); got != "abcde" {
+		t.Errorf("Text(%q) = %q", in, got)
+	}
+	if got := Text("שלום"); got != "שלום" {
+		t.Errorf("Hebrew letters must stay: %q", got)
+	}
+}

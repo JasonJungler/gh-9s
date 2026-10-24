@@ -228,3 +228,18 @@ func TestLeavingTheListDropsPendingTicks(t *testing.T) {
 		t.Error("no fetch")
 	}
 }
+
+func TestMovingAwayAndBackWithinThePauseFetchesOnce(t *testing.T) {
+	old := previewDelay
+	previewDelay = time.Millisecond
+	defer func() { previewDelay = old }()
+	f := newPreviewFixture(t, 5)
+	first := f.move(2)
+	f.move(3)
+	second := f.move(2) // back on row 3 before the first tick fired
+	f.settle(first)
+	f.settle(second)
+	if got := f.calls.Load(); got != 1 {
+		t.Errorf("%d fetches for one row, want 1", got)
+	}
+}

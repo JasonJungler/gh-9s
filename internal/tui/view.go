@@ -163,7 +163,11 @@ func (m model) View() string {
 		return b.String() + m.logBody() + m.footer()
 	}
 
-	b.WriteString(m.tableBody())
+	if m.previewShown() {
+		b.WriteString(m.withPane(model.tableBody))
+	} else {
+		b.WriteString(m.tableBody())
+	}
 	b.WriteString(m.footer())
 	return b.String()
 }
@@ -321,6 +325,9 @@ func (m model) footer() string {
 	}
 	if s, ok := screens[m.view]; ok {
 		keys = s.footer
+	}
+	if m.previewShown() {
+		keys += "  J/K scroll pane  p hide pane"
 	}
 	keys += "  R refresh  q quit"
 	line := m.status
