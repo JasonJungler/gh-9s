@@ -253,6 +253,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case infoMsg:
 		m.repo, m.branch, m.curRepo = msg.repo, msg.branch, msg.cur
+	case triggeredMsg:
+		switch {
+		case msg.runID != "":
+			m.runID, m.target = msg.runID, msg.target
+			m.graph, m.gsel, m.top, m.expanded = graph{}, 0, 0, nil
+			m.status = styOK.Render("✓ triggered " + msg.workflow + " → run " + msg.runID)
+			return m, m.push(viewGraph)
+		case msg.dispatched:
+			m.status = styErr.Render("triggered " + msg.workflow + ", but its run was not found yet: " + msg.err.Error())
+			return m, m.fetch()
+		default:
+			m.status = styErr.Render("✗ " + msg.err.Error())
+		}
+		return m, nil
 	case formReadyMsg:
 		switch {
 		case msg.err != nil:
@@ -824,7 +838,9 @@ func (m model) formKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case submit:
 		m.form = nil
-		return m, runAction("triggered "+next.workflow, next.args()...)
+		m.status = styDim.Render("triggering " + next.workflow + "…")
+		run := triggerAndFind(next)
+		return m, func() tea.Msg { return run() }
 	}
 	var cmd tea.Cmd
 	if next.pendingReload {

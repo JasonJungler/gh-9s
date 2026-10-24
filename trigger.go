@@ -85,3 +85,57 @@ func ghRunLister(user string) runLister {
 		return out, nil
 	}
 }
+
+// triggerDeps are the side effects of "trigger then watch"; tests replace them.
+var triggerDeps = struct {
+	dispatch          func(args []string) error
+	user              func(host string) (string, error)
+	lister            func(user string) runLister
+	sleep             func(time.Duration)
+	now               func() time.Time
+	timeout, interval time.Duration
+}{
+	dispatch: func(a []string) error { _, err := gh(a...); return err },
+	user:     currentUser,
+	lister:   ghRunLister,
+	sleep:    time.Sleep,
+	now:      time.Now,
+	timeout:  30 * time.Second,
+	interval: 2 * time.Second,
+}
+
+// triggeredMsg reports the outcome of a dispatch and the search for its run.
+type triggeredMsg struct {
+	workflow   string
+	target     repoRef
+	runID      string
+	dispatched bool
+	err        error
+}
+
+// triggerAndFind dispatches the form's workflow, then looks for the run it created.
+// The dispatch always happens; failing to identify the run is reported, not fatal.
+func triggerAndFind(f triggerForm) func() triggeredMsg {
+	return func() triggeredMsg {
+		d := triggerDeps
+		msg := triggeredMsg{workflow: f.workflow, target: f.target}
+		since := d.now()
+		user, userErr := d.user(f.target.Host)
+		if err := d.dispatch(f.args()); err != nil {
+			msg.err = err
+			return msg
+		}
+		msg.dispatched = true
+		if userErr != nil {
+			msg.err = fmt.Errorf("cannot look up your login: %w", userErr)
+			return msg
+		}
+		id, err := findTriggeredRun(d.lister(user), f.target, f.workflow, f.ref, user, since, d.timeout, d.interval, d.sleep)
+		if err != nil {
+			msg.err = err
+			return msg
+		}
+		msg.runID = fmt.Sprint(id)
+		return msg
+	}
+}
