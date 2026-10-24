@@ -3,6 +3,7 @@
 package ghcli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,6 +25,20 @@ func RunHost(host string, args ...string) ([]byte, error) {
 	if host != "" && host != "github.com" {
 		cmd.Env = append(os.Environ(), "GH_HOST="+host)
 	}
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+			return out, fmt.Errorf("%s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return out, err
+	}
+	return out, nil
+}
+
+// RunInput is Run with stdin: used for requests whose body is JSON, so no text travels in an argument.
+func RunInput(stdin []byte, args ...string) ([]byte, error) {
+	cmd := exec.Command("gh", args...)
+	cmd.Stdin = bytes.NewReader(stdin)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
