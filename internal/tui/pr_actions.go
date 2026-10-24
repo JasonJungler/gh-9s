@@ -40,7 +40,8 @@ type prAction struct {
 type prActionDoneMsg struct {
 	text       string // what was done, for the status line
 	err        error
-	sentDrafts string // the drafts-file key of a PR whose drafts went out with the review
+	sentDrafts string         // the drafts-file key of a PR whose drafts went out with the review
+	sent       []drafts.Draft // exactly the drafts that went out
 }
 
 func (m model) prLabel() string { return displayRef(m.curTarget()) + "#" + m.pr }
@@ -91,7 +92,7 @@ func submitInline(p prAction) tea.Cmd {
 			cs[i] = ghcli.InlineComment{Path: d.Path, Line: d.Line, Side: d.Side, StartLine: d.StartLine, Body: d.Body}
 		}
 		err = submitReviewInline(p.target, p.number, p.head, p.kind, p.body, cs)
-		return prActionDoneMsg{text: reviewVerb(p.kind) + " " + p.label + fmt.Sprintf(" with %d inline comments", len(cs)), err: err, sentDrafts: p.draftsKey}
+		return prActionDoneMsg{text: reviewVerb(p.kind) + " " + p.label + fmt.Sprintf(" with %d inline comments", len(cs)), err: err, sentDrafts: p.draftsKey, sent: p.drafts}
 	}
 }
 
@@ -153,6 +154,9 @@ func init() {
 		m.pending = nil
 		if !r.ok || p == nil {
 			return m, nil
+		}
+		if len(p.drafts) > 0 {
+			m.sendingKey = p.draftsKey // no second review while this one is on its way
 		}
 		return m, submitReview(*p)
 	}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/MurabitoB/gh-9s/internal/drafts"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 )
@@ -204,5 +206,172 @@ func TestARangeDraftGoesOutAsARange(t *testing.T) {
 	}
 	if c := f.calls[0].comments[0]; c.StartLine != 10 || c.Line != 12 || c.Side != "RIGHT" {
 		t.Errorf("comment = %+v; want lines 10–12", c)
+	}
+}
+
+// ---- findings of the review of release 3d ----
+
+func TestDraftsNeverFollowYouToAnotherPR(t *testing.T) {
+	installSubmit(t)
+	installDiff(t, reviewDiff, nil)
+	installThreads(t, nil, nil)
+	m := model{view: viewDiff, pr: "482", target: acme, width: 100, height: 30} // no drafts file
+	next, _ := m.Update(m.fetch()())
+	m = goToRow(t, next.(model), `+ import "log"`)
+	m = comment(m, "c", "for 482 only")
+	m.pr = "483" // back, then the diff of the next PR, which touches the same line
+	next, _ = m.Update(m.fetch()())
+	if n := len(diffSt(next.(model)).drafts); n != 0 {
+		t.Errorf("%d draft(s) of PR 482 are on PR 483", n)
+	}
+	zero := model{view: viewDiff, pr: "482", width: 100, height: 30} // repo not resolved yet: no key at all
+	next, _ = zero.Update(zero.fetch()())
+	z := goToRow(t, next.(model), `+ import "log"`)
+	z = comment(z, "c", "x")
+	z.pr = "483"
+	next, _ = z.Update(z.fetch()())
+	if n := len(diffSt(next.(model)).drafts); n != 0 {
+		t.Errorf("without a repo, %d draft(s) still crossed to another PR", n)
+	}
+}
+
+func TestDraftsWrittenForAnOlderCommitAreNotSentUntilYouSayYes(t *testing.T) {
+	f := installSubmit(t)
+	f.head = "aaaaaaa1111111"
+	m, path := draftModel(t, 100, reviewDiff)
+	m = goToRow(t, m, `+ import "log"`)
+	m = comment(m, "c", "about the log import")
+	if got := stored(t, path); len(got) != 1 || got[0].Head != "aaaaaaa1111111" {
+		t.Fatalf("a draft remembers its commit: %+v", got)
+	}
+	f.head = "bbbbbbb2222222" // the author pushed
+	next, _ := m.Update(m.fetch()())
+	m = next.(model)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "older commit") {
+		t.Errorf("a draft from an older commit is marked:\n%s", v)
+	}
+	m = keyAll(m, "r")
+	if m.dlg != nil || !strings.Contains(m.status, "older commit") || len(f.calls) != 0 {
+		t.Fatalf("dialog=%v status=%q; stale drafts block the review until adopted", m.dlg != nil, m.status)
+	}
+	m = keys(m, "A")
+	m = keyAll(m, "r", "enter", "y")
+	if len(f.calls) != 1 || f.calls[0].head != "bbbbbbb2222222" {
+		t.Errorf("calls = %+v", f.calls)
+	}
+}
+
+func TestADiffAndHeadReadAcrossAPushAreNotTrusted(t *testing.T) {
+	f := installSubmit(t)
+	heads := []string{"aaaaaaa1111111", "bbbbbbb2222222"}
+	n := 0
+	prHead = func(ghcli.RepoRef, string) (string, error) { n++; return heads[min(n-1, 1)], nil }
+	m, _ := draftModel(t, 100, reviewDiff)
+	if h := diffSt(m).head; h != "" {
+		t.Errorf("head = %q; the head changed while the diff was being fetched, so it is unknown", h)
+	}
+	m = goToRow(t, m, `+ import "log"`)
+	m = comment(m, "c", "x")
+	m = keyAll(m, "r")
+	if m.dlg != nil || !strings.Contains(m.status, "reload") || len(f.calls) != 0 {
+		t.Errorf("dialog=%v status=%q", m.dlg != nil, m.status)
+	}
+}
+
+func TestOnlyOneReviewIsInFlightAndOnlyTheSentDraftsAreCleared(t *testing.T) {
+	m, f, path := reviewWithDrafts(t)
+	key, _ := m.draftsKey()
+	m.sendingKey = key
+	m = keyAll(m, "r")
+	if m.dlg != nil || !strings.Contains(m.status, "being sent") || len(f.calls) != 0 {
+		t.Errorf("dialog=%v status=%q; a second review while one is in flight is refused", m.dlg != nil, m.status)
+	}
+	m.sendingKey = ""
+	st := diffSt(m)
+	sent, later := st.drafts[:1], st.drafts[1:]
+	m = m.clearSentDrafts(key, sent)
+	if got := diffSt(m).drafts; len(got) != 1 || got[0] != later[0] {
+		t.Errorf("drafts left = %+v; want only the one that was not sent", got)
+	}
+	if got := stored(t, path); len(got) != 1 || got[0] != later[0] {
+		t.Errorf("stored = %+v", got)
+	}
+}
+
+func TestACommentIsCleanedBeforeItIsKept(t *testing.T) {
+	m, path := draftModel(t, 100, reviewDiff)
+	m = goToRow(t, m, `+ import "log"`)
+	m = comment(m, "c", "bad \x1b[31m text\r")
+	got := stored(t, path)
+	if len(got) != 1 || strings.ContainsAny(got[0].Body, "\x1b\r") {
+		t.Errorf("stored %+v; control characters must not stop the draft from being saved", got)
+	}
+}
+
+func TestDraftsNotYetOnDiskSurviveARefetch(t *testing.T) {
+	m, _ := draftModel(t, 100, reviewDiff)
+	st := diffSt(m)
+	st.drafts = []drafts.Draft{{Path: "main.go", Line: 2, Side: "RIGHT", Body: "unsaved", Head: st.head}} // a save that failed
+	m = m.withScreenData(viewDiff, st)
+	next, _ := m.Update(m.fetch()())
+	if got := diffSt(next.(model)).drafts; len(got) != 1 || got[0].Body != "unsaved" {
+		t.Errorf("drafts after R = %+v; memory and file are merged, not replaced", got)
+	}
+}
+
+func TestTheReviewGoesToTheRepoOfTheCurrentDirectoryWhenThereIsNoTarget(t *testing.T) {
+	f := installSubmit(t)
+	ghe := ghcli.RepoRef{Host: "ghe.corp", Owner: "acme", Name: "api"}
+	installDiff(t, reviewDiff, nil)
+	installThreads(t, nil, nil)
+	m := model{view: viewDiff, pr: "482", curRepo: ghe, width: 100, height: 30}
+	next, _ := m.Update(m.fetch()())
+	m = goToRow(t, next.(model), `+ import "log"`)
+	m = comment(m, "c", "x")
+	m = keyAll(m, "r", "enter", "y")
+	if len(f.calls) != 1 || f.calls[0].repo != ghe {
+		t.Errorf("calls = %+v; want the Enterprise repo of the current directory", f.calls)
+	}
+	none := model{view: viewDiff, pr: "482", width: 100, height: 30}
+	next, _ = none.Update(none.fetch()())
+	none = goToRow(t, next.(model), `+ import "log"`)
+	none = comment(none, "c", "x")
+	f.calls = nil
+	none = keyAll(none, "r")
+	if none.dlg != nil || len(f.calls) != 0 || none.status == "" {
+		t.Errorf("without a known repo a review can't start: dialog=%v status=%q", none.dlg != nil, none.status)
+	}
+}
+
+func TestARangeAcrossHunksIsRefused(t *testing.T) {
+	m, path := draftModel(t, 100, reviewDiff)
+	m = goToRow(t, m, `+ import "log"`) // first hunk
+	m = keys(m, "V")
+	m = goToRow2(t, m, "+ var x = 2") // second hunk
+	m = keyAll(m, "c")
+	if m.dlg != nil || !strings.Contains(m.status, "hunk") || len(stored(t, path)) != 0 {
+		t.Errorf("dialog=%v status=%q; GitHub rejects a comment across hunks", m.dlg != nil, m.status)
+	}
+}
+
+// goToRow2 moves the cursor to a row while a range is open (goToRow starts with g, which would not
+// cancel the range, but this keeps the intent clear).
+func goToRow2(t *testing.T, m model, subs ...string) model {
+	t.Helper()
+	row := rowWith(t, m, subs...)
+	for diffSt(m).cur < row {
+		m = keys(m, "j")
+	}
+	return m
+}
+
+func TestSearchPutsTheCursorOnTheMatch(t *testing.T) {
+	m, _ := draftModel(t, 100, reviewDiff)
+	m = keys(m, "/", "l", "o", "g")
+	next, _ := m.Update(k("enter"))
+	m = next.(model)
+	st := diffSt(m)
+	if len(m.matches) == 0 || st.cur != m.matches[m.mi] {
+		t.Errorf("cursor row %d, match row %v: a comment would land on the wrong line", st.cur, m.matches)
 	}
 }

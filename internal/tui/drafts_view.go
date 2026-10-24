@@ -9,6 +9,7 @@ import (
 	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/drafts"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/safe"
 )
 
 // pendingDraft is a comment being written in a dialog: where it goes and for which PR screen.
@@ -27,12 +28,12 @@ func init() {
 		if m.view != viewDiff || m.itemID(m.pr) != pd.id {
 			return m, nil // the screen moved on while the dialog was open
 		}
-		body := strings.TrimSpace(r.text)
-		if body == "" {
+		text := safe.Text(r.text) // control characters and escape sequences never make it into a draft
+		if strings.TrimSpace(text) == "" {
 			m.status = styDim.Render("empty comment — nothing added")
 			return m, nil
 		}
-		pd.d.Body = r.text
+		pd.d.Body = text
 		return m.addDraft(pd.d), nil
 	}
 	dialogHandlers["diff.discard"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
@@ -72,18 +73,27 @@ func (m model) persistDrafts() model {
 }
 
 // draftThreads shows drafts as threads by "you (draft)", so every layout can draw them like comments.
-func draftThreads(ds []drafts.Draft) []ghcli.Thread {
+func draftThreads(ds []drafts.Draft, head string) []ghcli.Thread {
 	out := make([]ghcli.Thread, 0, len(ds))
 	for _, d := range ds {
+		who := "you (draft)"
+		if staleDraft(d, head) {
+			who = "you (draft, older commit)"
+		}
 		out = append(out, ghcli.Thread{Path: d.Path, Line: d.Line, Side: d.Side,
-			Comments: []ghcli.ThreadComment{{Author: "you (draft)", Body: d.Body}}})
+			Comments: []ghcli.ThreadComment{{Author: who, Body: d.Body}}})
 	}
 	return out
 }
 
+// staleDraft says whether a draft was written against another commit than the one on screen.
+func staleDraft(d drafts.Draft, head string) bool {
+	return d.Head != "" && head != "" && d.Head != head
+}
+
 // allThreads is what is drawn under the code: other people's comments, then the drafts.
 func allThreads(st diffState) []ghcli.Thread {
-	return append(append([]ghcli.Thread(nil), st.threads...), draftThreads(st.drafts)...)
+	return append(append([]ghcli.Thread(nil), st.threads...), draftThreads(st.drafts, st.head)...)
 }
 
 // reconcileDrafts splits drafts into those whose lines are still in the diff and those that are not.
@@ -147,6 +157,7 @@ func (m model) rebuildDiff() model {
 // addDraft keeps a new draft, saves it, and shows it.
 func (m model) addDraft(d drafts.Draft) model {
 	st, _ := m.screenData(viewDiff).(diffState)
+	d.Head = st.head
 	st.drafts = append(append([]drafts.Draft(nil), st.drafts...), d)
 	m = m.withScreenData(viewDiff, st)
 	m = m.persistDrafts()
@@ -187,6 +198,8 @@ func draftKeys(m model, st diffState, key string) (model, tea.Cmd, bool) {
 		return m.removeDraftAtCursor(st), nil, true
 	case "r":
 		return m.startDiffReview(st), nil, true
+	case "A":
+		return m.adoptDrafts(st), nil, true
 	case "X":
 		if len(st.drafts) == 0 {
 			m.status = styDim.Render("no drafts")
@@ -214,6 +227,10 @@ func (m model) startDraft(st diffState, oldSide bool) model {
 	}
 	if first.Path != last.Path || first.Side != last.Side {
 		m.status = styErr.Render("a range has to stay on one side of one file: pick lines on the same side (C for the old side)")
+		return m
+	}
+	if hunkOf(st, rows[0]) != hunkOf(st, rows[1]) {
+		m.status = styErr.Render("a range can't cross hunks: GitHub only takes lines of one hunk")
 		return m
 	}
 	d := drafts.Draft{Path: last.Path, Line: last.Line, Side: last.Side}
@@ -262,22 +279,40 @@ func inRange(st diffState, i int) bool {
 	return st.anchored && i >= min(st.anchor, st.cur) && i <= max(st.anchor, st.cur)
 }
 
-// loadDrafts is the drafts to show for a freshly fetched diff: the saved ones whose lines are still
-// in it (or, with no file, the ones kept in memory), and a note when some had to be dropped.
+// loadDrafts is the drafts to show for a freshly fetched diff: the saved ones plus the ones only
+// kept in memory (a save may have failed) of this same PR, those whose lines are still in the diff,
+// and a note when some had to be dropped. Drafts of another PR never come along.
 func (m model) loadDrafts(old, st diffState) ([]drafts.Draft, string) {
 	key, ok := m.draftsKey()
-	saved := old.drafts
+	var saved []drafts.Draft
 	if ok && m.drafts != nil {
 		_, saved = m.drafts.Get(key)
 	}
-	kept, dropped := reconcileDrafts(saved, st.d)
+	merged := append([]drafts.Draft(nil), saved...)
+	if old.id == st.id {
+		for _, d := range old.drafts {
+			if !hasDraft(merged, d) {
+				merged = append(merged, d)
+			}
+		}
+	}
+	kept, dropped := reconcileDrafts(merged, st.d)
+	if ok && m.drafts != nil && (len(dropped) > 0 || len(kept) != len(saved)) {
+		_ = m.drafts.Put(key, st.head, kept) // also heals a save that failed earlier
+	}
 	if len(dropped) == 0 {
 		return kept, ""
 	}
-	if ok {
-		_ = m.drafts.Put(key, st.head, kept)
-	}
 	return kept, fmt.Sprintf("%d draft(s) dropped: their lines are no longer in the diff", len(dropped))
+}
+
+func hasDraft(ds []drafts.Draft, d drafts.Draft) bool {
+	for _, x := range ds {
+		if x == d {
+			return true
+		}
+	}
+	return false
 }
 
 // threadTextRows draws a thread as plain rows for the single-column view.
@@ -298,11 +333,30 @@ func threadTextRows(t ghcli.Thread) []string {
 
 // startDiffReview opens the review dialogs from the diff screen; the drafts go with the review.
 func (m model) startDiffReview(st diffState) model {
-	if st.head == "" {
+	t := m.curTarget()
+	switch {
+	case m.sendingKey != "":
+		m.status = styDim.Render("a review is being sent: wait for it to finish")
+		return m
+	case t.Owner == "" || t.Name == "":
+		m.status = styErr.Render("don't know which repo this PR is in: nothing was sent")
+		return m
+	case st.head == "":
 		m.status = styErr.Render("can't tell which commit this diff is of: reload it (R) before reviewing")
 		return m
 	}
+	stale := 0
+	for _, d := range st.drafts {
+		if staleDraft(d, st.head) {
+			stale++
+		}
+	}
+	if stale > 0 {
+		m.status = styErr.Render(fmt.Sprintf("%d draft(s) were written for an older commit: A keeps them for this one, x or X removes them", stale))
+		return m
+	}
 	m, p := m.startPRAction()
+	p.target = t
 	p.drafts = append([]drafts.Draft(nil), st.drafts...)
 	p.head = st.head
 	p.draftsKey, _ = m.draftsKey()
@@ -313,17 +367,61 @@ func (m model) startDiffReview(st diffState) model {
 	}, false, nil))
 }
 
-// clearSentDrafts forgets the drafts of a PR whose review has gone out.
-func (m model) clearSentDrafts(key string) model {
+// adoptDrafts keeps the drafts written for an older commit, now for the one on screen.
+func (m model) adoptDrafts(st diffState) model {
+	n := 0
+	next := make([]drafts.Draft, len(st.drafts))
+	for i, d := range st.drafts {
+		if staleDraft(d, st.head) {
+			d.Head = st.head
+			n++
+		}
+		next[i] = d
+	}
+	st.drafts = next
+	m = m.withScreenData(viewDiff, st)
+	m = m.persistDrafts()
+	m.status = styDim.Render(fmt.Sprintf("%d draft(s) kept for this commit — check them before sending", n))
+	return m.rebuildDiff()
+}
+
+// clearSentDrafts forgets the drafts that went out with a review (and only those: ones written
+// while it was on its way stay).
+func (m model) clearSentDrafts(key string, sent []drafts.Draft) model {
+	without := func(ds []drafts.Draft) []drafts.Draft {
+		var rest []drafts.Draft
+		for _, d := range ds {
+			if !hasDraft(sent, d) {
+				rest = append(rest, d)
+			}
+		}
+		return rest
+	}
 	if cur, ok := m.draftsKey(); ok && cur == key {
 		if st, ok := m.screenData(viewDiff).(diffState); ok {
-			st.drafts = nil
+			st.drafts = without(st.drafts)
 			m = m.withScreenData(viewDiff, st)
 		}
 	}
-	_ = m.drafts.Delete(key)
+	if m.drafts != nil {
+		head, saved := m.drafts.Get(key)
+		_ = m.drafts.Put(key, head, without(saved))
+	}
 	if cur, ok := m.draftsKey(); ok && cur == key && m.view == viewDiff {
 		m = m.rebuildDiff()
 	}
 	return m
+}
+
+// hunkOf is the display row of the hunk header a row belongs to, or -1.
+func hunkOf(st diffState, row int) int {
+	for i := row; i >= 0; i-- {
+		if st.sb != nil && i < len(st.sb.lines) && st.sb.lines[i].hunk {
+			return i
+		}
+		if st.sb == nil && i < len(st.lines) && st.lines[i].kind == dHunk {
+			return i
+		}
+	}
+	return -1
 }

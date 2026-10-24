@@ -88,6 +88,7 @@ type model struct {
 	pendingMerge *mergeAction              // the merge being collected through dialogs
 	prefsFile    string                    // where small remembered choices live ("" = do not persist)
 	drafts       *drafts.Store             // inline review comments not sent yet, kept on disk
+	sendingKey   string                    // the PR whose review is being sent right now
 	pendingDraft *pendingDraft             // a comment being written in a dialog
 	pending      *prAction                 // the PR action being collected through dialogs
 	dlg          *dialog                   // a question being asked (text, choice or yes/no)

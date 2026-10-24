@@ -32,6 +32,7 @@ type diffState struct {
 
 	usrc      []int          // source key of every unified row, to keep the place when the layout changes
 	sb        *sbLayout      // the side-by-side layout for the current width; nil while unified
+	id        string         // which PR this state is of, so nothing carries over to another
 	drafts    []drafts.Draft // inline comments written but not sent
 	anchored  bool           // a range is being selected from row anchor to the cursor
 	anchor    int
@@ -94,6 +95,9 @@ func init() {
 				}()
 				text, err := fetchDiff(tg, number)
 				th, head := <-ch, <-headCh
+				if after, _ := prHead(tg, number); after != head {
+					head = "" // the PR moved while the diff was fetched: which commit it is of is unknown
+				}
 				if err != nil {
 					return screenMsg{view: viewDiff, id: id, err: err}
 				}
@@ -105,10 +109,7 @@ func init() {
 			p := msg.data.(diffPayload)
 			old, _ := m.screenData(viewDiff).(diffState)
 			st := diffState{d: p.d, threads: p.threads, sbs: old.sbs}
-			st.head = p.head
-			if pd, ok := m.screenData(viewPRDetail).(prDetailState); ok && st.head == "" {
-				st.head = pd.d.HeadSHA
-			}
+			st.head, st.id = p.head, m.itemID(m.pr)
 			if st.head != "" && st.head == old.head {
 				st.viewed = old.viewed
 			}
@@ -139,11 +140,11 @@ func init() {
 			if draftNote != "" {
 				m.status = styErr.Render(draftNote)
 			}
-			return m.syncDiffLayout()
+			return m.syncDiffLayout().keepCursorVisible()
 		},
 		key:    diffKey,
 		body:   diffBody,
-		footer: "j/k scroll  ]/[ file  }/{ hunk  tab files  v viewed  s side-by-side  / search  n/N  o browser",
+		footer: "j/k move  c/C comment  V range  x/X drafts  r review  ]/[ file  }/{ hunk  tab files  v viewed  s layout  / search  o browser",
 	})
 }
 

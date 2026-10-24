@@ -148,7 +148,10 @@ func TestTabMovesBetweenTheListAndTheDiff(t *testing.T) {
 
 func TestVMarksAFileViewedAndTheMarkSurvivesARefetchOfTheSameHead(t *testing.T) {
 	m := reviewModel(t, 140, reviewDiff, nil)
-	m = m.withScreenData(viewPRDetail, prDetailState{d: ghcli.PRDetail{HeadSHA: "abc"}})
+	old := prHead
+	t.Cleanup(func() { prHead = old })
+	head := "aaaaaaa1111111"
+	prHead = func(ghcli.RepoRef, string) (string, error) { return head, nil }
 	next, _ := m.Update(m.fetch()())
 	m = next.(model)
 	m = keys(m, "v")
@@ -159,7 +162,7 @@ func TestVMarksAFileViewedAndTheMarkSurvivesARefetchOfTheSameHead(t *testing.T) 
 	if v := ansi.Strip(next.(model).View()); !strings.Contains(v, "✓") {
 		t.Errorf("a refetch at the same head keeps the marks:\n%s", v)
 	}
-	m = m.withScreenData(viewPRDetail, prDetailState{d: ghcli.PRDetail{HeadSHA: "def"}})
+	head = "bbbbbbb2222222"
 	next, _ = m.Update(m.fetch()())
 	if v := ansi.Strip(next.(model).View()); strings.Contains(v, "✓") {
 		t.Errorf("a new head commit clears the marks:\n%s", v)

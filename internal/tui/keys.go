@@ -472,6 +472,11 @@ func (m *model) gotoMatch(i int) {
 	m.mi = i
 	m.follow = false
 	m.top = min(max(m.matches[i]-2, 0), m.maxTop())
+	if m.view == viewDiff { // the cursor goes where the match is, so a comment lands on that line
+		if st, ok := m.screenData(viewDiff).(diffState); ok && len(st.d.Files) > 0 {
+			*m = m.withScreenData(viewDiff, setCursor(st, m.matches[i]))
+		}
+	}
 }
 
 // selectedNodeID is the ID of the selected graph node ("" if none).

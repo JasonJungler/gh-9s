@@ -15,7 +15,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		if m.view == viewDiff {
-			m = m.syncDiffLayout()
+			m = m.syncDiffLayout().keepCursorVisible()
 		}
 	case imageDoneMsg:
 		if msg.err != nil {
@@ -71,13 +71,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mergeInfoMsg:
 		return m.mergeInfo(msg), nil
 	case prActionDoneMsg:
+		m.sendingKey = ""
 		if msg.err != nil {
 			m.status = styErr.Render("✗ " + msg.err.Error())
 			return m, nil
 		}
 		m.status = styOK.Render("✓ " + msg.text)
 		if msg.sentDrafts != "" {
-			m = m.clearSentDrafts(msg.sentDrafts)
+			m = m.clearSentDrafts(msg.sentDrafts, msg.sent)
 		}
 		return m, m.fetch() // the PR changed: reload what is on screen
 	case dialogResultMsg:
