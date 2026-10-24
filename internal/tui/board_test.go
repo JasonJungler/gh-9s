@@ -914,3 +914,73 @@ func TestBoardColumnsShrinkAndSessionMemoryAndP(t *testing.T) {
 		t.Error("columns were not kept for the session")
 	}
 }
+
+func TestWrapTitleKeepsWordsAndCutsLongOnes(t *testing.T) {
+	cases := []struct {
+		title string
+		w     int
+		want  []string
+	}{
+		{"short", 20, []string{"short", ""}},
+		{"fix the login page now", 12, []string{"fix the", "login page …"}},
+		{"Supercalifragilisticexpialidocious_long", 10, []string{"Supercali…", ""}},
+		{"a Supercalifragilisticexpialidocious b", 10, []string{"a", "Supercali…"}},
+		{"日本語のタイトルがとても長い場合", 8, []string{"日本語の", ""}},
+	}
+	for _, c := range cases {
+		got := wrapTitle(c.title, c.w)
+		if c.title == "日本語のタイトルがとても長い場合" {
+			if ansi.StringWidth(got[0]) > c.w || ansi.StringWidth(got[1]) > c.w {
+				t.Errorf("wide chars overflow: %q", got)
+			}
+			continue
+		}
+		if got[0] != c.want[0] || got[1] != c.want[1] {
+			t.Errorf("wrapTitle(%q,%d) = %q, want %q", c.title, c.w, got, c.want)
+		}
+	}
+}
+
+func TestColumnHeaderKeepsTheCountAndTheFooterListsTheKeys(t *testing.T) {
+	f := installBoard(t)
+	f.project = ghcli.Project{Title: "P", StatusOrder: []string{"A very long status name that cannot fit", "Another quite long status name", "Third long status name here"}, Total: 1,
+		Items: []ghcli.ProjectItem{projItem("Issue", "acme/app", 1, "x", "A very long status name that cannot fit", "OPEN")}}
+	m := pinsModel(t)
+	m.previewOff, m.width, m.height = true, 60, 24
+	m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "P"})
+	m = keyAll(pressTab(pressTab(openFavs(t, m), "tab"), "tab"), "enter")
+	m = keyAll(m, "b")
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "(1)") || !strings.Contains(out, "…") {
+		t.Errorf("header:\n%s", out)
+	}
+	if !strings.Contains(out, "j/k card") {
+		t.Errorf("footer:\n%s", out)
+	}
+}
+
+func TestDraftCardTextScrollsInThePane(t *testing.T) {
+	m, f := boardOn(t)
+	var long []string
+	for i := 1; i <= 60; i++ {
+		long = append(long, fmt.Sprintf("line %d of the draft", i))
+	}
+	f.project.Items[3].Body = strings.Join(long, "\n")
+	f.project.Items[4] = ghcli.ProjectItem{Type: "DraftIssue", Title: "Other idea", Draft: true, Body: "second draft text\n" + strings.Join(long, "\n")}
+	f.now = f.now.Add(10 * time.Second)
+	m.previewOff, m.width, m.height = false, 160, 30
+	m = keyAll(m, "R")
+	m = keyAll(m, "j", "j", "j") // the draft
+	if !strings.Contains(ansi.Strip(m.View()), "line 1 of the draft") {
+		t.Fatalf("no draft text:\n%s", m.View())
+	}
+	m = keyAll(m, "J", "J", "J", "J", "J", "J", "J", "J")
+	out := ansi.Strip(m.View())
+	if strings.Contains(out, "line 1 of the draft") || !strings.Contains(out, "line 25 of the draft") {
+		t.Errorf("J did not scroll the draft text:\n%s", out)
+	}
+	m = keyAll(m, "j") // the next card is a draft too: its text starts at the top
+	if !strings.Contains(ansi.Strip(m.View()), "second draft text") {
+		t.Errorf("the scroll was kept for a different draft:\n%s", m.View())
+	}
+}

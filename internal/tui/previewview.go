@@ -170,7 +170,7 @@ func (m model) previewPaneLines(width int) []string {
 // previewScroll moves the pane's text by delta lines (J and K), within the text.
 func (m model) previewScroll(delta int) model {
 	st := m.preview
-	if st == nil || !st.has || st.paneH == 0 {
+	if st == nil || (!st.has && st.draftID == "") || st.paneH == 0 {
 		return m
 	}
 	maxTop := max(0, len(m.previewPaneLines(st.paneW))-st.paneH)
@@ -226,4 +226,16 @@ func (m model) draftLines(width int) ([]string, bool) {
 		lines = append(lines[:previewTotalLines:previewTotalLines], ui.Dim.Render("… more text in the Project on GitHub (o)"))
 	}
 	return lines, true
+}
+
+// draftCardID is the id of the selected card when it is a draft on a board, else "".
+func (m model) draftCardID() string {
+	if m.view != viewBoard || !m.previewShown() {
+		return ""
+	}
+	if _, ok := m.draftLines(10); !ok {
+		return ""
+	}
+	r, _ := m.selected()
+	return r.id
 }

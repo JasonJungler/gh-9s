@@ -341,6 +341,9 @@ func (m model) footer() string {
 	if s, ok := screens[m.view]; ok {
 		keys = s.footer
 	}
+	if m.view == viewBoard && m.boardSt().colsActive(m) {
+		keys = "h/l column  j/k card  g/G first/last  enter open  b list  [/] view  f pin/unpin Project  o browser  / filter"
+	}
 	if m.previewShown() {
 		keys += "  J/K scroll pane  p hide pane"
 	}

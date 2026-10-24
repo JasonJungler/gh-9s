@@ -52,6 +52,7 @@ type previewState struct {
 	order    []previewKey             // least recently used first
 	inflight map[previewKey]time.Time // fetches under way, and since when
 	ticking  map[previewKey]bool      // a tick is on its way
+	draftID  string                   // the draft card the pane shows (a board), which has no fetch of its own
 	top      int                      // the pane's scroll
 	paneW    int                      // the size the pane was last drawn at, which scrolling needs
 	paneH    int
@@ -188,6 +189,9 @@ func (m model) previewSync() (model, tea.Cmd) {
 	}
 	st := m.preview
 	key, tg, updated, ok := m.previewTarget()
+	if did := m.draftCardID(); did != st.draftID { // another draft starts at its top
+		st.draftID, st.top = did, 0
+	}
 	if !ok {
 		if st.has {
 			st.has, st.sel = false, previewKey{}

@@ -123,16 +123,7 @@ func padCell(s string, w int) string {
 func cardLines(p ghcli.Project, i, w int, selected bool) []string {
 	it := p.Items[i]
 	r := boardRows(p, boardTab{items: []int{i}})[0]
-	var tl []string
-	if strings.TrimSpace(it.Title) != "" {
-		tl = strings.Split(ansi.Wrap(it.Title, w, ""), "\n")
-	}
-	if len(tl) > 2 {
-		tl = []string{tl[0], ansi.Truncate(strings.Join(tl[1:], " "), w, "…")}
-	}
-	for len(tl) < 2 {
-		tl = append(tl, "")
-	}
+	tl := wrapTitle(it.Title, w)
 	meta := strings.Join(nonEmpty(it.Assignees), ", ")
 	if l := strings.Join(nonEmpty(it.Labels), ","); l != "" {
 		if meta != "" {
@@ -180,8 +171,8 @@ func boardColumnsBody(m model, st boardState) string {
 	h := m.bodyHeight()
 	for c := first; c < first+k && c < len(cols); c++ {
 		col := cols[c]
-		name := fmt.Sprintf(" %s (%s)", col.name, boardCount(st.data, col.count))
-		cell := padCell(name, w)
+		count := fmt.Sprintf(" (%s)", boardCount(st.data, col.count))
+		cell := padCell(" "+ansi.Truncate(col.name, max(w-1-ansi.StringWidth(count), 1), "…")+count, w)
 		if c == st.col {
 			cell = ui.Sel.Render(cell)
 		} else {
@@ -340,4 +331,30 @@ func (m model) colsReselect(st boardState, keepID string) model {
 		}
 	}
 	return m.withScreenData(viewBoard, m.colFit(st, cols))
+}
+
+// wrapTitle fits a title on two lines of w columns: words are kept whole, a word wider than a line is cut
+// with …, and what does not fit after the second line is cut with … too.
+func wrapTitle(title string, w int) []string {
+	lines := []string{"", ""}
+	li := 0
+	words := strings.Fields(title)
+	for n, word := range words {
+		if ansi.StringWidth(word) > w {
+			word = ansi.Truncate(word, w, "…")
+		}
+		switch {
+		case lines[li] == "":
+			lines[li] = word
+		case ansi.StringWidth(lines[li])+1+ansi.StringWidth(word) <= w:
+			lines[li] += " " + word
+		case li == 0:
+			li = 1
+			lines[1] = word
+		default:
+			lines[1] = ansi.Truncate(lines[1]+" "+strings.Join(words[n:], " "), w, "…")
+			return lines
+		}
+	}
+	return lines
 }
