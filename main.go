@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -37,6 +38,7 @@ const (
 	modeCommand
 	modeConfirm
 	modeAlias
+	modeSearch
 )
 
 type model struct {
@@ -60,6 +62,9 @@ type model struct {
 	filter                        string
 	runID, jobID, jobName, jobURL string // jobs / logs scope
 	logs                          []string
+	query                         string // log search
+	matches                       []int
+	mi                            int
 	follow                        bool
 
 	graph    graph
@@ -221,6 +226,7 @@ func (m *model) push(v viewKind) tea.Cmd {
 func (m *model) switchTo(v viewKind) tea.Cmd {
 	m.view, m.tbl, m.cursor, m.top, m.filter, m.err = v, table{}, 0, 0, "", nil
 	m.logs, m.follow = nil, false
+	m.query, m.matches, m.mi = "", nil, 0
 	m.loading = true
 	return m.fetch()
 }
@@ -328,6 +334,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err == nil && m.view == viewLogs {
 			m.logs = msg.logs
+			if m.query != "" {
+				m.matches = searchMatches(m.logs, m.query)
+				m.mi = min(m.mi, max(0, len(m.matches)-1))
+			}
 			if m.follow {
 				m.top = m.maxTop()
 			}
@@ -544,6 +554,9 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.mode == modeFilter {
 			m.filter = ""
 		}
+		if m.mode == modeSearch {
+			m.query, m.matches = "", nil
+		}
 		m.mode, m.input = modeNormal, ""
 		return m, nil
 	case tea.KeyEnter:
@@ -554,6 +567,19 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter, m.cursor, m.top = in, 0, 0
 		case modeCommand:
 			return m.command(in)
+		case modeSearch:
+			m.query, m.matches, m.mi = in, searchMatches(m.logs, in), 0
+			if len(m.matches) == 0 {
+				m.status = styDim.Render("no match: " + in)
+				return m, nil
+			}
+			for i, l := range m.matches {
+				if l >= m.top {
+					m.mi = i
+					break
+				}
+			}
+			m.gotoMatch(m.mi)
 		case modeAlias:
 			if err := m.favs.setAlias(m.aliasFor, in); err != nil {
 				m.status = styErr.Render("✗ " + err.Error())
@@ -576,6 +602,9 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modeFilter {
 		m.filter, m.cursor, m.top = m.input, 0, 0
+	}
+	if m.mode == modeSearch {
+		m.query, m.matches, m.mi = m.input, searchMatches(m.logs, m.input), 0
 	}
 	return m, nil
 }
@@ -902,6 +931,18 @@ func (m model) logKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		m.top = 0
 	case "G", "end":
 		m.top = m.maxTop()
+	case "/":
+		m.mode, m.input = modeSearch, m.query
+		return m, nil, true
+	case "n", "N":
+		if len(m.matches) > 0 {
+			d := 1
+			if k.String() == "N" {
+				d = len(m.matches) - 1
+			}
+			m.gotoMatch((m.mi + d) % len(m.matches))
+		}
+		return m, nil, true
 	case "f":
 		m.follow = !m.follow
 		if m.follow {
@@ -912,7 +953,13 @@ func (m model) logKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		if m.jobURL != "" {
 			_ = openURL(m.jobURL)
 		}
-	case "esc", "backspace", "q", "ctrl+c", "R":
+	case "esc":
+		if m.query != "" {
+			m.query, m.matches, m.mi = "", nil, 0
+			return m, nil, true
+		}
+		return m, nil, false
+	case "backspace", "q", "ctrl+c", "R":
 		return m, nil, false
 	default:
 		return m, nil, true // ignore table-only keys such as r/c/d/t
@@ -925,6 +972,13 @@ func (m model) logKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 
 // logHeight is the log window size: the table body plus the unused column header row.
 func (m model) logHeight() int { return m.bodyHeight() + 1 }
+
+// gotoMatch scrolls the log so that match i is near the top.
+func (m *model) gotoMatch(i int) {
+	m.mi = i
+	m.follow = false
+	m.top = min(max(m.matches[i]-2, 0), m.maxTop())
+}
 
 func (m model) maxTop() int { return max(0, len(m.logs)-m.logHeight()) }
 
@@ -1002,6 +1056,9 @@ func (m model) View() string {
 		if m.follow {
 			title += " (following)"
 		}
+		if len(m.matches) > 0 {
+			title += fmt.Sprintf(" match %d/%d", m.mi+1, len(m.matches))
+		}
 	}
 	vis := m.visible()
 	count := len(vis)
@@ -1069,6 +1126,12 @@ func (m model) View() string {
 }
 
 // logBody renders the visible window of the log, padded to the body height.
+// isMatch reports whether log line i matches the active search.
+func (m model) isMatch(i int) bool {
+	j := sort.SearchInts(m.matches, i)
+	return j < len(m.matches) && m.matches[j] == i
+}
+
 func (m model) logBody() string {
 	var b strings.Builder
 	h := m.logHeight()
@@ -1087,6 +1150,10 @@ func (m model) logBody() string {
 			l = strings.TrimRight(trunc(l, m.width), " ")
 		}
 		switch {
+		case m.isMatch(i) && m.matches[m.mi] == i:
+			l = stySel.Render(l)
+		case m.isMatch(i):
+			l = styKey.Render(l)
 		case strings.Contains(l, "##[error]") || strings.Contains(l, "Error:"):
 			l = styFail.Render(l)
 		case strings.Contains(l, "##[warning]"):
@@ -1160,6 +1227,8 @@ func (m model) footer() string {
 		return styKey.Render("/") + m.input + "█"
 	case modeCommand:
 		return styKey.Render(":") + m.input + "█"
+	case modeSearch:
+		return styKey.Render("/") + m.input + "█"
 	case modeAlias:
 		return styKey.Render("alias for "+m.aliasFor.Workflow+" > ") + m.input + "█"
 	case modeConfirm:
@@ -1182,7 +1251,7 @@ func (m model) footer() string {
 	case viewGraph:
 		keys = "hjkl/arrows move  enter logs or expand  x collapse  v style  o open  ctrl-d/u scroll  esc back"
 	case viewLogs:
-		keys = "j/k scroll  space/ctrl-d page  g/G top/bottom  f follow  esc back"
+		keys = "j/k scroll  space/ctrl-d page  g/G top/bottom  / search  n/N next/prev  f follow  esc back"
 	}
 	keys += "  R refresh  q quit"
 	if m.status != "" {
