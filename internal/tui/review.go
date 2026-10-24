@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MurabitoB/gh-9s/internal/icons"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -329,11 +331,11 @@ func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 func listLine(f diff.File, threads []ghcli.Thread, nDrafts int, selected, viewed bool, w int) string {
 	mark := " "
 	if selected {
-		mark = "▸"
+		mark = icons.Get(icons.Selected)
 	}
 	seen := " "
 	if viewed {
-		seen = "✓"
+		seen = icons.Get(icons.Viewed)
 	}
 	stats := " " + plusMinus(f)
 	if n := threadCount(threads, f.Path); n > 0 {

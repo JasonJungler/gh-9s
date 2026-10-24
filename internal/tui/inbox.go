@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/MurabitoB/gh-9s/internal/icons"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
@@ -43,6 +45,8 @@ func inboxRunning() bool {
 }
 
 var inboxTabNames = [4]string{"Assigned", "Review requested", "My PRs", "Mentions"}
+
+var inboxTabIcons = [4]icons.Name{icons.TabAssigned, icons.TabReview, icons.TabMine, icons.TabMentions}
 
 var inboxEmpty = [4]string{
 	"nothing assigned to you", "no reviews are waiting for you", "you have no open pull requests", "no mentions",
@@ -253,11 +257,11 @@ func (m model) rebuildInbox(st inboxState, keepID string) model {
 func checksCell(c string) (string, state) {
 	switch c {
 	case "SUCCESS":
-		return "✓ pass", stOK
+		return icons.Get(icons.CheckPass) + " pass", stOK
 	case "FAILURE", "ERROR":
-		return "✗ fail", stFail
+		return icons.Get(icons.CheckFail) + " fail", stFail
 	case "PENDING", "EXPECTED":
-		return "● pending", stRun
+		return icons.Get(icons.CheckPending) + " pending", stRun
 	}
 	return "-", stOther
 }
@@ -265,11 +269,11 @@ func checksCell(c string) (string, state) {
 func reviewCell(it ghcli.InboxItem) string {
 	switch it.ReviewDecision {
 	case "APPROVED":
-		return "approved"
+		return withIcon(icons.ReviewApproved, "approved")
 	case "CHANGES_REQUESTED":
-		return "changes"
+		return withIcon(icons.ReviewChanges, "changes")
 	case "REVIEW_REQUIRED":
-		return "review"
+		return withIcon(icons.ReviewRequired, "review")
 	}
 	return "-"
 }
@@ -291,13 +295,21 @@ func inboxRows(tab int, ts inboxTabState) ([]string, []row) {
 			repo = it.Host + "/" + repo
 		}
 		if ts.fresh[inboxKey(it)] {
-			repo = "● " + repo
+			repo = icons.Get(icons.New) + " " + repo
 		}
 		title := it.Title
 		if it.Draft {
 			title = "[draft] " + title
 		}
 		num := fmt.Sprintf("#%d", it.Number)
+		switch {
+		case it.Kind == "issue":
+			num = withIcon(icons.IssueOpen, num)
+		case it.Draft:
+			num = withIcon(icons.PRDraft, num)
+		default:
+			num = withIcon(icons.PROpen, num)
+		}
 		st := stOther
 		var cells []string
 		switch tab {
@@ -330,7 +342,7 @@ func inboxBody(m model) string {
 	var b strings.Builder
 	var tabs []string
 	for i, name := range inboxTabNames {
-		label := fmt.Sprintf(" %s (%d) ", name, st.tabs[i].total)
+		label := fmt.Sprintf(" %s (%d) ", withIcon(inboxTabIcons[i], name), st.tabs[i].total)
 		if i == st.tab {
 			label = ui.Sel.Render(label)
 		} else {

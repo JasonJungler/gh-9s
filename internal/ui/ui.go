@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/MurabitoB/gh-9s/internal/icons"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -31,15 +33,15 @@ func Age(s string) string {
 // RunState maps a run or job status and conclusion to a label and a State.
 func RunState(status, conclusion string) (string, State) {
 	if status != "completed" {
-		return "● " + status, StRun
+		return icons.Get(icons.RunActive) + " " + status, StRun
 	}
 	switch conclusion {
 	case "success":
-		return "✓ success", StOK
+		return icons.Get(icons.RunOK) + " success", StOK
 	case "failure", "timed_out", "startup_failure":
-		return "✗ " + conclusion, StFail
+		return icons.Get(icons.RunFail) + " " + conclusion, StFail
 	default:
-		return "○ " + conclusion, StOther
+		return icons.Get(icons.RunOther) + " " + conclusion, StOther
 	}
 }
 
@@ -73,8 +75,18 @@ const (
 	StRun
 )
 
-// Symbol is the one-character marker for each state.
-var Symbol = map[State]string{StOK: "✓", StFail: "✗", StRun: "●", StOther: "○"}
+// Symbol is the one-character marker for each state, from the icon set in use.
+func Symbol(s State) string {
+	switch s {
+	case StOK:
+		return icons.Get(icons.RunOK)
+	case StFail:
+		return icons.Get(icons.RunFail)
+	case StRun:
+		return icons.Get(icons.RunActive)
+	}
+	return icons.Get(icons.RunOther)
+}
 
 var (
 	Header = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6")).Padding(0, 1)

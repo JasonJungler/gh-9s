@@ -6,6 +6,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/MurabitoB/gh-9s/internal/icons"
+
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
 
@@ -87,10 +89,10 @@ func nodeDur(n Node, now time.Time) string {
 
 // nodeParts splits a node's text into a status symbol and the rest.
 func nodeParts(n Node, now time.Time) (sym, rest string) {
-	sym = ui.Symbol[n.State]
+	sym = ui.Symbol(n.State)
 	if len(n.Members) == 0 {
 		if n.Start.IsZero() && n.State == ui.StRun {
-			sym = "○" // queued or waiting on dependencies
+			sym = icons.Get(icons.RunOther) // queued or waiting on dependencies
 		}
 		rest = n.Name
 	} else {

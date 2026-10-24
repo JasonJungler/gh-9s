@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MurabitoB/gh-9s/internal/icons"
+
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
 )
@@ -90,14 +92,14 @@ func rollupState(checks []rollupRef) (string, state) {
 		}
 		switch {
 		case s != "COMPLETED" || c2 == "PENDING" || c2 == "EXPECTED":
-			return fmt.Sprintf("● pending %d/%d", ok, len(checks)), stRun
+			return fmt.Sprintf("%s pending %d/%d", icons.Get(icons.CheckPending), ok, len(checks)), stRun
 		case c2 == "FAILURE" || c2 == "ERROR" || c2 == "TIMED_OUT" || c2 == "CANCELLED":
-			return "✗ failing", stFail
+			return icons.Get(icons.CheckFail) + " failing", stFail
 		default:
 			ok++
 		}
 	}
-	return fmt.Sprintf("✓ %d/%d", ok, len(checks)), stOK
+	return fmt.Sprintf("%s %d/%d", icons.Get(icons.CheckPass), ok, len(checks)), stOK
 }
 
 // prListArgs is the `gh pr list` command for r, narrowed by f.
@@ -150,7 +152,7 @@ func fetchIssues(r ghcli.RepoRef, f ghcli.IssueFilter) (table, error) {
 			st = stOther
 		}
 		t.rows = append(t.rows, row{id: fmt.Sprint(i.Number), state: st, url: i.URL,
-			cells: []string{fmt.Sprint(i.Number), i.State, i.Title, author,
+			cells: []string{issueNumberCell(i.Number, i.State), i.State, i.Title, author,
 				orDash(strings.Join(labels, ",")), orDash(strings.Join(assignees, ",")), age(i.UpdatedAt)}})
 	}
 	return t, nil
@@ -200,6 +202,11 @@ func prRows(prs []prListItem, currentBranch string) table {
 		if currentBranch != "" && p.Head == currentBranch {
 			num = "*" + num
 		}
+		if p.Draft {
+			num = withIcon(icons.PRDraft, num)
+		} else {
+			num = withIcon(icons.PROpen, num)
+		}
 		review := p.Review
 		if review == "" {
 			review = "-"
@@ -212,6 +219,36 @@ func prRows(prs []prListItem, currentBranch string) table {
 			cells: []string{num, label, title, author, p.Head, review, age(p.UpdatedAt)}})
 	}
 	return t
+}
+
+// checkStatus is the label and state of a check's bucket (pass, fail, pending, skipping, cancel).
+func checkStatus(bucket string) (string, state) {
+	switch bucket {
+	case "pass":
+		return icons.Get(icons.CheckPass) + " pass", stOK
+	case "fail":
+		return icons.Get(icons.CheckFail) + " fail", stFail
+	case "pending":
+		return icons.Get(icons.CheckPending) + " pending", stRun
+	}
+	return icons.Get(icons.CheckSkipped) + " " + bucket, stOther
+}
+
+// withIcon puts an icon in front of text; with no icon (the plain set) the text is unchanged.
+func withIcon(n icons.Name, text string) string {
+	if g := icons.Get(n); g != "" {
+		return g + " " + text
+	}
+	return text
+}
+
+// issueNumberCell is an issue's number, with its state icon in the Nerd Font set.
+func issueNumberCell(num int, state string) string {
+	n := icons.IssueOpen
+	if state != "OPEN" {
+		n = icons.IssueClosed
+	}
+	return withIcon(n, fmt.Sprint(num))
 }
 
 func fetchChecks(r ghcli.RepoRef, pr string) (table, error) {
@@ -232,15 +269,7 @@ func fetchChecks(r ghcli.RepoRef, pr string) (table, error) {
 	}
 	t := table{cols: []string{"STATUS", "NAME", "WORKFLOW", "STATE", "AGE"}}
 	for _, c := range checks {
-		st, label := stOther, "○ "+c.Bucket
-		switch c.Bucket {
-		case "pass":
-			st, label = stOK, "✓ pass"
-		case "fail":
-			st, label = stFail, "✗ fail"
-		case "pending":
-			st, label = stRun, "● pending"
-		}
+		label, st := checkStatus(c.Bucket)
 		t.rows = append(t.rows, row{id: c.Name, state: st, url: c.Link,
 			cells: []string{label, c.Name, c.Workflow, c.State, age(c.Started)}})
 	}
