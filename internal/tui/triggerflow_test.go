@@ -59,15 +59,18 @@ func TestTriggerFlowOpensGraph(t *testing.T) {
 	}
 }
 
-func TestTriggerFlowRunNotFoundStaysPut(t *testing.T) {
+func TestTriggerFlowRunNotFoundOpensTheRunsList(t *testing.T) {
 	fk := &fakeTrigger{runs: []ghcli.RunInfo{{ID: 9, CreatedAt: t0.Add(-time.Hour), Actor: "me", Event: "workflow_dispatch"}}}
 	fk.install(t)
 	m := formOpenModel(t)
 	next, cmd := m.Update(k("enter"))
 	next, _ = next.Update(cmd())
 	m = next.(model)
-	if m.view != viewWorkflows {
-		t.Errorf("view = %v; want to stay on workflows", m.view)
+	if m.view != viewRuns || m.wfID != "deploy.yml" {
+		t.Errorf("view=%v wfID=%q; want the runs of deploy.yml so the new run shows up", m.view, m.wfID)
+	}
+	if len(m.back) == 0 || m.back[len(m.back)-1] != viewWorkflows {
+		t.Errorf("esc should return to workflows, back=%v", m.back)
 	}
 	if !strings.Contains(m.status, "triggered deploy.yml") || !strings.Contains(m.status, "not found") {
 		t.Errorf("status = %q", m.status)
@@ -98,7 +101,7 @@ func TestTriggerUnknownUserStillDispatches(t *testing.T) {
 	next, cmd := m.Update(k("enter"))
 	next, _ = next.Update(cmd())
 	m = next.(model)
-	if len(fk.dispatched) != 1 || m.view != viewWorkflows || !strings.Contains(m.status, "no auth") {
+	if len(fk.dispatched) != 1 || m.view != viewRuns || !strings.Contains(m.status, "no auth") {
 		t.Errorf("dispatched=%v view=%v status=%q", fk.dispatched, m.view, m.status)
 	}
 }

@@ -100,6 +100,12 @@ func (f triggerForm) update(k tea.KeyMsg) (next triggerForm, submit, cancel bool
 	case tea.KeyEsc:
 		return f, false, true
 	case tea.KeyEnter:
+		if f.ref != f.loadedRef {
+			// the ref was typed, not cycled: its inputs have not been read yet
+			f.pendingReload = true
+			f.err = "reading inputs for " + f.ref + "… press enter again"
+			return f, false, false
+		}
 		for _, x := range f.fields {
 			if x.In.Required && strings.TrimSpace(x.Value) == "" {
 				f.err = x.In.Name + " is required"

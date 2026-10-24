@@ -22,8 +22,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = styOK.Render("✓ triggered " + msg.workflow + " → run " + msg.runID)
 			return m, m.push(viewGraph)
 		case msg.dispatched:
+			// show that workflow's runs so the new one appears as soon as GitHub lists it
 			m.status = styErr.Render("triggered " + msg.workflow + ", but its run was not found yet: " + msg.err.Error())
-			return m, m.fetch()
+			m.target, m.wfID, m.wfName = msg.target, msg.workflow, msg.workflow
+			return m, m.push(viewRuns)
 		default:
 			m.status = styErr.Render("✗ " + msg.err.Error())
 		}
@@ -49,6 +51,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				f.err = "no workflow_dispatch trigger at " + msg.ref
 			default:
 				f = f.withInputs(msg.inputs)
+				f.err = ""
 			}
 			m.form = &f
 		}

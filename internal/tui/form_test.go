@@ -138,3 +138,17 @@ func TestFormCancel(t *testing.T) {
 		t.Error("esc should cancel")
 	}
 }
+
+func TestFormEnterAfterTypingRefReadsInputsFirst(t *testing.T) {
+	f := newForm()          // focus starts on the ref field
+	f, _, _ = press(f, "x") // ref is now "mainx"; its inputs have not been read
+	f, submit, _ := press(f, "enter")
+	if submit || !f.pendingReload || !strings.Contains(f.err, "reading inputs") {
+		t.Fatalf("submit=%v pendingReload=%v err=%q; want a reload before submitting", submit, f.pendingReload, f.err)
+	}
+	f.pendingReload, f.loadedRef = false, f.ref         // the caller re-read the inputs
+	f, _, _ = press(f, "tab", "tab", "tab", "tab", "v") // fill the required tag input
+	if _, submit, _ = press(f, "enter"); !submit {
+		t.Error("enter should submit once the inputs match the ref")
+	}
+}
