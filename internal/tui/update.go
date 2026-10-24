@@ -14,6 +14,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+	case imageDoneMsg:
+		if msg.err != nil {
+			m.status = styErr.Render("✗ image viewer: " + msg.err.Error())
+		}
+		return m, nil
 	case infoMsg:
 		m.repo, m.branch, m.curRepo = msg.repo, msg.branch, msg.cur
 	case triggeredMsg:

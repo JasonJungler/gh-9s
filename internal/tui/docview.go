@@ -3,15 +3,11 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/markdown"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
-
-// showImage opens the full-screen image viewer; tests replace it.
-var showImage = func(m model, url string) (model, tea.Cmd) { return m.open(url), nil }
 
 // detailDoc is a detail screen laid out as lines, plus where its image markers are.
 type detailDoc struct {
