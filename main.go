@@ -67,16 +67,17 @@ type model struct {
 	mi                            int
 	follow                        bool
 
-	graph    graph
-	gstyle   graphStyle
-	gsel     int
-	expanded map[string]bool
-	specs    map[string][]jobSpec // workflow job specs, by run ID
-	form     *triggerForm         // non-nil while the trigger form is open
-	favs     *favStore            // nil when the favorites file could not be loaded
-	curRepo  repoRef              // repo of the current directory, host included
-	latest   map[string]latestEntry
-	aliasFor favorite
+	runStatus string // last seen status of the watched run, for the finished notification
+	graph     graph
+	gstyle    graphStyle
+	gsel      int
+	expanded  map[string]bool
+	specs     map[string][]jobSpec // workflow job specs, by run ID
+	form      *triggerForm         // non-nil while the trigger form is open
+	favs      *favStore            // nil when the favorites file could not be loaded
+	curRepo   repoRef              // repo of the current directory, host included
+	latest    map[string]latestEntry
+	aliasFor  favorite
 
 	confirm    func() tea.Cmd
 	confirmMsg string
@@ -263,7 +264,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.runID != "":
 			m.runID, m.target = msg.runID, msg.target
-			m.graph, m.gsel, m.top, m.expanded = graph{}, 0, 0, nil
+			m.graph, m.gsel, m.top, m.expanded, m.runStatus = graph{}, 0, 0, nil, ""
 			m.status = styOK.Render("✓ triggered " + msg.workflow + " → run " + msg.runID)
 			return m, m.push(viewGraph)
 		case msg.dispatched:
@@ -321,16 +322,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.specs[k] = v
 		}
+		var notifyCmd tea.Cmd
 		if msg.err == nil && msg.graph != nil {
+			cur := runStatus(msg.jobs)
+			if runFinished(m.runStatus, cur) {
+				title, body := "gh-9s: run "+m.runID+" "+runOutcome(msg.jobs), "run "+m.runID+" "+runOutcome(msg.jobs)
+				notifyCmd = func() tea.Msg { notifier(title, body); return nil }
+			}
+			m.runStatus = cur
 			if msg.graph.flat {
 				// dependencies unknown: show the plain jobs list instead of guessing a graph
 				m.view, m.tbl, m.cursor, m.top = viewJobs, jobsTable(msg.jobs), 0, 0
 				m.status = styDim.Render("graph unavailable: " + msg.graph.reason)
-				return m, nil
+				return m, notifyCmd
 			}
 			m.graph = *msg.graph
 			m.gsel = min(m.gsel, max(0, len(m.shown().nodes)-1))
-			return m, nil
+			return m, notifyCmd
 		}
 		if msg.err == nil && m.view == viewLogs {
 			m.logs = msg.logs
@@ -528,7 +536,7 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 		return m, m.push(viewRuns)
 	case viewRuns:
 		m.runID = r.id
-		m.graph, m.gsel, m.top, m.expanded = graph{}, 0, 0, nil
+		m.graph, m.gsel, m.top, m.expanded, m.runStatus = graph{}, 0, 0, nil, ""
 		return m, m.push(viewGraph)
 	case viewJobs:
 		m.jobID, m.jobName, m.jobURL = r.id, r.extra, r.url
