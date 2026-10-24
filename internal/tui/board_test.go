@@ -792,3 +792,24 @@ func TestBoardColumnsScrollAndFilterAndEmpty(t *testing.T) {
 		t.Errorf("g: %q", r.id)
 	}
 }
+
+func TestBoardColumnsToggleKeepsTheSecondCard(t *testing.T) {
+	f := installBoard(t)
+	f.project = ghcli.Project{Title: "P", StatusOrder: []string{"Todo"}, Total: 3, Items: []ghcli.ProjectItem{
+		projItem("Issue", "acme/app", 1, "one", "Todo", "OPEN"),
+		projItem("Issue", "acme/app", 2, "two", "Todo", "OPEN"),
+		projItem("Issue", "acme/app", 3, "three", "Todo", "OPEN"),
+	}}
+	m := pinsModel(t)
+	m.previewOff, m.width, m.height = true, 100, 30
+	m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "P"})
+	m = keyAll(pressTab(pressTab(openFavs(t, m), "tab"), "tab"), "enter")
+	m = keyAll(m, "tab", "j", "j", "b") // list on Todo, third card, to columns
+	if r, _ := m.boardSelectedRow(); r.id != "acme/app#3" {
+		t.Errorf("columns select %q, want the third card", r.id)
+	}
+	m = keyAll(m, "k", "b")
+	if r, _ := m.selected(); r.id != "acme/app#2" {
+		t.Errorf("back in the list the card is %q, want the second", r.id)
+	}
+}
