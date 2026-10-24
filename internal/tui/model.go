@@ -123,6 +123,7 @@ type model struct {
 	pinDel         *pins.Repo         // the pinned repo a confirm dialog is about
 	pinDelProject  *pins.Project      // ... or the pinned Project
 	boardViewMemo  map[string]string  // the view chosen on each Project (by name), for the session
+	boardColsOn    bool               // the columns layout is chosen, for the session
 	projectChoices []ghcli.ProjectRef // the Projects offered by the pin dialog
 	board          pins.Project       // the Project the board screen shows
 

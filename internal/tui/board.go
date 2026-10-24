@@ -108,14 +108,18 @@ func boardApply(m model, msg screenMsg) model {
 		return m
 	}
 	keep := ""
-	if r, ok := m.selected(); ok && m.view == viewBoard {
+	if r, ok := m.boardSelectedRow(); ok && m.view == viewBoard {
 		keep = r.id
 	}
+	fresh := !st.loaded
 	name := st.viewName
 	if name == "" {
 		name = m.boardViewMemo[st.key]
 	}
 	st.data, st.loaded, st.loadedAt, st.force, st.me = pl.p, true, boardNow(), false, pl.me
+	if fresh { // a Project opened for the first time follows the session's choice of layout
+		st.cols = m.boardColsOn
+	}
 	st.view, st.viewName = 0, ""
 	for i, v := range pl.p.Views { // the view is found again by name: views may have been added, moved or deleted
 		if name != "" && v.Name == name {
@@ -243,6 +247,9 @@ func (m model) rebuildBoard(st boardState, keepID string) model {
 		}
 	}
 	m.scroll()
+	if st.cols {
+		m = m.colsReselect(st, keepID)
+	}
 	return m
 }
 
@@ -255,9 +262,6 @@ func (m model) boardExtraRows() int {
 	n := 2
 	if st.hasViews() {
 		n++
-	}
-	if st.colsActive(m) {
-		n++ // the header and its rule instead of one tab bar
 	}
 	return n
 }
@@ -524,7 +528,7 @@ func (m model) switchBoardView(delta int) model {
 	}
 	memo[st.key] = st.viewName
 	m.boardViewMemo = memo
-	st.tab = 0
+	st.tab, st.col, st.curs, st.tops, st.win = 0, 0, nil, nil, 0
 	m.filter = ""
 	return m.rebuildBoard(st, "")
 }

@@ -38,3 +38,10 @@ Dragging or moving cards, editing, grouping by fields other than Status, swimlan
 No columns / one column / 40 columns; 200+ items with N+ counts; CJK and emoji in titles; terminal 60 to 300 wide;
 selection when the selected card disappears on refresh or filter; empty columns (selection cannot stay on them: `h`/`l`
 still enters an empty column, `j`/`k` do nothing); switching view while in columns; wheel scrolling; window markers.
+
+## As built (deviations from the text above)
+- A card is four lines (item, title on up to two lines, who and what) plus a blank one, so a column scrolls in steps of 5 rows.
+- The preview pane is not shown in columns; `p` there says so. (The pane would take the width the columns need.)
+- Long words in a title are wrapped across lines (never cut with `…`); only a third title line is cut.
+- `h`/`l` land on the card last selected in that column, not on the same row index.
+- Column headers show the count before the typed `/` filter, as the list tabs do.

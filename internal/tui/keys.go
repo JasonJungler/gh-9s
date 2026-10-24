@@ -49,6 +49,10 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox || m.view == viewBoard) {
+		if m.view == viewBoard && m.boardSt().colsActive(m) {
+			m.status = styDim.Render("the preview pane is not shown in columns; b goes back to the list")
+			return m, nil
+		}
 		m.previewOff = !m.previewOff // for this session; the setting `preview` is the lasting choice
 		if m.previewOff {
 			m.status = styDim.Render("preview pane off (p brings it back)")

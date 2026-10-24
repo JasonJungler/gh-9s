@@ -106,6 +106,7 @@ func (m model) boardSelectedRow() (row, bool) {
 		return m.selected()
 	}
 	cols := m.boardColumns(st)
+	st = m.colFit(st, cols)
 	if st.col >= len(cols) || len(cols[st.col].cards) == 0 {
 		return row{}, false
 	}
@@ -192,7 +193,8 @@ func boardColumnsBody(m model, st boardState) string {
 		if len(col.cards) == 0 {
 			lines = append(lines, styDim.Render(padCell(" (empty)", w)))
 		}
-		for ci := st.tops[c]; ci < len(col.cards) && len(lines) < h; ci++ {
+		top := min(st.tops[c], max(len(col.cards)-m.colVisibleCards(), 0))
+		for ci := top; ci < len(col.cards) && len(lines) < h; ci++ {
 			lines = append(lines, cardLines(st.data, col.cards[ci], w, c == st.col && ci == st.curs[c])...)
 			lines = append(lines, strings.Repeat(" ", w))
 		}
@@ -220,6 +222,8 @@ func boardColumnsBody(m model, st boardState) string {
 	}
 	_, note := st.viewItems()
 	switch {
+	case m.err != nil:
+		b.WriteString(styErr.Render(" "+trunc(ghcli.CleanText(m.err.Error()), max(m.width-2, 10))) + "\n")
 	case note != "":
 		b.WriteString(styErr.Render(" "+trunc(note, max(m.width-2, 10))) + "\n")
 	case st.data.Total > len(st.data.Items):
@@ -236,7 +240,13 @@ func (m model) toggleBoardColumns() model {
 	if !st.loaded {
 		return m
 	}
+	if st.cols && !st.colsActive(m) { // the terminal shrank: the list is what is on screen
+		st.cols = false
+		m.boardColsOn = false
+		return m.withScreenData(viewBoard, st)
+	}
 	if st.cols {
+		m.boardColsOn = false
 		id := ""
 		if r, ok := m.boardSelectedRow(); ok {
 			id = r.id
@@ -258,6 +268,7 @@ func (m model) toggleBoardColumns() model {
 		id = r.id
 	}
 	st.cols = true
+	m.boardColsOn = true
 	st.col, st.curs, st.tops, st.win = max(st.tab-1, 0), nil, nil, 0
 	cols := m.boardColumns(st)
 	for c, col := range cols { // find the card of the list's cursor
@@ -313,4 +324,20 @@ func boardColsKey(m model, st boardState, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return moveCard(-m.colVisibleCards())
 	}
 	return m, nil, false
+}
+
+// colsReselect puts the selection of the columns back on the card with id keepID, or keeps the position
+// and clamps it when that card is gone.
+func (m model) colsReselect(st boardState, keepID string) model {
+	cols := m.boardColumns(st)
+	if keepID != "" {
+		for c, col := range cols {
+			for ci, i := range col.cards {
+				if boardRowID(st.data, i) == keepID {
+					st.col, st.curs = c, setIdx(st.curs, c, ci)
+				}
+			}
+		}
+	}
+	return m.withScreenData(viewBoard, m.colFit(st, cols))
 }

@@ -813,3 +813,104 @@ func TestBoardColumnsToggleKeepsTheSecondCard(t *testing.T) {
 		t.Errorf("back in the list the card is %q, want the second", r.id)
 	}
 }
+
+func TestBoardColumnsFillTheTerminalExactly(t *testing.T) {
+	for _, withViews := range []bool{false, true} {
+		for _, h := range []int{20, 24, 40} {
+			for _, w := range []int{60, 100, 200} {
+				var m model
+				if withViews {
+					m, _ = boardWithViews(t, "ann")
+				} else {
+					m, _ = boardOn(t)
+				}
+				m.width, m.height = w, h
+				list := strings.Count(m.View(), "\n")
+				m = keyAll(m, "b")
+				if got := strings.Count(m.View(), "\n"); got != list {
+					t.Errorf("views=%v %dx%d: columns are %d lines, the list %d", withViews, w, h, got+1, list+1)
+				}
+			}
+		}
+	}
+}
+
+func TestBoardColumnsSurviveRefreshViewSwitchFilterAndErrors(t *testing.T) {
+	m, f := boardWithViews(t, "ann")
+	m.width, m.height = 120, 30
+	m = keyAll(m, "b", "l", "l") // Done: acme/app#3
+	// a new card arrives first in Done; R must keep the selection on #3 by id
+	f.project.Items = append([]ghcli.ProjectItem{projItem("Issue", "acme/app", 9, "new", "Done", "OPEN")}, f.project.Items...)
+	f.now = f.now.Add(10 * time.Second)
+	m = keyAll(m, "R")
+	if r, _ := m.boardSelectedRow(); r.id != "acme/app#3" {
+		t.Errorf("after R the card is %q", r.id)
+	}
+	// a view without a "No status" column: enter still works on what is selected
+	m = keyAll(m, "l", "]", "]") // No status, then My items (assignee:@me): every item has a Status there
+	if _, ok := m.boardSelectedRow(); !ok {
+		t.Error("after a view switch nothing is selected although the column has cards")
+	}
+	m = keyAll(m, "enter")
+	if m.view == viewBoard {
+		t.Error("enter did nothing after the view switch")
+	}
+	// a failed refresh is visible
+	m = keyAll(m, "esc")
+	f.err = errors.New("boom network")
+	f.now = f.now.Add(10 * time.Second)
+	m = keyAll(m, "R")
+	if !strings.Contains(ansi.Strip(m.View()), "boom network") {
+		t.Errorf("error not shown in columns:\n%s", m.View())
+	}
+}
+
+func TestBoardColumnsFilterClampsEveryColumn(t *testing.T) {
+	f := installBoard(t)
+	f.project = ghcli.Project{Title: "P", StatusOrder: []string{"Todo", "Done"}, Total: 30}
+	for i := 1; i <= 30; i++ {
+		f.project.Items = append(f.project.Items, projItem("Issue", "acme/app", i, fmt.Sprintf("card number %d", i), "Todo", "OPEN"))
+	}
+	m := pinsModel(t)
+	m.previewOff, m.width, m.height = true, 100, 24
+	m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "P"})
+	m = keyAll(pressTab(pressTab(openFavs(t, m), "tab"), "tab"), "enter")
+	m = keyAll(m, "b", "G", "l")
+	m = keyAll(typeAll(keyAll(m, "/"), "card number 1"), "enter")
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "acme/app #1") {
+		t.Errorf("the Todo column is blank after a filter:\n%s", out)
+	}
+}
+
+func TestBoardColumnsShrinkAndSessionMemoryAndP(t *testing.T) {
+	m, _ := boardOn(t)
+	m.width, m.height = 120, 30
+	m = keyAll(m, "b")
+	if m.status != "" && strings.Contains(m.status, "preview") {
+		t.Error("status")
+	}
+	m = keyAll(m, "p")
+	if !strings.Contains(m.status, "not shown in columns") {
+		t.Errorf("p says %q", m.status)
+	}
+	m.width = 50 // the terminal shrinks: the list is on screen
+	m = keyAll(m, "tab")
+	tab := m.boardSt().tab
+	m = keyAll(m, "b")
+	if m.boardSt().cols || m.boardSt().tab != tab {
+		t.Errorf("b on a shrunk terminal changed the list: cols %v tab %d (was %d)", m.boardSt().cols, m.boardSt().tab, tab)
+	}
+	// the choice follows the session to another Project
+	m.width = 120
+	m = keyAll(m, "b")
+	m = keyAll(m, "esc")
+	other := pins.Project{Owner: "other", Number: 1, Title: "Other"}
+	m.pins.ToggleProject(other)
+	m = pump(m, m.fetch())
+	m, _ = m.openBoard(other)
+	m = pump(m, m.fetch())
+	if !m.boardSt().cols {
+		t.Error("columns were not kept for the session")
+	}
+}
