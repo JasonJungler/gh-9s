@@ -128,3 +128,14 @@ func TestProjectIdsAreRead(t *testing.T) {
 		t.Fatalf("%+v %v", p, err)
 	}
 }
+
+func TestSameLookingStatusOptionsKeepTheirOwnIds(t *testing.T) {
+	page := `{"data":{"repositoryOwner":{"projectV2":{"id":"P","title":"T","field":{"id":"F","options":[{"id":"a","name":"Todo"},{"id":"b","name":"Todo"}]},"items":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}`
+	p, _, _, err := ParseProjectPage([]byte(page))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.StatusOrder) != 2 || p.StatusOrder[0] == p.StatusOrder[1] || p.StatusIDs[p.StatusOrder[0]] != "a" || p.StatusIDs[p.StatusOrder[1]] != "b" {
+		t.Errorf("order %v ids %v", p.StatusOrder, p.StatusIDs)
+	}
+}

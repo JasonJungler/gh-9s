@@ -167,6 +167,15 @@ func init() {
 // opAlive says whether the write still belongs to the board on screen.
 func (m model) opAlive(op *boardOp) bool { return m.view == viewBoard && op.key == projectKey(m.board) }
 
+// dropOp forgets an op whose answer came too late to be used, and its "loading…" line.
+func (m model) dropOp(op *boardOp) model {
+	if m.boardOp == op {
+		m.boardOp = nil
+	}
+	m.status = ""
+	return m
+}
+
 // startWrite runs a write unless one is already running.
 func (m model) startWrite(done string, fn func() error) (model, tea.Cmd) {
 	if m.boardBusy {
@@ -214,10 +223,11 @@ func (m model) onBoardWriteDone(msg boardWriteDoneMsg) (model, tea.Cmd) {
 	} else {
 		m.status = styOK.Render("✓ " + msg.text)
 	}
-	if m.view == viewBoard && msg.key == projectKey(m.board) {
-		st := m.boardSt()
-		st.force = true
+	if st, ok := m.screenData(viewBoard).(boardState); ok && st.key == msg.key {
+		st.force = true // coming back later must not show the old Status
 		m = m.withScreenData(viewBoard, st)
+	}
+	if m.view == viewBoard && msg.key == projectKey(m.board) {
 		m.loading = true
 		return m, m.fetch()
 	}
@@ -347,7 +357,7 @@ func (m model) startAssign() (model, tea.Cmd) {
 
 func (m model) onBoardAssignees(msg boardAssigneesMsg) (model, tea.Cmd) {
 	if m.boardOp != msg.op || !m.opAlive(msg.op) || m.dlg != nil {
-		return m, nil
+		return m.dropOp(msg.op), nil
 	}
 	if msg.err != nil {
 		m.boardOp = nil
@@ -402,7 +412,7 @@ func (m model) startAdd() (model, tea.Cmd) {
 
 func (m model) onBoardResolved(msg boardResolvedMsg) (model, tea.Cmd) {
 	if m.boardOp != msg.op || !m.opAlive(msg.op) || m.dlg != nil {
-		return m, nil
+		return m.dropOp(msg.op), nil
 	}
 	if msg.err != nil {
 		m.boardOp = nil
@@ -427,14 +437,14 @@ func (m model) onBoardResolved(msg boardResolvedMsg) (model, tea.Cmd) {
 }
 
 var (
-	contentShort = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)#([0-9]{1,9})$`)
-	contentPath  = regexp.MustCompile(`^/([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)/(?:issues|pull)/([0-9]{1,9})/?$`)
+	contentShort = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._-]+)#([0-9]{1,9})$`)
+	contentPath  = regexp.MustCompile(`^/([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._-]+)/(?:issues|pull)/([0-9]{1,9})/?$`)
 )
 
 // parseContentRef reads OWNER/REPO#N or a github address of an issue or PR on the Project's host.
 func parseContentRef(s, host string) (owner, name string, n int, err error) {
 	s = strings.TrimSpace(s)
-	if m := contentShort.FindStringSubmatch(s); m != nil {
+	if m := contentShort.FindStringSubmatch(s); m != nil && m[2] != "." && m[2] != ".." {
 		n, _ = strconv.Atoi(m[3])
 		return m[1], m[2], n, nil
 	}
@@ -444,7 +454,7 @@ func parseContentRef(s, host string) (owner, name string, n int, err error) {
 		want = "github.com"
 	}
 	if perr == nil && u.Scheme == "https" && strings.EqualFold(u.Host, want) {
-		if m := contentPath.FindStringSubmatch(u.Path); m != nil {
+		if m := contentPath.FindStringSubmatch(u.Path); m != nil && m[2] != "." && m[2] != ".." {
 			n, _ = strconv.Atoi(m[3])
 			return m[1], m[2], n, nil
 		}

@@ -175,8 +175,15 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 	if pr.Field != nil {
 		p.StatusField, p.StatusIDs = pr.Field.ID, map[string]string{}
 		for _, o := range pr.Field.Options {
-			p.StatusOrder = append(p.StatusOrder, oneLine(CleanText(o.Name)))
-			p.StatusIDs[oneLine(CleanText(o.Name))] = o.ID
+			name := oneLine(CleanText(o.Name))
+			for n := 2; ; n++ { // options that read the same stay apart, so each writes its own id
+				if _, dup := p.StatusIDs[name]; !dup {
+					break
+				}
+				name = fmt.Sprintf("%s (%d)", oneLine(CleanText(o.Name)), n)
+			}
+			p.StatusOrder = append(p.StatusOrder, name)
+			p.StatusIDs[name] = o.ID
 		}
 	}
 	for _, v := range pr.Views.Nodes {

@@ -244,6 +244,7 @@ func (m *model) switchTo(v viewKind) tea.Cmd {
 	}
 	m.query, m.matches, m.mi = "", nil, 0
 	m.note = ""
+	m.boardOp = nil
 	m.pending, m.pendingMerge = nil, nil // half-finished actions belong to the screen we are leaving
 	m.loading = true
 	return m.fetch()
