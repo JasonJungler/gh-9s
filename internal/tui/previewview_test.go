@@ -215,3 +215,50 @@ func TestSidebarSectionsOfAPR(t *testing.T) {
 		t.Errorf("nerd reviewer icon missing:\n%s", n)
 	}
 }
+
+func TestWidePaneShowsTheSidebarBesideTheText(t *testing.T) {
+	p := fullPR()
+	p.Reviewers = []ghcli.Reviewer{{Name: "alice", State: "REQUESTED"}, {Name: "bob", State: "APPROVED"}}
+	p.Assignees = []string{"carol"}
+	p.Milestone = "v1.0"
+	wide := previewLines(previewEntry{pr: &p}, 100)
+	var rev, assign int = -1, -1
+	for i, l := range wide {
+		s := ansi.Strip(l)
+		if strings.Contains(s, "Reviewers") {
+			rev = i
+			if !strings.Contains(s, "│") {
+				t.Errorf("the sidebar must sit right of a rule: %q", s)
+			}
+		}
+		if strings.Contains(s, "Assignees") {
+			assign = i
+		}
+		if w := ansi.StringWidth(l); w > 100 {
+			t.Errorf("line %d is %d wide", i, w)
+		}
+	}
+	if rev < 0 || assign <= rev {
+		t.Fatalf("sections missing or out of order (%d, %d):\n%s", rev, assign, plainText(wide))
+	}
+	txt := plainText(wide)
+	for _, want := range []string{"alice requested", "bob approved", "carol", "v1.0", "Why", "bob commented"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("wide preview lacks %q:\n%s", want, txt)
+		}
+	}
+	// the description is on the same rows as the sidebar, not under it
+	descRow := -1
+	for i, l := range wide {
+		if strings.Contains(ansi.Strip(l), "Description") {
+			descRow = i
+		}
+	}
+	if descRow < 0 || descRow > assign+8 {
+		t.Errorf("the description (row %d) should start beside the sidebar (rows %d-%d)", descRow, rev, assign)
+	}
+	// a narrow pane keeps one column
+	if strings.Contains(plainText(previewLines(previewEntry{pr: &p}, 60)), "│") {
+		t.Error("below previewSplitMin the sidebar stays in the text")
+	}
+}

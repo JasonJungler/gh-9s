@@ -12,6 +12,8 @@ import (
 // The pane shows a PR or an issue the way its detail screen does, shortened: what a person looks at
 // when going down a list. What it renders is capped so a huge PR cannot stall the UI.
 const (
+	previewSplitMin   = 72 // a pane at least this wide puts the sidebar beside the text
+	previewSideWidth  = 28
 	previewDescLines  = 150 // lines of the description
 	previewTotalLines = 400 // lines of the whole pane
 	previewComments   = 5   // latest comments shown
@@ -62,23 +64,51 @@ func prPreview(d *detailDoc, p ghcli.PRDetail, width int) {
 		state += " (draft)"
 	}
 	d.add(ui.Dim.Render(fmt.Sprintf("%s  %s ← %s  %s", p.Author, p.BaseRef, p.HeadRef, state)))
+	split := width >= previewSplitMin
+	mainW := width
+	if split {
+		mainW = width - previewSideWidth - 1
+	}
+	var body detailDoc // the part under the title; beside the sidebar when the pane is wide enough
+	d, whole := &body, d
 	d.add("", "Review: "+orDash(p.ReviewDecision))
 	d.add(fmt.Sprintf("Checks: %s%d %s%d %s%d", icons.Get(icons.CheckPass), p.ChecksPassed, icons.Get(icons.CheckFail), p.ChecksFailed, icons.Get(icons.CheckPending), p.ChecksPending))
 	for _, n := range p.FailingChecks {
-		d.add(ui.Fail.Render(trunc(" "+icons.Get(icons.CheckFail)+" "+n, width)))
+		d.add(ui.Fail.Render(trunc(" "+icons.Get(icons.CheckFail)+" "+n, mainW)))
 	}
 	if more := p.ChecksFailed - len(p.FailingChecks); more > 0 {
 		d.add(ui.Dim.Render(fmt.Sprintf("  … %d more failing", more)))
 	}
 	d.add(fmt.Sprintf("+%d −%d in %d files", p.Additions, p.Deletions, p.ChangedFiles))
-	d.add("")
-	d.add(prSidebar(p, width)...)
-	description(d, p.Body, width)
-	var comments []ghcli.Comment
-	var reviews []ghcli.Review
-	comments = p.Comments[max(0, len(p.Comments)-previewComments):]
-	reviews = p.Reviews[max(0, len(p.Reviews)-previewReviews):]
-	discussion(d, comments, reviews, len(p.Comments)-len(comments)+len(p.Reviews)-len(reviews), width)
+	if !split {
+		d.add("")
+		d.add(prSidebar(p, width)...)
+	}
+	description(d, p.Body, mainW)
+	comments := p.Comments[max(0, len(p.Comments)-previewComments):]
+	reviews := p.Reviews[max(0, len(p.Reviews)-previewReviews):]
+	discussion(d, comments, reviews, len(p.Comments)-len(comments)+len(p.Reviews)-len(reviews), mainW)
+	if !split {
+		whole.addDoc(body)
+		return
+	}
+	whole.addDoc(columns(body, prSidebarColumn(p, previewSideWidth), mainW))
+}
+
+// columns puts the sidebar lines to the right of the main ones, separated by a rule.
+func columns(main detailDoc, side []string, mainW int) detailDoc {
+	out := detailDoc{images: main.images}
+	for i := 0; i < max(len(main.lines), len(side)); i++ {
+		l, r := "", ""
+		if i < len(main.lines) {
+			l = main.lines[i]
+		}
+		if i < len(side) {
+			r = side[i]
+		}
+		out.lines = append(out.lines, fit(l, mainW)+ui.Dim.Render("│")+r)
+	}
+	return out
 }
 
 func issuePreview(d *detailDoc, i ghcli.IssueDetail, width int) {
