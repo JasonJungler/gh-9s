@@ -13,7 +13,10 @@ import (
 )
 
 // sideMinWidth is the narrowest terminal that gets the side-by-side view on its own.
-const sideMinWidth = 120
+const (
+	sideMinWidth  = 120
+	sideMinForced = 60 // below this the list column and two panes cannot fit
+)
 
 // sbLayout is the side-by-side layout of the whole diff for one terminal width.
 type sbLayout struct {
@@ -22,6 +25,7 @@ type sbLayout struct {
 	lines  []sbLine
 	starts []int    // row where each file starts
 	src    []int    // source key of every row
+	src2   []int    // the higher source key of a paired row (same as src for the others)
 	logs   []string // plain text of every row, for search
 }
 
@@ -34,7 +38,7 @@ func listWidth(width int) int {
 
 // sideMode says whether the diff is shown side by side at the current width.
 func (m model) sideMode(st diffState) bool {
-	if len(st.d.Files) == 0 {
+	if len(st.d.Files) == 0 || m.width < sideMinForced {
 		return false
 	}
 	return st.sbs == 1 || (st.sbs == 0 && m.width >= sideMinWidth)
@@ -45,11 +49,13 @@ func buildSB(st diffState, width int) *sbLayout {
 	rw := width - lw - 1
 	pw := max((rw-1)/2, 10)
 	l := &sbLayout{width: width, lw: lw}
-	add := func(row sbLine, key int) {
+	add2 := func(row sbLine, key, key2 int) {
 		l.lines = append(l.lines, row)
 		l.src = append(l.src, key)
+		l.src2 = append(l.src2, key2)
 		l.logs = append(l.logs, row.plain())
 	}
+	add := func(row sbLine, key int) { add2(row, key, key) }
 	for fi, f := range st.d.Files {
 		if fi > 0 {
 			add(sbLine{left: fit("", pw), right: fit("", pw), kind: dBlank}, srcKey(fi, 0))
@@ -64,7 +70,7 @@ func buildSB(st diffState, width int) *sbLayout {
 		}
 		add(sbLine{left: fit(ui.Key.Render(fmt.Sprintf("── %s  %s ──", name, plusMinus(f))), pw), right: fit("", pw), kind: dFile}, srcKey(fi, 0))
 		for _, row := range sideBySide(f, st.threads, rw) {
-			add(row, srcKey(fi, row.idx))
+			add2(row, srcKey(fi, row.idx), srcKey(fi, row.idx2))
 		}
 	}
 	if st.d.Truncated {
@@ -82,6 +88,21 @@ func firstAtLeast(src []int, key int) int {
 		}
 	}
 	return max(len(src)-1, 0)
+}
+
+// rowFor finds the side-by-side row that shows the source line key: a row holding it as either
+// of its two lines, else the last row before it.
+func (l *sbLayout) rowFor(key int) int {
+	last := 0
+	for i := range l.src {
+		if l.src[i] == key || l.src2[i] == key {
+			return i
+		}
+		if l.src[i] < key {
+			last = i
+		}
+	}
+	return last
 }
 
 // syncDiffLayout makes the layout match the terminal width and the user's choice, keeping the same
@@ -104,8 +125,9 @@ func (m model) syncDiffLayout() model {
 	}
 	if want {
 		st.sb = buildSB(st, m.width)
+		st.listMode = false // the unified file list has no place in this layout
 		m.logs = st.sb.logs
-		m.top = firstAtLeast(st.sb.src, key)
+		m.top = st.sb.rowFor(key)
 	} else {
 		st.sb = nil
 		m.logs = make([]string, len(st.lines))
@@ -135,7 +157,7 @@ func fileAt(starts []int, row int) int {
 // reviewKey handles the keys of the review screen; ok is false for everything else.
 func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	st, _ := m.screenData(viewDiff).(diffState)
-	if len(st.d.Files) == 0 || st.listMode {
+	if len(st.d.Files) == 0 || st.listMode || m.err != nil || (m.loading && len(m.logs) == 0) {
 		return m, nil, false
 	}
 	side := st.sb != nil
@@ -145,6 +167,10 @@ func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	}
 	switch key := k.String(); {
 	case key == "s":
+		if m.width < sideMinForced {
+			m.status = styDim.Render(fmt.Sprintf("side-by-side needs %d+ columns", sideMinForced))
+			return m, nil, true
+		}
 		if side {
 			st.sbs = 2
 		} else {

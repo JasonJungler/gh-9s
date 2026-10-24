@@ -97,6 +97,11 @@ func init() {
 			}
 			lines, starts, src := diffDisplaySrc(st.d)
 			st.lines, st.starts, st.usrc = lines, starts, src
+			if old.sb != nil && m.top < len(old.sb.src) { // keep the line on top across the refetch
+				m.top = firstAtLeast(src, old.sb.src[m.top])
+			} else if old.sb == nil && m.top < len(old.usrc) {
+				m.top = firstAtLeast(src, old.usrc[m.top])
+			}
 			m.logs = make([]string, len(lines))
 			for i, l := range lines {
 				m.logs[i] = l.text
@@ -274,7 +279,7 @@ func diffKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 
 func diffBody(m model) string {
 	st, _ := m.screenData(viewDiff).(diffState)
-	if st.sb != nil {
+	if st.sb != nil && m.err == nil && !(m.loading && len(m.logs) == 0) {
 		return sideBody(m, st)
 	}
 	h := m.logHeight()

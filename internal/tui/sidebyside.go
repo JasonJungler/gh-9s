@@ -20,7 +20,7 @@ type sbLine struct {
 	kind        dkind
 	thread      bool // a comment from a review thread
 	hunk        bool // a hunk header
-	idx         int  // 1+index in File.Lines of the line this row shows (its thread rows share it); 0 none
+	idx, idx2   int  // 1+index in File.Lines of the row's lines (the lower and the higher; thread rows share them); 0 none
 }
 
 func hlDel(s string) string { return ui.Fail.Reverse(true).Render(s) }
@@ -73,7 +73,7 @@ func sideBySide(f diff.File, threads []ghcli.Thread, width int) []sbLine {
 			if r.Old.Kind == diff.Hunk {
 				k, st = dHunk, ui.Cols
 			}
-			out = append(out, sbLine{left: fit(st.Render(expandTabs(r.Old.Text)), pw), right: fit("", pw), kind: k, hunk: k == dHunk, idx: r.Old.Idx + 1})
+			out = append(out, sbLine{left: fit(st.Render(expandTabs(r.Old.Text)), pw), right: fit("", pw), kind: k, hunk: k == dHunk, idx: r.Old.Idx + 1, idx2: r.Old.Idx + 1})
 			continue
 		}
 		var spOld, spNew []diff.Span
@@ -88,24 +88,30 @@ func sideBySide(f diff.File, threads []ghcli.Thread, width int) []sbLine {
 				kind = dAdd
 			}
 		}
-		idx := 0
+		idx, idx2 := 0, 0
 		for _, n := range []*diff.NumLine{r.Old, r.New} {
-			if n != nil && (idx == 0 || n.Idx+1 < idx) {
-				idx = n.Idx + 1
+			if n != nil {
+				if idx == 0 || n.Idx+1 < idx {
+					idx = n.Idx + 1
+				}
+				idx2 = max(idx2, n.Idx+1)
 			}
 		}
-		out = append(out, sbLine{left: cell(r.Old, true, spOld, gw, cw), right: cell(r.New, false, spNew, gw, cw), kind: kind, idx: idx})
+		out = append(out, sbLine{left: cell(r.Old, true, spOld, gw, cw), right: cell(r.New, false, spNew, gw, cw), kind: kind, idx: idx, idx2: idx2})
 		for _, t := range mine {
 			if (t.Side == "RIGHT" && r.New != nil && r.New.New == t.Line) || (t.Side == "LEFT" && r.Old != nil && r.Old.Old == t.Line) {
 				for _, tr := range threadRows(t, pw) {
-					tr.idx = idx
+					tr.idx, tr.idx2 = idx, idx2
 					out = append(out, tr)
 				}
 			}
 		}
 	}
 	for _, t := range outdated {
-		out = append(out, threadRows(t, pw)...)
+		for _, tr := range threadRows(t, pw) {
+			tr.idx, tr.idx2 = len(f.Lines)+1, len(f.Lines)+1 // after every line of the file, so the keys stay in order
+			out = append(out, tr)
+		}
 	}
 	return out
 }
