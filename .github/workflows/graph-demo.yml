@@ -1,0 +1,160 @@
+name: Graph Demo
+
+# Manual-only and does no real work (every step just sleeps). It exists to exercise gh-9s:
+#   - a 6-stage dependency graph with fan-out and fan-in
+#   - three matrix jobs (unit 3x2, build 4, e2e 3)
+#   - a job that is skipped, and a job that always runs
+#   - workflow_dispatch inputs of every kind the trigger form supports
+#   - a switch that makes one matrix member fail, to see failures and skipped downstream jobs
+#
+# Run it with:  gh workflow run graph-demo.yml -f scenario=one-failure
+# or press `t` on it in gh-9s.
+run-name: Graph Demo (${{ inputs.scenario }}, ${{ inputs.ticket }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: What the run should do
+        type: choice
+        options:
+          - all-green
+          - one-failure
+          - slow
+        default: all-green
+      fail_fast:
+        description: Cancel the rest of a matrix when one of its jobs fails
+        type: boolean
+        default: false
+      step_seconds:
+        description: Seconds each fake step sleeps (ignored by the slow scenario)
+        type: number
+        default: 5
+      ticket:
+        description: Label shown in the run name (required)
+        type: string
+        required: true
+        default: DEMO-1
+      note:
+        description: Optional free text, echoed by the first job
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # Inputs reach the shell through the environment, never by pasting them into scripts.
+  SECS: ${{ inputs.scenario == 'slow' && 25 || inputs.step_seconds }}
+  TICKET: ${{ inputs.ticket }}
+  NOTE: ${{ inputs.note }}
+
+jobs:
+  # ---- stage 0 -----------------------------------------------------------
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo the inputs
+        run: |
+          echo "ticket=$TICKET note=$NOTE seconds=$SECS"
+          sleep "$SECS"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pretend to lint
+        run: sleep "$SECS"
+
+  # ---- stage 1 -----------------------------------------------------------
+  unit:
+    name: Unit (go ${{ matrix.go }} / ${{ matrix.os }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: ${{ inputs.fail_fast }}
+      matrix:
+        go: ["1.22", "1.23", "1.24"]
+        os: [linux, macos]
+    steps:
+      - name: Pretend to test
+        run: sleep "$SECS"
+      - name: Fail on purpose (one-failure scenario)
+        if: ${{ inputs.scenario == 'one-failure' && matrix.go == '1.23' && matrix.os == 'linux' }}
+        run: |
+          echo "failing on purpose"
+          exit 1
+
+  docs:
+    name: Docs
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pretend to build the docs
+        run: sleep "$SECS"
+
+  skipped-example:
+    # Never runs (no scenario option matches): shows how a skipped job looks next to its siblings.
+    needs: prepare
+    if: ${{ inputs.scenario == 'never' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "unreachable"
+
+  # ---- stage 2 -----------------------------------------------------------
+  build:
+    needs: [lint, unit]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: ${{ inputs.fail_fast }}
+      matrix:
+        target: [linux-amd64, linux-arm64, darwin-arm64, windows-amd64]
+    steps:
+      - name: Pretend to compile
+        run: sleep "$SECS"
+
+  # ---- stage 3 -----------------------------------------------------------
+  deploy-staging:
+    name: Deploy staging
+    needs: [build, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pretend to deploy
+        run: sleep "$SECS"
+
+  # ---- stage 4 -----------------------------------------------------------
+  e2e:
+    name: E2E / ${{ matrix.browser }}
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: ${{ inputs.fail_fast }}
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - name: Pretend to drive a browser
+        run: sleep "$SECS"
+
+  smoke:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pretend to smoke-test
+        run: sleep "$SECS"
+
+  # ---- stage 5 -----------------------------------------------------------
+  release:
+    name: Release
+    needs: [e2e, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pretend to release
+        run: sleep "$SECS"
+
+  notify:
+    name: Notify
+    needs: [e2e, smoke]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report the outcome
+        run: echo "result of e2e=${{ needs.e2e.result }} smoke=${{ needs.smoke.result }}"

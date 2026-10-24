@@ -39,7 +39,8 @@ Everywhere: `j/k` move, `g/G` top/bottom, `/` filter, `:` command bar, `esc` bac
 **Job graph** (watching a run)
 - `hjkl` or arrows move between jobs, `enter` opens the job's log, `v` switches style, `ctrl-d/u` scroll
 - Styles: **boxes** (default, left-to-right with arrows), **tree** (top-to-bottom, fits narrow terminals), **lanes** (timeline). Boxes too wide for the terminal fall back to the tree.
-- Matrix and reusable-workflow jobs are collapsed into one node showing counts (`3/8 ✓`); `enter` expands, `x` collapses.
+- In the boxes style, lines connect only neighbouring stages. A dependency that skips a stage is written in the box instead (`build 4✓ ← lint`), so a line is never a guess; the tree view spells out every `(needs …)`.
+- Matrix and reusable-workflow jobs are collapsed into one node showing counts (counts by status, e.g. `6✓ 1✗ 2●`); `enter` expands, `x` collapses.
 - Dependencies come from the `needs:` entries of the workflow file at the run's commit. If they cannot be determined, gh-9s shows the plain jobs list and says why — it never draws a guessed graph.
 - You get a terminal bell and a desktop notification when a run you are watching finishes.
 
@@ -68,6 +69,10 @@ docs/                   design spec and implementation plan
 ```
 
 Only `ghcli` talks to GitHub; `workflow`, `graph`, `favorites` and `ui` are testable without a network.
+
+## Try the graph
+
+`.github/workflows/graph-demo.yml` is a manual-only workflow that does no real work. It has six stages, three matrix jobs (unit 3×2, build 4, e2e 3), a skipped job, an `always()` job, and `workflow_dispatch` inputs of every kind the trigger form supports. Press `t` on it in gh-9s, or run `gh workflow run graph-demo.yml -f scenario=one-failure`, to watch a failure and its skipped downstream jobs.
 
 ## Design
 

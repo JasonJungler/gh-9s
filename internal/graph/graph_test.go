@@ -145,9 +145,11 @@ func TestGroupLabelCountsEveryStatus(t *testing.T) {
 
 func TestExpressionNamedGroupDropsTheExpression(t *testing.T) {
 	cases := map[string]string{ // spec name -> name shown for the group
-		"Test ${{ matrix.go }}":       "Test",
-		"Build (${{ matrix.os }})":    "Build",
-		"e2e / ${{ matrix.browser }}": "e2e",
+		"Test ${{ matrix.go }}":                         "Test",
+		"Build (${{ matrix.os }})":                      "Build",
+		"e2e / ${{ matrix.browser }}":                   "e2e",
+		"Unit (go ${{ matrix.go }} / ${{ matrix.os }})": "Unit",
+		"Build target ${{ matrix.t }}":                  "Build target",
 	}
 	expr := regexp.MustCompile(`\$\{\{[^}]*\}\}`)
 	for specName, want := range cases {

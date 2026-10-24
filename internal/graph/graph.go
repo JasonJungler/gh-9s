@@ -69,14 +69,18 @@ func matchSpec(name string, specs []workflow.JobSpec) int {
 	return best
 }
 
-// displayName is a spec's name without matrix expressions:
-// "Build (${{ matrix.os }})" is shown as "Build".
+// displayName is a spec's name without matrix expressions: "Build (${{ matrix.os }})"
+// and "Unit (go ${{ matrix.go }} / ${{ matrix.os }})" are shown as "Build" and "Unit".
 func displayName(s workflow.JobSpec) string {
 	i := strings.Index(s.Name, "${{")
 	if i < 0 {
 		return s.Name
 	}
-	return strings.TrimRight(s.Name[:i], " ([-:/")
+	prefix := s.Name[:i]
+	if j := strings.LastIndex(prefix, "("); j >= 0 && !strings.Contains(prefix[j:], ")") {
+		prefix = prefix[:j] // the expression sits inside parentheses: drop the whole group
+	}
+	return strings.TrimRight(prefix, " ([-:/")
 }
 
 // countLabel summarises a group by status, e.g. "6✓ 1✗ 2●" (zero counts are left out).
