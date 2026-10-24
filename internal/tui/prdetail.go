@@ -146,9 +146,8 @@ func prDetailLines(d ghcli.PRDetail, width int) detailDoc {
 		orDash(d.ReviewDecision), orDash(d.MergeState),
 		icons.Get(icons.CheckPass), d.ChecksPassed, icons.Get(icons.CheckFail), d.ChecksFailed, icons.Get(icons.CheckPending), d.ChecksPending,
 		d.Additions, d.Deletions, d.ChangedFiles))
-	if len(d.Labels) > 0 {
-		out.add("Labels: " + strings.Join(d.Labels, ", "))
-	}
+	out.add("")
+	out.add(prSidebar(d, width)...)
 	out.add("", "── Description ──")
 	if strings.TrimSpace(d.Body) == "" {
 		out.add("(no description)")

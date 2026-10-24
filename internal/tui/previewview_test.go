@@ -187,3 +187,31 @@ func TestPaneIsDrawnBesideTheListEndToEnd(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+func TestSidebarSectionsOfAPR(t *testing.T) {
+	p := fullPR()
+	p.Reviewers = []ghcli.Reviewer{{Name: "alice", State: "REQUESTED"}, {Name: "bob", State: "APPROVED"}, {Name: "dan", State: "CHANGES_REQUESTED"}}
+	p.Assignees = []string{"carol"}
+	p.Projects = []string{"Roadmap (In review)"}
+	p.Milestone = "v1.0"
+	p.LinkedIssues = []string{"#12 Crash"}
+	txt := plainText(previewLines(previewEntry{pr: &p}, 60))
+	for _, want := range []string{"Reviewers", "alice requested", "bob approved", "dan changes requested", "Assignees  carol",
+		"Labels     bug, ci", "Projects   Roadmap (In review)", "Milestone  v1.0", "Closes     #12 Crash"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("sidebar lacks %q:\n%s", want, txt)
+		}
+	}
+	none := plainText(prSidebar(ghcli.PRDetail{}, 60))
+	if strings.Count(none, "none") != 6 {
+		t.Errorf("empty sections say none:\n%s", none)
+	}
+	// the full detail screen has it too
+	if d := plainText(prDetailLines(p, 80).lines); !strings.Contains(d, "Reviewers") || !strings.Contains(d, "bob approved") {
+		t.Errorf("detail screen lacks the sidebar:\n%s", d)
+	}
+	useNerd(t)
+	if n := plainText(prSidebar(p, 60)); !strings.Contains(n, icons.GetIn(icons.Nerd, icons.ReviewApproved)+" bob") {
+		t.Errorf("nerd reviewer icon missing:\n%s", n)
+	}
+}

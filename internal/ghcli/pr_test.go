@@ -130,3 +130,29 @@ func TestFailingChecksNamesDedupeCapAndSanitise(t *testing.T) {
 		t.Errorf("failed count %d, want 44", d.ChecksFailed)
 	}
 }
+
+func TestParsePRDetailSidebar(t *testing.T) {
+	raw := `{"number":1,
+	 "reviewRequests":[{"__typename":"User","login":"alice"},{"__typename":"Team","slug":"core","name":"Core"},{"__typename":"User","login":"alice"}],
+	 "latestReviews":[{"author":{"login":"bob"},"state":"APPROVED"},{"author":{"login":"alice"},"state":"CHANGES_REQUESTED"},{"author":null,"state":"COMMENTED"}],
+	 "assignees":[{"login":"carol"}],
+	 "projectItems":[{"title":"Roadmap","status":{"name":"In review"}},{"title":"Plain","status":null}],
+	 "milestone":{"title":"v1\u001b[2J.0"},
+	 "closingIssuesReferences":[{"number":12,"title":"Crash"}]}`
+	d, err := ParsePRDetail([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Reviewer{{"alice", "REQUESTED"}, {"core", "REQUESTED"}, {"bob", "APPROVED"}, {"ghost", "COMMENTED"}}
+	if !reflect.DeepEqual(d.Reviewers, want) {
+		t.Errorf("reviewers = %+v, want %+v (a person asked again shows as requested, once)", d.Reviewers, want)
+	}
+	if !reflect.DeepEqual(d.Assignees, []string{"carol"}) || !reflect.DeepEqual(d.Projects, []string{"Roadmap (In review)", "Plain"}) ||
+		d.Milestone != "v1.0" || !reflect.DeepEqual(d.LinkedIssues, []string{"#12 Crash"}) {
+		t.Errorf("assignees %v projects %v milestone %q linked %v", d.Assignees, d.Projects, d.Milestone, d.LinkedIssues)
+	}
+	empty, _ := ParsePRDetail([]byte(`{"number":2,"milestone":null,"projectItems":null}`))
+	if len(empty.Reviewers) != 0 || empty.Milestone != "" {
+		t.Errorf("empty = %+v", empty)
+	}
+}

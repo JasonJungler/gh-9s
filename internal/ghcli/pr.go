@@ -2,6 +2,7 @@ package ghcli
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -22,10 +23,18 @@ type PRDetail struct {
 	Additions, Deletions, ChangedFiles                int
 	Labels                                            []string
 	ChecksPassed, ChecksFailed, ChecksPending         int
+	Reviewers                                         []Reviewer // who was asked and who answered, like the sidebar of the PR page
+	Assignees, Projects, LinkedIssues                 []string
+	Milestone                                         string
 	FailingChecks                                     []string // names of the checks that failed, without repeats, at most maxFailingChecks
 	Comments                                          []Comment
 	Reviews                                           []Review
 }
+
+// Reviewer is a person or team asked to review, with where they stand: "REQUESTED" (asked, no answer
+// yet, or asked again) or the state of their latest review (APPROVED, CHANGES_REQUESTED, COMMENTED,
+// DISMISSED).
+type Reviewer struct{ Name, State string }
 
 // PRFilter narrows the PR list. The zero value lists everything.
 type PRFilter struct{ Mine, ReviewRequested bool }
@@ -87,6 +96,34 @@ func ParsePRDetail(b []byte) (PRDetail, error) {
 			Body        string    `json:"body"`
 			SubmittedAt string    `json:"submittedAt"`
 		} `json:"reviews"`
+		ReviewRequests []struct {
+			Login string `json:"login"`
+			Slug  string `json:"slug"`
+			Name  string `json:"name"`
+		} `json:"reviewRequests"`
+		LatestReviews []struct {
+			Author *rawLogin `json:"author"`
+			State  string    `json:"state"`
+		} `json:"latestReviews"`
+		Assignees []struct {
+			Login string `json:"login"`
+		} `json:"assignees"`
+		ProjectItems []struct {
+			Title  string `json:"title"`
+			Status *struct {
+				Name string `json:"name"`
+			} `json:"status"`
+			Project *struct {
+				Title string `json:"title"`
+			} `json:"project"`
+		} `json:"projectItems"`
+		Milestone *struct {
+			Title string `json:"title"`
+		} `json:"milestone"`
+		Closing []struct {
+			Number int    `json:"number"`
+			Title  string `json:"title"`
+		} `json:"closingIssuesReferences"`
 		Rollup []struct {
 			Typename   string `json:"__typename"`
 			Name       string `json:"name"`    // a check run
@@ -113,6 +150,46 @@ func ParsePRDetail(b []byte) (PRDetail, error) {
 	}
 	for _, r := range raw.Reviews {
 		d.Reviews = append(d.Reviews, Review{loginOrGhost(r.Author), r.State, CleanText(r.Body), r.SubmittedAt})
+	}
+	asked := map[string]bool{}
+	for _, r := range raw.ReviewRequests {
+		name := r.Login
+		if name == "" {
+			name = r.Slug
+		}
+		if name = CleanText(name); name != "" && !asked[name] {
+			asked[name] = true
+			d.Reviewers = append(d.Reviewers, Reviewer{name, "REQUESTED"})
+		}
+	}
+	for _, r := range raw.LatestReviews {
+		if name := loginOrGhost(r.Author); !asked[name] { // asked again: the request is what the page shows
+			asked[name] = true
+			d.Reviewers = append(d.Reviewers, Reviewer{name, r.State})
+		}
+	}
+	for _, a := range raw.Assignees {
+		if l := CleanText(a.Login); l != "" {
+			d.Assignees = append(d.Assignees, l)
+		}
+	}
+	for _, it := range raw.ProjectItems {
+		name := it.Title
+		if it.Project != nil && it.Project.Title != "" {
+			name = it.Project.Title
+		}
+		if name = CleanText(name); name != "" {
+			if it.Status != nil && it.Status.Name != "" {
+				name += " (" + CleanText(it.Status.Name) + ")"
+			}
+			d.Projects = append(d.Projects, name)
+		}
+	}
+	if raw.Milestone != nil {
+		d.Milestone = CleanText(raw.Milestone.Title)
+	}
+	for _, c := range raw.Closing {
+		d.LinkedIssues = append(d.LinkedIssues, fmt.Sprintf("#%d %s", c.Number, CleanText(c.Title)))
 	}
 	for _, c := range raw.Rollup {
 		switch checkOutcome(c.Typename, c.Status, c.Conclusion, c.State) {
@@ -164,7 +241,8 @@ func checkOutcome(typename, status, conclusion, state string) string {
 func FetchPR(r RepoRef, number string) (PRDetail, error) {
 	out, err := Run(Scoped(r, "pr", "view", number, "--json",
 		"number,title,body,author,state,isDraft,baseRefName,headRefName,headRefOid,url,reviewDecision,mergeable,"+
-			"mergeStateStatus,statusCheckRollup,comments,reviews,additions,deletions,changedFiles,labels")...)
+			"mergeStateStatus,statusCheckRollup,comments,reviews,additions,deletions,changedFiles,labels,"+
+			"reviewRequests,latestReviews,assignees,projectItems,milestone,closingIssuesReferences")...)
 	if err != nil {
 		return PRDetail{}, err
 	}

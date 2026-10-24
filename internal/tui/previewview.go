@@ -62,9 +62,6 @@ func prPreview(d *detailDoc, p ghcli.PRDetail, width int) {
 		state += " (draft)"
 	}
 	d.add(ui.Dim.Render(fmt.Sprintf("%s  %s ← %s  %s", p.Author, p.BaseRef, p.HeadRef, state)))
-	if len(p.Labels) > 0 {
-		addWrapped(d, withIcon(icons.Label, strings.Join(p.Labels, ", ")), width, func(s string) string { return s })
-	}
 	d.add("", "Review: "+orDash(p.ReviewDecision))
 	d.add(fmt.Sprintf("Checks: %s%d %s%d %s%d", icons.Get(icons.CheckPass), p.ChecksPassed, icons.Get(icons.CheckFail), p.ChecksFailed, icons.Get(icons.CheckPending), p.ChecksPending))
 	for _, n := range p.FailingChecks {
@@ -74,6 +71,8 @@ func prPreview(d *detailDoc, p ghcli.PRDetail, width int) {
 		d.add(ui.Dim.Render(fmt.Sprintf("  … %d more failing", more)))
 	}
 	d.add(fmt.Sprintf("+%d −%d in %d files", p.Additions, p.Deletions, p.ChangedFiles))
+	d.add("")
+	d.add(prSidebar(p, width)...)
 	description(d, p.Body, width)
 	var comments []ghcli.Comment
 	var reviews []ghcli.Review
