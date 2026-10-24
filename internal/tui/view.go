@@ -75,7 +75,7 @@ func (m model) View() string {
 	if m.wfName != "" && m.view == viewRuns {
 		title += " workflow=" + m.wfName
 	}
-	if m.view == viewChecks || m.view == viewPRDetail {
+	if m.view == viewChecks || m.view == viewPRDetail || m.view == viewDiff {
 		if m.pr != "" {
 			title += " pr=#" + m.pr
 		}
@@ -94,6 +94,9 @@ func (m model) View() string {
 		if used != m.gstyle {
 			title += " (" + m.gstyle.String() + " too wide)"
 		}
+	}
+	if m.view == viewDiff && len(m.matches) > 0 {
+		title += fmt.Sprintf(" match %d/%d", m.mi+1, len(m.matches))
 	}
 	if m.view == viewLogs {
 		title += " job=" + m.jobName

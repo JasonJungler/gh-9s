@@ -40,7 +40,7 @@ func init() {
 		},
 		key:    prDetailKey,
 		body:   prDetailBody,
-		footer: "c checks  o open  j/k scroll  g/G top/bottom",
+		footer: "c checks  d diff  o open  j/k scroll  g/G top/bottom",
 	})
 }
 
@@ -63,6 +63,9 @@ func prDetailKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		st.scroll = maxScroll
 	case "c":
 		cmd := m.push(viewChecks)
+		return m, cmd, true
+	case "d":
+		cmd := m.push(viewDiff)
 		return m, cmd, true
 	case "o":
 		if st.d.URL != "" {

@@ -25,6 +25,7 @@ const (
 	viewFavs
 	viewGraph
 	viewPRDetail
+	viewDiff
 )
 
 var viewNames = map[viewKind]string{

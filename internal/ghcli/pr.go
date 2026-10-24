@@ -154,3 +154,9 @@ func FetchPR(r RepoRef, number string) (PRDetail, error) {
 	}
 	return ParsePRDetail(out)
 }
+
+// FetchPRDiff returns the PR's unified diff as plain text.
+func FetchPRDiff(r RepoRef, number string) (string, error) {
+	out, err := Run(Scoped(r, "pr", "diff", number, "--color", "never")...)
+	return string(out), err
+}
