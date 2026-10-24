@@ -1,6 +1,40 @@
 package ghcli
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+)
+
+// Seams, so tests never launch a browser.
+var (
+	lookPath     = exec.LookPath
+	startCommand = func(name string, args ...string) error {
+		cmd := exec.Command(name, args...)
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		go func() { _ = cmd.Wait() }() // reap it; the browser outlives this call
+		return nil
+	}
+)
+
+// OpenURL opens url in the browser that suits this machine (see BrowserCommand).
+func OpenURL(url string) error {
+	env := BrowserEnv{
+		GOOS:    runtime.GOOS,
+		Browser: os.Getenv("BROWSER"),
+		WSL:     runtime.GOOS == "linux" && IsWSL(os.Getenv, os.ReadFile),
+		Has:     func(n string) bool { _, err := lookPath(n); return err == nil },
+	}
+	name, args := BrowserCommand(env, url)
+	if err := startCommand(name, args...); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return nil
+}
 
 // IsWSL reports whether we run under Windows Subsystem for Linux.
 func IsWSL(getenv func(string) string, readFile func(string) ([]byte, error)) bool {

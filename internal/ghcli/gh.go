@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -59,18 +58,6 @@ func LocalRepo() (repo, branch string) {
 		branch = strings.TrimSpace(string(out))
 	}
 	return
-}
-
-// OpenURL opens url in the default browser.
-func OpenURL(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	default:
-		return exec.Command("xdg-open", url).Start()
-	}
 }
 
 // FetchJobLog returns the log of one job as display lines, dropping the
