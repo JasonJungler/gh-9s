@@ -40,7 +40,7 @@ func init() {
 		},
 		key:    prDetailKey,
 		body:   prDetailBody,
-		footer: "c checks  d diff  o open  j/k scroll  g/G top/bottom",
+		footer: "c checks  d diff  C comment  r review  o open  j/k scroll",
 	})
 }
 
@@ -67,6 +67,10 @@ func prDetailKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	case "d":
 		cmd := m.push(viewDiff)
 		return m, cmd, true
+	case "C":
+		return m.startPRComment(), nil, true
+	case "r":
+		return m.startPRReview(), nil, true
 	case "o":
 		if st.d.URL != "" {
 			_ = openURL(st.d.URL)

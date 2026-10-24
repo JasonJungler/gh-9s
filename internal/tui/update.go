@@ -58,6 +58,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form = &f
 		}
 		return m, nil
+	case prActionDoneMsg:
+		if msg.err != nil {
+			m.status = styErr.Render("✗ " + msg.err.Error())
+			return m, nil
+		}
+		m.status = styOK.Render("✓ " + msg.text)
+		return m, m.fetch() // the PR changed: reload what is on screen
 	case dialogResultMsg:
 		if h, ok := dialogHandlers[msg.id]; ok {
 			return h(m, msg)

@@ -160,3 +160,40 @@ func FetchPRDiff(r RepoRef, number string) (string, error) {
 	out, err := Run(Scoped(r, "pr", "diff", number, "--color", "never")...)
 	return string(out), err
 }
+
+// ReviewKind is what a submitted review says about the PR.
+type ReviewKind string
+
+const (
+	ReviewApprove        ReviewKind = "approve"
+	ReviewRequestChanges ReviewKind = "request-changes"
+	ReviewComment        ReviewKind = "comment"
+)
+
+// ReviewArgs is the `gh pr review` command. The body is one --body=… argument, so text that
+// starts with "-" or holds quotes and newlines can never be read as anything else. An approval
+// may have no body.
+func ReviewArgs(r RepoRef, number string, kind ReviewKind, body string) []string {
+	a := []string{"pr", "review", number, "--" + string(kind)}
+	if body != "" {
+		a = append(a, "--body="+body)
+	}
+	return Scoped(r, a...)
+}
+
+// CommentArgs is the `gh pr comment` command.
+func CommentArgs(r RepoRef, number, body string) []string {
+	return Scoped(r, "pr", "comment", number, "--body="+body)
+}
+
+// ReviewPR submits a review.
+func ReviewPR(r RepoRef, number string, kind ReviewKind, body string) error {
+	_, err := Run(ReviewArgs(r, number, kind, body)...)
+	return err
+}
+
+// CommentPR adds a comment to the PR.
+func CommentPR(r RepoRef, number, body string) error {
+	_, err := Run(CommentArgs(r, number, body)...)
+	return err
+}
