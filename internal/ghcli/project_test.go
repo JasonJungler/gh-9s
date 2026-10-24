@@ -203,3 +203,14 @@ func TestParseProjectViews(t *testing.T) {
 		t.Error("query")
 	}
 }
+
+func TestDraftIssueBodyIsRead(t *testing.T) {
+	b := `{"data":{"repositoryOwner":{"projectV2":{"title":"P","closed":false,"items":{"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"fieldValueByName":null,"content":{"__typename":"DraftIssue","title":"Idea","body":"text\u001b[31m here"}}]}}}}}`
+	p, _, _, err := ParseProjectPage([]byte(b))
+	if err != nil || len(p.Items) != 1 || p.Items[0].Body != "text[31m here" && p.Items[0].Body != "text here" && strings.ContainsRune(p.Items[0].Body, 0x1b) {
+		t.Fatalf("%+v %v", p.Items, err)
+	}
+	if !strings.Contains(projectQuery, "DraftIssue{title body}") {
+		t.Error("query does not ask for the body")
+	}
+}

@@ -644,3 +644,22 @@ func TestPreviewPaneFillsTheScreenWhateverTheItemCount(t *testing.T) {
 		t.Errorf("with one item the view is %d lines", got)
 	}
 }
+
+func TestPreviewPaneShowsTheTextOfADraftCard(t *testing.T) {
+	m, f := boardOn(t)
+	f.project.Items[3].Body = "First line\n\nSecond paragraph about the idea"
+	f.now = f.now.Add(10 * time.Second)
+	m.previewOff, m.width, m.height = false, 160, 40
+	m = keyAll(m, "R")
+	m = keyAll(m, "j", "j", "j") // the draft
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"Idea", "draft - only in the Project", "First line", "Second paragraph about the idea"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pane lacks %q:\n%s", want, out)
+		}
+	}
+	m = keyAll(m, "k") // a real issue row is still previewed through the fetch, not as a draft
+	if _, ok := m.draftLines(40); ok {
+		t.Error("a non-draft row was treated as a draft")
+	}
+}

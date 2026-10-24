@@ -12,6 +12,7 @@ type ProjectItem struct {
 	Status            string // "" when the item has no Status
 	Type              string // "Issue", "PullRequest", "DraftIssue", or "" when the item is not readable
 	Number            int
+	Body              string // a draft card's text
 	Title, URL, Repo  string // Repo is OWNER/NAME
 	State             string // OPEN, CLOSED or MERGED
 	Draft             bool   // a draft pull request, or a draft issue that lives only in the Project
@@ -54,7 +55,7 @@ const projectPageSize = 100
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:20){nodes{login}} labels(first:20){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed url views(first:20){nodes{name layout filter sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title}}}}}}}}`
+const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed url views(first:20){nodes{name layout filter sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
 
 type nameNodes struct {
 	Nodes []struct {
@@ -129,6 +130,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 								Type    string `json:"__typename"`
 								Number  int    `json:"number"`
 								Title   string `json:"title"`
+								Body    string `json:"body"`
 								State   string `json:"state"`
 								URL     string `json:"url"`
 								Updated string `json:"updatedAt"`
@@ -194,7 +196,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		it.Type, it.Title = c.Type, oneLine(CleanText(c.Title))
 		switch c.Type {
 		case "DraftIssue":
-			it.Draft = true
+			it.Draft, it.Body = true, CleanText(c.Body)
 		default:
 			it.Number, it.State, it.URL, it.Updated = c.Number, c.State, CleanText(c.URL), c.Updated
 			if c.Repo != nil {

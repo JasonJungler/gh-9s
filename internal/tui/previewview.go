@@ -149,6 +149,9 @@ func discussion(d *detailDoc, comments []ghcli.Comment, reviews []ghcli.Review, 
 
 // previewPaneLines are the lines of the selected row's entry at a width, laid out once per entry.
 func (m model) previewPaneLines(width int) []string {
+	if lines, ok := m.draftLines(width); ok {
+		return lines
+	}
 	st := m.preview
 	if st == nil || !st.has {
 		return nil
@@ -190,4 +193,37 @@ func (m model) previewContent(w, h int) string {
 		b.WriteString(" " + lines[i] + "\n")
 	}
 	return b.String()
+}
+
+// draftLines is the pane for a draft card of a board, which exists only in the Project and so has
+// nothing to fetch: its title and text.
+func (m model) draftLines(width int) ([]string, bool) {
+	if m.view != viewBoard {
+		return nil, false
+	}
+	r, ok := m.selected()
+	if !ok {
+		return nil, false
+	}
+	it, found := boardItem(m.boardSt().data, r.id)
+	if !found || it.Type != "DraftIssue" {
+		return nil, false
+	}
+	width = max(width, 10)
+	var d detailDoc
+	addWrapped(&d, it.Title, width, bold)
+	d.add(ui.Dim.Render("draft - only in the Project"))
+	d.add("")
+	body := strings.TrimSpace(it.Body)
+	if body == "" {
+		body = "(no description)"
+	}
+	for _, para := range strings.Split(body, "\n") {
+		addWrapped(&d, para, width, func(s string) string { return s })
+	}
+	lines := d.lines
+	if len(lines) > previewTotalLines {
+		lines = append(lines[:previewTotalLines:previewTotalLines], ui.Dim.Render("… more text in the Project on GitHub (o)"))
+	}
+	return lines, true
 }
