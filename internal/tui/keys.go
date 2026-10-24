@@ -426,3 +426,24 @@ func (m *model) gotoMatch(i int) {
 	m.follow = false
 	m.top = min(max(m.matches[i]-2, 0), m.maxTop())
 }
+
+// selectedNodeID is the ID of the selected graph node ("" if none).
+func (m model) selectedNodeID() string {
+	if n := m.shown().Nodes; m.gsel >= 0 && m.gsel < len(n) {
+		return n[m.gsel].ID
+	}
+	return ""
+}
+
+// reselect points the selection at the node with the given ID after the graph
+// changed (jobs appear and finish while watching), or clamps it if that node is gone.
+func (m *model) reselect(id string) {
+	nodes := m.shown().Nodes
+	for i, n := range nodes {
+		if id != "" && n.ID == id {
+			m.gsel = i
+			return
+		}
+	}
+	m.gsel = min(m.gsel, max(0, len(nodes)-1))
+}

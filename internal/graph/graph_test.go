@@ -2,6 +2,7 @@ package graph
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -37,15 +38,15 @@ func TestBuildGraphLinear(t *testing.T) {
 func TestBuildGraphMatrixCollapses(t *testing.T) {
 	specs := []workflow.JobSpec{{ID: "build", Name: "build"}}
 	g := Build([]Job{ok("build (ubuntu, 1.22)"), ok("build (macos, 1.22)")}, specs)
-	if g.Flat || len(g.Nodes) != 1 || len(g.Nodes[0].Members) != 2 || g.Nodes[0].Label != "2/2 ✓" {
+	if g.Flat || len(g.Nodes) != 1 || len(g.Nodes[0].Members) != 2 || g.Nodes[0].Label != "2✓" {
 		t.Fatalf("graph = %+v", g)
 	}
 	g = Build([]Job{ok("build (ubuntu, 1.22)"), job("build (macos, 1.22)", "completed", "failure")}, specs)
-	if g.Nodes[0].State != ui.StFail || g.Nodes[0].Label != "1/2 ✗" {
+	if g.Nodes[0].State != ui.StFail || g.Nodes[0].Label != "1✓ 1✗" {
 		t.Errorf("failing group = %+v", g.Nodes[0])
 	}
 	g = Build([]Job{ok("build (a)"), job("build (b)", "in_progress", "")}, specs)
-	if g.Nodes[0].State != ui.StRun || g.Nodes[0].Label != "1/2 ●" {
+	if g.Nodes[0].State != ui.StRun || g.Nodes[0].Label != "1✓ 1●" {
 		t.Errorf("running group = %+v", g.Nodes[0])
 	}
 }
@@ -126,5 +127,43 @@ func TestStagesDiamond(t *testing.T) {
 	want := [][]int{{0, 1}, {2}, {3, 4}, {5}}
 	if got := g.stages(); g.Flat || !reflect.DeepEqual(got, want) {
 		t.Errorf("stages = %v; want %v (flat=%v %s)", got, want, g.Flat, g.Reason)
+	}
+}
+
+func TestGroupLabelCountsEveryStatus(t *testing.T) {
+	g := Build([]Job{
+		ok("build (a)"), ok("build (b)"), job("build (c)", "completed", "failure"),
+		job("build (d)", "in_progress", ""), job("build (e)", "queued", ""), job("build (f)", "completed", "skipped"),
+	}, []workflow.JobSpec{{ID: "build", Name: "build"}})
+	if got := g.Nodes[0].Label; got != "2✓ 1✗ 1● 2○" {
+		t.Errorf("label = %q; want counts for every status", got)
+	}
+	if g.Nodes[0].State != ui.StFail {
+		t.Errorf("state = %v; a failed member makes the group failed", g.Nodes[0].State)
+	}
+}
+
+func TestExpressionNamedGroupDropsTheExpression(t *testing.T) {
+	cases := map[string]string{ // spec name -> name shown for the group
+		"Test ${{ matrix.go }}":       "Test",
+		"Build (${{ matrix.os }})":    "Build",
+		"e2e / ${{ matrix.browser }}": "e2e",
+	}
+	expr := regexp.MustCompile(`\$\{\{[^}]*\}\}`)
+	for specName, want := range cases {
+		g := Build([]Job{
+			{ID: "1", Name: expr.ReplaceAllString(specName, "a"), Status: "completed", Conclusion: "success"},
+			{ID: "2", Name: expr.ReplaceAllString(specName, "b"), Status: "completed", Conclusion: "success"},
+		}, []workflow.JobSpec{{ID: "j", Name: specName}})
+		if g.Flat || len(g.Nodes) != 1 || g.Nodes[0].Name != want || len(g.Nodes[0].Members) != 2 {
+			t.Errorf("spec %q: flat=%v nodes=%+v; want one group named %q", specName, g.Flat, g.Nodes, want)
+		}
+	}
+}
+
+func TestSingleEntryMatrixKeepsItsSuffix(t *testing.T) {
+	g := Build([]Job{ok("build (ubuntu)")}, []workflow.JobSpec{{ID: "build", Name: "build"}})
+	if g.Flat || len(g.Nodes) != 1 || g.Nodes[0].Name != "build (ubuntu)" || len(g.Nodes[0].Members) != 0 {
+		t.Errorf("node = %+v", g.Nodes[0])
 	}
 }

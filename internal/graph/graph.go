@@ -69,14 +69,52 @@ func matchSpec(name string, specs []workflow.JobSpec) int {
 	return best
 }
 
-func aggregate(jobs []Job) (st ui.State, done int) {
-	st = ui.StOK
+// displayName is a spec's name without matrix expressions:
+// "Build (${{ matrix.os }})" is shown as "Build".
+func displayName(s workflow.JobSpec) string {
+	i := strings.Index(s.Name, "${{")
+	if i < 0 {
+		return s.Name
+	}
+	return strings.TrimRight(s.Name[:i], " ([-:/")
+}
+
+// countLabel summarises a group by status, e.g. "6✓ 1✗ 2●" (zero counts are left out).
+// ● is a job in progress; ○ is one that has not started, was skipped, or was cancelled.
+func countLabel(jobs []Job) string {
+	var ok, fail, run, wait int
+	for _, j := range jobs {
+		_, s := j.State()
+		switch {
+		case s == ui.StOK:
+			ok++
+		case s == ui.StFail:
+			fail++
+		case s == ui.StRun && j.Status == "in_progress":
+			run++
+		default:
+			wait++
+		}
+	}
+	var parts []string
+	for _, p := range []struct {
+		n   int
+		sym string
+	}{{ok, "✓"}, {fail, "✗"}, {run, "●"}, {wait, "○"}} {
+		if p.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d%s", p.n, p.sym))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func aggregate(jobs []Job) ui.State {
+	st := ui.StOK
 	running := false
 	for _, j := range jobs {
 		_, s := j.State()
 		switch s {
 		case ui.StOK:
-			done++
 		case ui.StFail:
 			st = ui.StFail
 		case ui.StRun:
@@ -90,7 +128,7 @@ func aggregate(jobs []Job) (st ui.State, done int) {
 	if st != ui.StFail && running {
 		st = ui.StRun
 	}
-	return st, done
+	return st
 }
 
 func newNode(id, name string, jobs []Job) Node {
@@ -114,13 +152,15 @@ func newNode(id, name string, jobs []Job) Node {
 	}
 	if len(jobs) == 1 {
 		n.Job = jobs[0]
+		if jobs[0].Name != "" {
+			n.Name = jobs[0].Name // keeps a matrix suffix such as "build (ubuntu)"
+		}
 		n.Label, n.State = jobs[0].State()
 		return n
 	}
-	var done int
-	n.State, done = aggregate(jobs)
+	n.State = aggregate(jobs)
 	n.Members = jobs
-	n.Label = fmt.Sprintf("%d/%d %s", done, len(jobs), ui.Symbol[n.State])
+	n.Label = countLabel(jobs)
 	return n
 }
 
@@ -161,7 +201,7 @@ func Build(jobs []Job, specs []workflow.JobSpec) Graph {
 			continue // skipped job: nothing to draw
 		}
 		index[s.ID] = len(g.Nodes)
-		g.Nodes = append(g.Nodes, newNode(s.ID, s.Name, groups[i]))
+		g.Nodes = append(g.Nodes, newNode(s.ID, displayName(s), groups[i]))
 	}
 	for i, s := range specs {
 		if len(groups[i]) == 0 {

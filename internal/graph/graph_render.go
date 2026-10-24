@@ -94,13 +94,7 @@ func nodeParts(n Node, now time.Time) (sym, rest string) {
 		}
 		rest = n.Name
 	} else {
-		done := 0
-		for _, m := range n.Members {
-			if _, s := m.State(); s == ui.StOK {
-				done++
-			}
-		}
-		rest = fmt.Sprintf("%s %d/%d", n.Name, done, len(n.Members))
+		rest = n.Name + " " + n.Label
 	}
 	if d := nodeDur(n, now); d != "" {
 		rest += " " + d

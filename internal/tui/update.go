@@ -98,8 +98,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.note = "graph unavailable: " + msg.graph.Reason
 				return m, notifyCmd
 			}
+			keep := m.selectedNodeID()
 			m.graph = *msg.graph
-			m.gsel = min(m.gsel, max(0, len(m.shown().Nodes)-1))
+			m.reselect(keep)
 			return m, notifyCmd
 		}
 		if msg.err == nil && m.view == viewLogs {

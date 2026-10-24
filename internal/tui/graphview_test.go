@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
 	"github.com/MurabitoB/gh-9s/internal/workflow"
 )
@@ -105,5 +106,21 @@ func TestGraphScrollKeysClamp(t *testing.T) {
 	m = keys(m, "ctrl+u")
 	if m.top != 0 {
 		t.Errorf("top = %d; want 0", m.top)
+	}
+}
+
+func TestSelectionFollowsTheSameJobAcrossRefreshes(t *testing.T) {
+	specs := []workflow.JobSpec{{ID: "a", Name: "a"}, {ID: "b", Name: "b"}, {ID: "c", Name: "c"}, {ID: "z", Name: "z"}}
+	m := graphModel()
+	g1 := graph.Build([]graph.Job{ok("a"), ok("b"), ok("c")}, specs)
+	next, _ := m.Update(dataMsg{view: viewGraph, graph: &g1, run: ghcli.RunMeta{Status: "in_progress"}})
+	m = next.(model)
+	m.gsel = 2 // job c
+	// a new job that sorts before c appears on the next refresh
+	g2 := graph.Build([]graph.Job{ok("a"), ok("z"), ok("b"), ok("c")}, append([]workflow.JobSpec{specs[3]}, specs[:3]...))
+	next, _ = m.Update(dataMsg{view: viewGraph, graph: &g2, run: ghcli.RunMeta{Status: "in_progress"}})
+	m = next.(model)
+	if got := m.shown().Nodes[m.gsel].Name; got != "c" {
+		t.Errorf("selection moved to %q; want it to stay on c", got)
 	}
 }
