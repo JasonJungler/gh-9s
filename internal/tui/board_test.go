@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -305,21 +304,6 @@ func TestPreviewPaneFollowsBoardRows(t *testing.T) {
 	m = keyAll(m, "j", "j", "j") // the draft
 	if _, _, _, ok := m.previewTarget(); ok {
 		t.Error("a draft card has nothing to preview")
-	}
-}
-
-func TestProjectsAreOnlyEverRead(t *testing.T) {
-	for _, f := range []string{"board.go", "favprojects.go", "favtabs.go", "../ghcli/project.go"} {
-		b, err := os.ReadFile(filepath.Clean(f))
-		if err != nil {
-			t.Fatal(err)
-		}
-		s := strings.ToLower(string(b))
-		for _, bad := range []string{"mutation", "item-edit", "item-add", "item-delete", "item-create", "\"project\", \"edit\"", "-x\", \"post", "--method"} {
-			if strings.Contains(s, bad) {
-				t.Errorf("%s contains %q: Projects are read-only in this release", f, bad)
-			}
-		}
 	}
 }
 

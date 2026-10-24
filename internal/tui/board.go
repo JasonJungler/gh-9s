@@ -62,7 +62,7 @@ func init() {
 		apply:    boardApply,
 		key:      boardKeyHandler,
 		body:     boardBody,
-		footer:   "tab/h/l switch column  [/] switch view  enter open  b columns  f pin/unpin Project  o browser  / filter",
+		footer:   "tab/h/l switch column  [/] switch view  enter open  s status  a assign  n add  b columns  f pin/unpin Project  o browser  / filter",
 	})
 }
 
@@ -347,6 +347,26 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	switch k.String() {
 	case "b":
 		return m.toggleBoardColumns(), nil, true
+	case "s":
+		next, cmd := m.startStatus()
+		return next, cmd, true
+	case "a":
+		next, cmd := m.startAssign()
+		return next, cmd, true
+	case "n":
+		next, cmd := m.startAdd()
+		return next, cmd, true
+	case "H", "L":
+		if !st.colsActive(m) {
+			m.status = styDim.Render("H and L move a card between columns; b shows the columns, s picks a Status")
+			return m, nil, true
+		}
+		delta := 1
+		if k.String() == "H" {
+			delta = -1
+		}
+		next, cmd := m.moveCardSideways(delta)
+		return next, cmd, true
 	case "tab", "l", "right":
 		return m.switchBoardTab(1), nil, true
 	case "shift+tab", "h", "left":

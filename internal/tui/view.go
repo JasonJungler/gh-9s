@@ -342,7 +342,7 @@ func (m model) footer() string {
 		keys = s.footer
 	}
 	if m.view == viewBoard && m.boardSt().colsActive(m) {
-		keys = "h/l column  j/k card  g/G first/last  enter open  b list  [/] view  f pin/unpin Project  o browser  / filter"
+		keys = "h/l column  j/k card  H/L move card  s status  a assign  n add  enter open  b list  [/] view  f pin/unpin Project  o browser  / filter"
 	}
 	if m.previewShown() {
 		keys += "  J/K scroll pane  p hide pane"

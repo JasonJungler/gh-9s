@@ -9,6 +9,7 @@ import (
 
 // ProjectItem is one card of a GitHub Project (v2) board.
 type ProjectItem struct {
+	ID                string // the card's node id in the Project
 	Status            string // "" when the item has no Status
 	Type              string // "Issue", "PullRequest", "DraftIssue", or "" when the item is not readable
 	Number            int
@@ -29,6 +30,9 @@ type ProjectView struct {
 
 // Project is a GitHub Project (v2) as read from one board.
 type Project struct {
+	ID          string            // the Project's node id, which the write calls need
+	StatusField string            // the id of its Status field
+	StatusIDs   map[string]string // Status option name to option id
 	Title       string
 	Closed      bool
 	URL         string   // the Project on the web
@@ -55,7 +59,7 @@ const projectPageSize = 100
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:20){nodes{login}} labels(first:20){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed url views(first:20){nodes{name layout filter sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
+const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:20){nodes{name layout filter sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
 
 type nameNodes struct {
 	Nodes []struct {
@@ -96,6 +100,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		Data *struct {
 			Owner *struct {
 				Project *struct {
+					ID     string `json:"id"`
 					Title  string `json:"title"`
 					Closed bool   `json:"closed"`
 					URL    string `json:"url"`
@@ -112,7 +117,9 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 						} `json:"nodes"`
 					} `json:"views"`
 					Field *struct {
+						ID      string `json:"id"`
 						Options []struct {
+							ID   string `json:"id"`
 							Name string `json:"name"`
 						} `json:"options"`
 					} `json:"field"`
@@ -123,6 +130,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 							End     string `json:"endCursor"`
 						} `json:"pageInfo"`
 						Nodes []*struct {
+							ID     string `json:"id"`
 							Status *struct {
 								Name string `json:"name"`
 							} `json:"fieldValueByName"`
@@ -163,10 +171,12 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		return Project{}, false, "", errors.New("project not found or no access")
 	}
 	pr := resp.Data.Owner.Project
-	p = Project{Title: oneLine(CleanText(pr.Title)), Closed: pr.Closed, URL: CleanText(pr.URL), Total: pr.Items.TotalCount}
+	p = Project{ID: pr.ID, Title: oneLine(CleanText(pr.Title)), Closed: pr.Closed, URL: CleanText(pr.URL), Total: pr.Items.TotalCount}
 	if pr.Field != nil {
+		p.StatusField, p.StatusIDs = pr.Field.ID, map[string]string{}
 		for _, o := range pr.Field.Options {
 			p.StatusOrder = append(p.StatusOrder, oneLine(CleanText(o.Name)))
+			p.StatusIDs[oneLine(CleanText(o.Name))] = o.ID
 		}
 	}
 	for _, v := range pr.Views.Nodes {
@@ -183,7 +193,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		if n == nil {
 			continue
 		}
-		it := ProjectItem{}
+		it := ProjectItem{ID: n.ID}
 		if n.Status != nil {
 			it.Status = oneLine(CleanText(n.Status.Name))
 		}

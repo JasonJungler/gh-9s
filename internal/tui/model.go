@@ -124,6 +124,8 @@ type model struct {
 	pinDelProject  *pins.Project      // ... or the pinned Project
 	boardViewMemo  map[string]string  // the view chosen on each Project (by name), for the session
 	boardColsOn    bool               // the columns layout is chosen, for the session
+	boardOp        *boardOp           // a write being collected through dialogs
+	boardBusy      bool               // a write is running
 	projectChoices []ghcli.ProjectRef // the Projects offered by the pin dialog
 	board          pins.Project       // the Project the board screen shows
 

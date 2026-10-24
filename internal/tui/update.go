@@ -234,6 +234,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onRepoPin(msg)
 	case projectListMsg:
 		return m.onProjectList(msg)
+	case boardWriteDoneMsg:
+		return m.onBoardWriteDone(msg)
+	case boardAssigneesMsg:
+		return m.onBoardAssignees(msg)
+	case boardResolvedMsg:
+		return m.onBoardResolved(msg)
 	case projectPinMsg:
 		return m.onProjectPin(msg)
 	case gotoMsg:
