@@ -11,11 +11,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/favorites"
+	"github.com/MurabitoB/gh-9s/internal/icons"
 	"github.com/MurabitoB/gh-9s/internal/settings"
 )
 
 func settingsModel(t *testing.T, content string, env map[string]string) (model, string) {
 	t.Helper()
+	oldIcons := icons.Current() // changing "icons" switches the process-wide set
+	t.Cleanup(func() { icons.Use(oldIcons) })
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 	if content != "" {

@@ -173,7 +173,7 @@ func TestTheInboxRowsFollowAnIconSwitch(t *testing.T) {
 	f.items[inboxKeyOf("github.com", ghcli.InboxAssigned)] = []ghcli.InboxItem{issueItem("github.com", "acme/api", 1, "one", "2026-10-24T10:00:00Z")}
 	m, _ := startAs(t, `{"icons":"plain"}`, nil)
 	m = keyAll(m, "0")
-	if v := ansi.Strip(m.View()); strings.Contains(v, icons.GetIn(icons.Nerd, icons.IssueOpen)) {
+	if v := ansi.Strip(m.View()); strings.Contains(v, icons.GetIn(icons.Nerd, icons.IssueOpen)+" #1") {
 		t.Fatalf("setup: plain first:\n%s", v)
 	}
 	m = keyAll(cmdLine(m, "set icons nerd"), "enter")
@@ -181,7 +181,7 @@ func TestTheInboxRowsFollowAnIconSwitch(t *testing.T) {
 		m = keyAll(m, "0")
 	}
 	m = pump(m, m.fetch())
-	if v := ansi.Strip(m.View()); !strings.Contains(v, icons.GetIn(icons.Nerd, icons.IssueOpen)) {
+	if v := ansi.Strip(m.View()); !strings.Contains(v, icons.GetIn(icons.Nerd, icons.IssueOpen)+" #1") {
 		t.Errorf("rows built before the switch must change with it:\n%s", v)
 	}
 }
