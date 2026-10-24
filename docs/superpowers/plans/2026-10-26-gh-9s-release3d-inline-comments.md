@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** On the review screen, put the cursor on a line, press `c` to write an inline comment; comments pile up as drafts and go out together with the verdict (approve / request changes / comment) as one GitHub review.
+**Goal:** On the review screen, put the cursor on a line (or select a range with `V`), press `c` to write an inline comment; comments pile up as drafts, kept on disk per PR, and go out together with the verdict (approve / request changes / comment) as one GitHub review.
+
+**Changes after looking at similar tools (lgtm, tuicr, octo.nvim) and GitHub's docs:** drafts persist in `drafts.json` next to `favorites.json` (survive quitting/crashes); line ranges are supported (`start_line`/`start_side`); `REQUEST_CHANGES` and `COMMENT` need a non-empty review body (GitHub's documented rule), only `APPROVE` may go without. Unverified assumptions to check on a test PR: that `line`+`side` (not `position`) is accepted, and what GitHub says when the user already has a pending review.
 
 **Architecture:** `internal/ghcli` gains `SubmitReview` (one `gh api …/pulls/N/reviews` POST with a JSON body on stdin, pinned to a commit) and a head-commit check. The review screen gets a line cursor, a pure `rowTarget` that maps a row to (path, line, side), drafts kept in `diffState`, and the existing review flow (verdict choice → body → confirmation) extended to include the drafts.
 
@@ -16,8 +18,8 @@
 - The review body and every comment travel as JSON on stdin (`gh api --input -`), never inside an argv string or a shell.
 - Nothing is sent without the confirmation dialog, which names `owner/repo#N`, the verdict, and the number of inline comments.
 - The review is pinned to `commit_id` = the head commit the diff was fetched at. If the PR's head moved since, refuse (message + refetch); never post comments against a different commit.
-- Drafts live in memory only; leaving the screen or quitting with drafts asks for confirmation. Only single-line comments.
-- Existing keys keep working; the new ones are `c` (comment on the line, new side), `C` (old side, when the row has an old line), `x` (delete the draft under the cursor), `r` (review verdict; also still available on the PR detail).
+- Drafts are written to `drafts.json` (per host/repo/PR, with the head commit they were written against) on every change and loaded when the PR's diff opens; leaving the screen with drafts does not ask (nothing is lost), but a successful submit and `X` (discard all, with confirmation) remove them. Single-line and line-range comments (a range stays on one side of one file).
+- Existing keys keep working; the new ones are `c` (comment on the line, new side), `C` (old side, when the row has an old line), `V` (start/extend a range; `esc` cancels), `x` (delete the draft under the cursor), `X` (discard all drafts of this PR), `r` (review verdict; also still available on the PR detail).
 - Remote text sanitised as everywhere; no network in tests (seams). Run Go as `mise exec -- go ...` with `export PATH=/opt/homebrew/bin:$PATH`. Branch `release3d-comments` off `main`; no push/tag without approval. README updated.
 
 ## Review Focus
@@ -25,9 +27,9 @@
 - A comment on a line that GitHub does not accept (outside the diff, a hunk header, a binary file) is refused before sending, with a sentence saying why; a 422 from GitHub shows GitHub's reason.
 - An existing pending review of the user (GitHub allows one) → GitHub's message is shown unchanged, drafts are kept, nothing is lost.
 - A body or comment with quotes, newlines, emoji, `-`-prefixed text, a 60,000-character body.
-- Drafts across a refetch (`R`) and a layout switch: kept when their file and line still exist in the new diff, listed as dropped otherwise; same line commented twice; draft deleted; 100 drafts.
+- Drafts across a refetch (`R`), a layout switch and a restart: kept when their file and line still exist in the new diff, listed as dropped otherwise; a corrupt or hand-edited `drafts.json` (left untouched, drafts disabled with a status note); same line commented twice; draft deleted; 100 drafts; drafts written for an older head commit shown with a note.
 - The cursor: moving with j/k/ctrl+d/g/G keeps it on screen, searching and `]`/`[`/`}`/`{` move it, resizing across 120 columns keeps it on the same source line, it never sits on a blank or truncation row.
-- Request changes with no body and no drafts is refused (GitHub requires one of them); approve with drafts is allowed.
+- Request changes / comment with an empty body is refused with a sentence (GitHub requires a body); approve with drafts and no body is allowed.
 - Submitting twice (double key press) sends one review.
 
 ---
@@ -41,8 +43,8 @@
 **Interfaces:**
 - Produces:
   - `func RunInput(stdin []byte, args ...string) ([]byte, error)` — like `Run`, with stdin
-  - `type InlineComment struct { Path string; Line int; Side string /* LEFT|RIGHT */; Body string }`
-  - `func ReviewPayload(head string, kind ReviewKind, body string, comments []InlineComment) ([]byte, error)` — JSON `{commit_id, event: APPROVE|REQUEST_CHANGES|COMMENT, body (omitted when empty), comments: [{path, line, side, body}]}`; refuses request-changes with neither body nor comments, and any comment with an empty body, empty path, or line < 1
+  - `type InlineComment struct { Path string; Line int; Side string /* LEFT|RIGHT */; StartLine int /* 0 for one line */; Body string }`
+  - `func ReviewPayload(head string, kind ReviewKind, body string, comments []InlineComment) ([]byte, error)` — JSON `{commit_id, event: APPROVE|REQUEST_CHANGES|COMMENT, body (omitted when empty), comments: [{path, line, side, body}]}`; refuses request-changes and comment with an empty body (GitHub requires one), and any comment with an empty body, empty path, line < 1, or StartLine >= Line (`start_line`/`start_side` are sent only for ranges)
   - `func SubmitReviewArgs(r RepoRef, number string) []string` — `api [--hostname H] --method POST repos/OWNER/NAME/pulls/N/reviews --input -`
   - `func SubmitReview(r RepoRef, number, head string, kind ReviewKind, body string, comments []InlineComment) error`
   - `func PRHead(r RepoRef, number string) (string, error)` — `gh pr view N --json headRefOid`
@@ -78,9 +80,9 @@
 
 **Interfaces:**
 - Consumes: Task 2 `rowTarget`, `newTextDialog`.
-- Produces: `type draft struct { target; Body string }`; `diffState.drafts []draft`; `c`/`C` open a text dialog titled `Comment on path:line (new|old) of owner/repo#N`; on OK the draft is added; drafts show in place under their line (reuse `threadRows` through a `ghcli.Thread` with author `you (pending)`) and in the footer as `N drafts`; `x` removes the draft under the cursor; `reconcileDrafts(old []draft, d diff.Diff) (kept, dropped []draft)` is applied on every refetch (dropped ones are listed in the status line); leaving the screen (esc/back, `q`) with drafts opens a confirm dialog "Discard N draft comments?".
+- Produces: `type draft struct { target; Body string }`; `diffState.drafts []draft` (loaded from and saved to `internal/drafts`, a new package modelled on `internal/recent`: `Load(path)`, `Get(host, repo, number)`, `Put(host, repo, number, head, []Draft)`, `Delete(...)`, validating everything it reads); `c`/`C` open a text dialog titled `Comment on path:line (new|old) of owner/repo#N`; on OK the draft is added; drafts show in place under their line (reuse `threadRows` through a `ghcli.Thread` with author `you (pending)`) and in the footer as `N drafts`; `x` removes the draft under the cursor; `reconcileDrafts(old []draft, d diff.Diff) (kept, dropped []draft)` is applied on every refetch (dropped ones are listed in the status line); `V` starts a range at the cursor and moving extends it (shown highlighted), `c` then comments the whole range, `esc` cancels; `X` discards all drafts of the PR after a confirm dialog.
 
-- [ ] **Step 1: Write the failing tests:** `c` on a changed line opens the dialog naming the file, line, side and PR, OK adds the draft, it appears under the line in both layouts; `C` on a deleted line uses the LEFT side; two drafts on one line both show; `x` removes only the one under the cursor; `c` on a hunk header only sets the status sentence; empty text adds nothing; refetch keeps drafts whose line still exists and reports dropped ones; esc with drafts asks first and `n` stays, `y` leaves; drafts of another PR never appear.
+- [ ] **Step 1: Write the failing tests:** `c` on a changed line opens the dialog naming the file, line, side and PR, OK adds the draft, it appears under the line in both layouts; `C` on a deleted line uses the LEFT side; two drafts on one line both show; `x` removes only the one under the cursor; `c` on a hunk header only sets the status sentence; empty text adds nothing; refetch keeps drafts whose line still exists and reports dropped ones; `V`, move, `c` makes a range draft shown under its last line; a range across files or sides is refused; a restart (new model, same store) brings the drafts back; `X` + `y` clears them from memory and disk; drafts of another PR never appear.
 - [ ] **Step 2: Run** `mise exec -- go test ./internal/tui -run Draft` — Expected: FAIL.
 - [ ] **Step 3: Implement.** **Step 4: Run** the suite as in Task 2 — Expected: all `ok`.
 - [ ] **Step 5: Commit** `feat: draft inline comments`.
