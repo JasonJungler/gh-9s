@@ -302,14 +302,14 @@ func inboxRows(tab int, ts inboxTabState) ([]string, []row) {
 			title = "[draft] " + title
 		}
 		num := fmt.Sprintf("#%d", it.Number)
+		numIcon := icons.PROpen
 		switch {
 		case it.Kind == "issue":
-			num = withIcon(icons.IssueOpen, num)
+			numIcon = icons.IssueOpen
 		case it.Draft:
-			num = withIcon(icons.PRDraft, num)
-		default:
-			num = withIcon(icons.PROpen, num)
+			numIcon = icons.PRDraft
 		}
+		num = withIcon(numIcon, num)
 		st := stOther
 		var cells []string
 		switch tab {
@@ -322,7 +322,7 @@ func inboxRows(tab int, ts inboxTabState) ([]string, []row) {
 		default:
 			cells = []string{repo, num, it.Kind, age(it.UpdatedAt), it.Author, title}
 		}
-		rows = append(rows, row{id: inboxKey(it), url: it.URL, state: st, cells: cells})
+		rows = append(rows, row{id: inboxKey(it), url: it.URL, state: st, cells: cells, tint: tintFor(1, numIcon)})
 	}
 	return cols, rows
 }

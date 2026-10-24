@@ -18,6 +18,8 @@ type row struct {
 	url   string
 	extra string // view specific: workflow id, PR number, ...
 
+	tint []string // a colour (lipgloss) per cell, "" for none: how an icon takes its meaning's colour; empty in the plain set
+
 	status, conclusion string // runs: the run's own status and conclusion, which decide what can be done to it
 }
 
@@ -151,7 +153,7 @@ func fetchIssues(r ghcli.RepoRef, f ghcli.IssueFilter) (table, error) {
 		if i.State != "OPEN" {
 			st = stOther
 		}
-		t.rows = append(t.rows, row{id: fmt.Sprint(i.Number), state: st, url: i.URL,
+		t.rows = append(t.rows, row{id: fmt.Sprint(i.Number), state: st, url: i.URL, tint: tintFor(0, issueIcon(i.State)),
 			cells: []string{issueNumberCell(i.Number, i.State), i.State, i.Title, author,
 				orDash(strings.Join(labels, ",")), orDash(strings.Join(assignees, ",")), age(i.UpdatedAt)}})
 	}
@@ -202,11 +204,11 @@ func prRows(prs []prListItem, currentBranch string) table {
 		if currentBranch != "" && p.Head == currentBranch {
 			num = "*" + num
 		}
+		icon := icons.PROpen
 		if p.Draft {
-			num = withIcon(icons.PRDraft, num)
-		} else {
-			num = withIcon(icons.PROpen, num)
+			icon = icons.PRDraft
 		}
+		num = withIcon(icon, num)
 		review := p.Review
 		if review == "" {
 			review = "-"
@@ -215,7 +217,7 @@ func prRows(prs []prListItem, currentBranch string) table {
 		if p.Author != nil && p.Author.Login != "" {
 			author = p.Author.Login
 		}
-		t.rows = append(t.rows, row{id: fmt.Sprint(p.Number), state: st, url: p.URL,
+		t.rows = append(t.rows, row{id: fmt.Sprint(p.Number), state: st, url: p.URL, tint: tintFor(0, icon),
 			cells: []string{num, label, title, author, p.Head, review, age(p.UpdatedAt)}})
 	}
 	return t
@@ -242,13 +244,29 @@ func withIcon(n icons.Name, text string) string {
 	return text
 }
 
+// tintFor is a tint list that colours cell `at` with the colour of an icon's meaning; nil in the plain
+// set, where there is no icon to colour.
+func tintFor(at int, n icons.Name) []string {
+	if icons.Get(n) == "" || icons.Color(n) == "" {
+		return nil
+	}
+	t := make([]string, at+1)
+	t[at] = icons.Color(n)
+	return t
+}
+
+func issueIcon(state string) icons.Name {
+	if state != "OPEN" {
+		return icons.IssueClosed
+	}
+	return icons.IssueOpen
+}
+
+func issueTint(state string) string { return icons.Color(issueIcon(state)) }
+
 // issueNumberCell is an issue's number, with its state icon in the Nerd Font set.
 func issueNumberCell(num int, state string) string {
-	n := icons.IssueOpen
-	if state != "OPEN" {
-		n = icons.IssueClosed
-	}
-	return withIcon(n, fmt.Sprint(num))
+	return withIcon(issueIcon(state), fmt.Sprint(num))
 }
 
 func fetchChecks(r ghcli.RepoRef, pr string) (table, error) {

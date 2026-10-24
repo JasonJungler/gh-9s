@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MurabitoB/gh-9s/internal/icons"
+
 	"github.com/MurabitoB/gh-9s/internal/ui"
 	"github.com/MurabitoB/gh-9s/internal/workflow"
 )
@@ -104,7 +106,7 @@ func countLabel(jobs []Job) string {
 	for _, p := range []struct {
 		n   int
 		sym string
-	}{{ok, "✓"}, {fail, "✗"}, {run, "●"}, {wait, "○"}} {
+	}{{ok, icons.Get(icons.RunOK)}, {fail, icons.Get(icons.RunFail)}, {run, icons.Get(icons.RunActive)}, {wait, icons.Get(icons.RunOther)}} {
 		if p.n > 0 {
 			parts = append(parts, fmt.Sprintf("%d%s", p.n, p.sym))
 		}

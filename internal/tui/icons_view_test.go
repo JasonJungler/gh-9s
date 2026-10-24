@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/MurabitoB/gh-9s/internal/diff"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
@@ -147,5 +149,60 @@ func TestNewRowsGetTheNewIconInNerdMode(t *testing.T) {
 	m = poll(t, m)
 	if v := ansi.Strip(m.View()); !strings.Contains(v, g(icons.New)+" acme/api") {
 		t.Errorf("the newcomer is marked with the new icon:\n%s", v)
+	}
+}
+
+func TestIconsCarryTheirMeaningsColour(t *testing.T) {
+	plain := prRows([]prListItem{{Number: 1, Title: "t"}}, "").rows[0]
+	if len(plain.tint) != 0 {
+		t.Errorf("plain rows have no tint: %v", plain.tint)
+	}
+	useNerd(t)
+	rows := prRows([]prListItem{{Number: 1, Title: "open"}, {Number: 2, Title: "draft", Draft: true}}, "").rows
+	if rows[0].tint[0] != icons.Color(icons.PROpen) || rows[1].tint[0] != icons.Color(icons.PRDraft) {
+		t.Errorf("tints = %v %v", rows[0].tint, rows[1].tint)
+	}
+	if issueTint("OPEN") != icons.Color(icons.IssueOpen) || issueTint("CLOSED") != icons.Color(icons.IssueClosed) {
+		t.Error("issue tints")
+	}
+}
+
+func TestTintedCellsAreDrawnInTheirColourExceptOnTheSelectedRow(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+	useNerd(t)
+	m := model{view: viewPRs, width: 120, height: 20, tbl: prRows([]prListItem{{Number: 1, Title: "a"}, {Number: 2, Title: "b", Draft: true}}, "")}
+	body := m.tableBody()
+	start := func(c string) string { // the escape code lipgloss opens a colour with
+		return strings.Split(lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("x"), "x")[0]
+	}
+	if !strings.Contains(body, start("8")) {
+		t.Errorf("the draft's number cell should be grey:\n%q", body)
+	}
+	lines := strings.Split(body, "\n")
+	if strings.Contains(lines[1], start("2")) { // line 1 is the selected row: reverse video only
+		t.Errorf("the selected row keeps one style:\n%q", lines[1])
+	}
+}
+
+func TestSwitchingIconsDropsTheFavoritesStatusCache(t *testing.T) {
+	m := model{view: viewFavs, latest: map[string]latestEntry{"x": {}}}
+	m, _ = m.afterIconsChanged()
+	if m.latest != nil {
+		t.Error("the cached labels hold the old symbols: forget them")
+	}
+}
+
+func TestPRDetailChecksLineUsesTheIcons(t *testing.T) {
+	d := ghcli.PRDetail{Number: 1, Title: "t", ChecksPassed: 3, ChecksFailed: 1, ChecksPending: 2}
+	if got := strings.Join(prDetailLines(d, 100).lines, "\n"); !strings.Contains(got, "Checks: ✓3 ✗1 ●2") {
+		t.Errorf("plain:\n%s", got)
+	}
+	useNerd(t)
+	got := strings.Join(prDetailLines(d, 100).lines, "\n")
+	want := "Checks: " + g(icons.CheckPass) + "3 " + g(icons.CheckFail) + "1 " + g(icons.CheckPending) + "2"
+	if !strings.Contains(got, want) {
+		t.Errorf("nerd:\n%s", got)
 	}
 }

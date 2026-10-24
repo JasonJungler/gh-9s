@@ -38,6 +38,7 @@ func (m model) startIcons() model {
 // afterIconsChanged redraws what was built with the old set.
 func (m model) afterIconsChanged() (model, tea.Cmd) {
 	m = m.applyIcons()
+	m.latest = nil                                                                              // the favorites' cached status labels were drawn with the old set
 	if st, ok := m.screenData(viewInbox).(inboxState); ok && st.loaded && m.view == viewInbox { // rows are built once
 		keep := ""
 		if r, ok := m.selected(); ok {

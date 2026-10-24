@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/MurabitoB/gh-9s/internal/icons"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
@@ -140,8 +142,9 @@ func prDetailLines(d ghcli.PRDetail, width int) detailDoc {
 		state += " (draft)"
 	}
 	out.add(fmt.Sprintf("%s   %s ← %s   %s", d.Author, d.BaseRef, d.HeadRef, state))
-	out.add(fmt.Sprintf("Review: %s   Merge: %s   Checks: ✓%d ✗%d ●%d   +%d −%d in %d files",
-		orDash(d.ReviewDecision), orDash(d.MergeState), d.ChecksPassed, d.ChecksFailed, d.ChecksPending,
+	out.add(fmt.Sprintf("Review: %s   Merge: %s   Checks: %s%d %s%d %s%d   +%d −%d in %d files",
+		orDash(d.ReviewDecision), orDash(d.MergeState),
+		icons.Get(icons.CheckPass), d.ChecksPassed, icons.Get(icons.CheckFail), d.ChecksFailed, icons.Get(icons.CheckPending), d.ChecksPending,
 		d.Additions, d.Deletions, d.ChangedFiles))
 	if len(d.Labels) > 0 {
 		out.add("Labels: " + strings.Join(d.Labels, ", "))

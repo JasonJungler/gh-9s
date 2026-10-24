@@ -261,6 +261,8 @@ func (m model) tableBody() string {
 			s := trunc(ghcli.CleanText(c), w[j]) + "  "
 			if j == statusCol(m.view) && i != m.cursor {
 				s = stateStyle(r.state).Render(s)
+			} else if i != m.cursor && j < len(r.tint) && r.tint[j] != "" {
+				s = lipgloss.NewStyle().Foreground(lipgloss.Color(r.tint[j])).Render(s)
 			}
 			line.WriteString(s)
 		}
