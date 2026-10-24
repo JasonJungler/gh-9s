@@ -21,10 +21,11 @@ const (
 	viewChecks
 	viewJobs
 	viewLogs
+	viewFavs
 )
 
 var viewNames = map[viewKind]string{
-	viewRuns: "runs", viewWorkflows: "workflows", viewPRs: "pulls", viewChecks: "checks", viewJobs: "jobs", viewLogs: "logs",
+	viewRuns: "runs", viewWorkflows: "workflows", viewPRs: "pulls", viewChecks: "checks", viewJobs: "jobs", viewLogs: "logs", viewFavs: "favorites",
 }
 
 type inputMode int
@@ -35,6 +36,7 @@ const (
 	modeCommand
 	modeTrigger
 	modeConfirm
+	modeAlias
 )
 
 type model struct {
@@ -60,22 +62,31 @@ type model struct {
 	logs                          []string
 	follow                        bool
 
+	favs     *favStore // nil when the favorites file could not be loaded
+	curRepo  repoRef   // repo of the current directory, host included
+	latest   map[string]latestEntry
+	aliasFor favorite
+
 	confirm    func() tea.Cmd
 	confirmMsg string
 }
 
 type dataMsg struct {
-	view viewKind
-	tbl  table
-	logs []string
-	err  error
+	view   viewKind
+	tbl    table
+	logs   []string
+	latest map[string]latestEntry
+	err    error
 }
 type actionMsg struct {
 	msg string
 	err error
 }
 type tickMsg struct{}
-type infoMsg struct{ repo, branch string }
+type infoMsg struct {
+	repo, branch string
+	cur          repoRef
+}
 type gotoMsg struct {
 	view viewKind
 	pr   string
@@ -95,7 +106,13 @@ var (
 )
 
 func main() {
-	p := tea.NewProgram(model{loading: true}, tea.WithAltScreen())
+	m := model{loading: true}
+	if fs, err := loadFavs(favsPath()); err != nil {
+		m.status = styErr.Render("favorites disabled: " + err.Error())
+	} else {
+		m.favs = fs
+	}
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "gh9s:", err)
 		os.Exit(1)
@@ -105,7 +122,8 @@ func main() {
 func (m model) Init() tea.Cmd {
 	return tea.Batch(m.fetch(), tick(), func() tea.Msg {
 		r, b := repoInfo()
-		return infoMsg{r, b}
+		cur, _ := currentRepo()
+		return infoMsg{r, b, cur}
 	})
 }
 
@@ -115,8 +133,16 @@ func tick() tea.Cmd {
 
 func (m model) fetch() tea.Cmd {
 	v, wf, pr, br, run, job, tg := m.view, m.wfID, m.pr, m.branch, m.runID, m.jobID, m.target
+	var pinned []favorite
+	var snap *favStore
+	if m.favs != nil {
+		pinned = m.favs.forRepo(m.curTarget())
+		snap = &favStore{items: append([]favorite(nil), m.favs.items...)}
+	}
+	cache := m.latest
 	return func() tea.Msg {
 		var t table
+		var latest map[string]latestEntry
 		var logs []string
 		var err error
 		switch v {
@@ -124,6 +150,7 @@ func (m model) fetch() tea.Cmd {
 			t, err = fetchRuns(tg, wf)
 		case viewWorkflows:
 			t, err = fetchWorkflows(tg)
+			t.rows = pinFavorites(t.rows, pinned)
 		case viewPRs:
 			t, err = fetchPRs(tg, br)
 		case viewChecks:
@@ -132,8 +159,12 @@ func (m model) fetch() tea.Cmd {
 			t, err = fetchJobs(tg, run)
 		case viewLogs:
 			logs, err = fetchJobLog(tg, run, job)
+		case viewFavs:
+			if snap != nil {
+				t, latest = fetchFavorites(snap, cache, time.Now())
+			}
 		}
-		return dataMsg{v, t, logs, err}
+		return dataMsg{v, t, logs, latest, err}
 	}
 }
 
@@ -176,7 +207,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case infoMsg:
-		m.repo, m.branch = msg.repo, msg.branch
+		m.repo, m.branch, m.curRepo = msg.repo, msg.branch, msg.cur
 	case tickMsg:
 		if m.view == viewLogs && !m.follow {
 			return m, tick() // logs are static unless following
@@ -188,6 +219,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.err = msg.err
+		if msg.latest != nil {
+			m.latest = msg.latest
+		}
 		if msg.err == nil && m.view == viewLogs {
 			m.logs = msg.logs
 			if m.follow {
@@ -211,7 +245,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = styErr.Render("✗ " + msg.err.Error())
 			return m, nil
 		}
-		m.pr = msg.pr
+		m.pr, m.target = msg.pr, repoRef{}
 		return m, m.push(msg.view)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -254,6 +288,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.back = m.back[:len(m.back)-1]
 			if prev != viewRuns {
 				m.wfID, m.wfName = "", ""
+			}
+			if prev == viewFavs {
+				m.target = repoRef{}
 			}
 			return m, m.switchTo(prev)
 		}
@@ -304,36 +341,44 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "w":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
-			c := exec.Command("gh", "run", "watch", r.id, "--exit-status")
+			c := exec.Command("gh", scoped(m.target, "run", "watch", r.id, "--exit-status")...)
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				return actionMsg{msg: "watch finished: run " + r.id}
 			})
 		}
 	case "l":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
-			return m, logsCmd(r.id, false)
+			return m, logsCmd(m.target, r.id, false)
 		}
 	case "L":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
-			return m, logsCmd(r.id, true)
+			return m, logsCmd(m.target, r.id, true)
 		}
 	case "r":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
-			return m, runAction("rerun run "+r.id, "run", "rerun", r.id)
+			return m, runAction("rerun run "+r.id, scoped(m.target, "run", "rerun", r.id)...)
 		}
 	case "F":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
-			return m, runAction("rerun failed jobs of "+r.id, "run", "rerun", r.id, "--failed")
+			return m, runAction("rerun failed jobs of "+r.id, scoped(m.target, "run", "rerun", r.id, "--failed")...)
 		}
 	case "c":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
 			m.mode, m.confirmMsg = modeConfirm, "cancel run "+r.id+"? (y/N)"
-			m.confirm = func() tea.Cmd { return runAction("cancelled run "+r.id, "run", "cancel", r.id) }
+			m.confirm = func() tea.Cmd { return runAction("cancelled run "+r.id, scoped(m.target, "run", "cancel", r.id)...) }
 		}
 	case "d":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
 			m.mode, m.confirmMsg = modeConfirm, "delete run "+r.id+"? (y/N)"
-			m.confirm = func() tea.Cmd { return runAction("deleted run "+r.id, "run", "delete", r.id) }
+			m.confirm = func() tea.Cmd { return runAction("deleted run "+r.id, scoped(m.target, "run", "delete", r.id)...) }
+		}
+	case "f":
+		if r, ok := m.selected(); ok && (m.view == viewWorkflows || m.view == viewFavs) {
+			return m.toggleFavorite(r)
+		}
+	case "a":
+		if r, ok := m.selected(); ok && (m.view == viewWorkflows || m.view == viewFavs) {
+			return m.startAlias(r)
 		}
 	case "e":
 		if r, ok := m.selected(); ok && m.view == viewWorkflows {
@@ -341,7 +386,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if r.cells[2] != "active" {
 				sub = "enable"
 			}
-			return m, runAction(sub+"d workflow "+r.extra, "workflow", sub, r.id)
+			return m, runAction(sub+"d workflow "+r.extra, scoped(m.target, "workflow", sub, r.id)...)
 		}
 	}
 	m.scroll()
@@ -349,7 +394,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) goTop(v viewKind) (tea.Model, tea.Cmd) {
-	m.back, m.wfID, m.wfName, m.pr = nil, "", "", ""
+	m.back, m.wfID, m.wfName, m.pr, m.target = nil, "", "", "", repoRef{}
 	return m, m.switchTo(v)
 }
 
@@ -368,6 +413,10 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 	case viewJobs:
 		m.jobID, m.jobName, m.jobURL = r.id, r.extra, r.url
 		return m, m.push(viewLogs)
+	case viewFavs:
+		if f, ok := m.favForRow(r); ok {
+			return m, m.openFavorite(f, true)
+		}
 	case viewPRs:
 		m.pr = r.id
 		return m, m.push(viewChecks)
@@ -399,6 +448,15 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if r, ok := m.selected(); ok {
 				return m, triggerCmd(r, in)
 			}
+		case modeAlias:
+			if err := m.favs.setAlias(m.aliasFor, in); err != nil {
+				m.status = styErr.Render("✗ " + err.Error())
+			} else if err := m.favs.save(); err != nil {
+				m.status = styErr.Render("✗ " + err.Error())
+			} else {
+				m.status = styOK.Render("✓ alias set: " + in)
+			}
+			return m, m.fetch()
 		}
 		return m, nil
 	case tea.KeyBackspace:
@@ -424,6 +482,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m.goTop(viewWorkflows)
 	case "pulls", "pull", "prs", "pr":
 		return m.goTop(viewPRs)
+	case "fav", "favs", "favorites":
+		return m.goTop(viewFavs)
 	case "cpr", "checks":
 		return m, func() tea.Msg {
 			pr, err := currentPR()
@@ -433,9 +493,95 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "":
 	default:
+		if m.favs != nil {
+			if f, ok := m.favs.byAlias(c); ok {
+				return m, m.openFavorite(f, false)
+			}
+		}
 		m.status = styErr.Render("unknown command: " + c)
 	}
 	return m, nil
+}
+
+// curTarget is the repo views are showing: the explicit target, else the
+// repo of the current directory.
+func (m model) curTarget() repoRef {
+	if m.target != (repoRef{}) {
+		return m.target
+	}
+	return m.curRepo
+}
+
+func (m model) favForRow(r row) (favorite, bool) {
+	switch m.view {
+	case viewFavs:
+		if m.favs != nil {
+			for _, f := range m.favs.items {
+				if f.key() == r.extra {
+					return f, true
+				}
+			}
+		}
+	case viewWorkflows:
+		if t := m.curTarget(); t != (repoRef{}) && len(r.cells) > 3 {
+			return favorite{Host: hostOrDefault(t.Host), Repo: t.Owner + "/" + t.Name,
+				Workflow: workflowFile(r.cells[3])}, true
+		}
+	}
+	return favorite{}, false
+}
+
+func (m model) toggleFavorite(r row) (tea.Model, tea.Cmd) {
+	f, ok := m.favForRow(r)
+	switch {
+	case m.favs == nil:
+		m.status = styErr.Render("favorites are disabled (see the startup message)")
+	case !ok:
+		m.status = styErr.Render("cannot tell which repo this is; run gh-9s inside a repo")
+	default:
+		added := m.favs.toggle(f)
+		if err := m.favs.save(); err != nil {
+			m.status = styErr.Render("✗ " + err.Error())
+		} else if added {
+			m.status = styOK.Render("★ added " + f.Workflow)
+		} else {
+			m.status = styDim.Render("removed " + f.Workflow)
+		}
+		return m, m.fetch()
+	}
+	return m, nil
+}
+
+func (m model) startAlias(r row) (tea.Model, tea.Cmd) {
+	f, ok := m.favForRow(r)
+	if m.favs == nil || !ok {
+		m.status = styErr.Render("favorites are not available here")
+		return m, nil
+	}
+	i := m.favs.index(f)
+	if i < 0 {
+		m.status = styDim.Render("press f to make it a favorite first")
+		return m, nil
+	}
+	m.aliasFor, m.mode, m.input = f, modeAlias, m.favs.items[i].Alias
+	return m, nil
+}
+
+// openFavorite shows a favorite's runs, in its own repo.
+func (m *model) openFavorite(f favorite, push bool) tea.Cmd {
+	m.target = f.target()
+	if m.target == m.curRepo {
+		m.target = repoRef{}
+	}
+	m.wfID, m.wfName = f.Workflow, f.Alias
+	if m.wfName == "" {
+		m.wfName = f.Workflow
+	}
+	if push {
+		return m.push(viewRuns)
+	}
+	m.back = nil
+	return m.switchTo(viewRuns)
 }
 
 func runAction(done string, args ...string) tea.Cmd {
@@ -458,12 +604,16 @@ func triggerCmd(r row, in string) tea.Cmd {
 	return runAction("triggered "+r.extra, args...)
 }
 
-func logsCmd(id string, failedOnly bool) tea.Cmd {
+func logsCmd(tg repoRef, id string, failedOnly bool) tea.Cmd {
 	flag := "--log"
 	if failedOnly {
 		flag = "--log-failed"
 	}
-	c := exec.Command("sh", "-c", fmt.Sprintf("gh run view %s %s 2>&1 | ${PAGER:-less -R}", id, flag))
+	scope := ""
+	if a := tg.args(); a != nil {
+		scope = " -R " + a[1]
+	}
+	c := exec.Command("sh", "-c", fmt.Sprintf("gh run view %s %s%s 2>&1 | ${PAGER:-less -R}", id, flag, scope))
 	return tea.ExecProcess(c, func(error) tea.Msg { return actionMsg{msg: "closed logs"} })
 }
 
@@ -568,6 +718,9 @@ func (m model) widths() []int {
 func (m model) View() string {
 	var b strings.Builder
 	title := fmt.Sprintf(" gh9s  %s@%s  <%s>", m.repo, m.branch, viewNames[m.view])
+	if m.target != (repoRef{}) {
+		title = fmt.Sprintf(" gh9s  %s  <%s>", m.target, viewNames[m.view])
+	}
 	if m.wfName != "" && m.view == viewRuns {
 		title += " workflow=" + m.wfName
 	}
@@ -687,6 +840,8 @@ func statusCol(v viewKind) int {
 	switch v {
 	case viewRuns, viewPRs, viewJobs:
 		return 1
+	case viewFavs:
+		return 3
 	case viewChecks:
 		return 0
 	}
@@ -713,6 +868,8 @@ func (m model) footer() string {
 		return styKey.Render(":") + m.input + "█"
 	case modeTrigger:
 		return styKey.Render("trigger ref [k=v ...] > ") + m.input + "█"
+	case modeAlias:
+		return styKey.Render("alias for "+m.aliasFor.Workflow+" > ") + m.input + "█"
 	case modeConfirm:
 		return styErr.Render(m.confirmMsg)
 	}
@@ -721,9 +878,11 @@ func (m model) footer() string {
 	case viewRuns:
 		keys = "enter jobs  l pager-logs  L failed-logs  w watch  r rerun  F rerun-failed  c cancel  d delete  o open"
 	case viewWorkflows:
-		keys = "enter runs  t trigger  e enable/disable  o open"
+		keys = "enter runs  t trigger  f favorite  a alias  e enable/disable  o open"
 	case viewPRs:
 		keys = "enter checks  o open"
+	case viewFavs:
+		keys = "enter runs  f unfavorite  a alias"
 	case viewChecks:
 		keys = "enter/o open check  esc back"
 	case viewJobs:
