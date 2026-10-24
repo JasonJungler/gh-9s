@@ -173,6 +173,3 @@ func scale(img image.Image, w, h int) *image.RGBA {
 	}
 	return out
 }
-
-// encodeSixel is filled in with the Sixel encoder.
-func encodeSixel(img image.Image, maxColors int) string { return "" }
