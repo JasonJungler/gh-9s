@@ -12,3 +12,12 @@ func TestCleanLog(t *testing.T) {
 		t.Errorf("CleanLog = %q; want %q", got, want)
 	}
 }
+
+func TestCleanLogStripsEscapeSequencesFromJobOutput(t *testing.T) {
+	in := "build\tstep\t2026-01-01T00:00:00Z \x1b[31merror:\x1b[0m failed \x1b]0;title\x07done\nplain\n"
+	got := CleanLog(in)
+	want := []string{"step  error: failed done", "plain"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("CleanLog = %q; want %q (colours and terminal commands removed, the words kept)", got, want)
+	}
+}

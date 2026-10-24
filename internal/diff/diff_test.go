@@ -165,7 +165,7 @@ func TestParseStripsTerminalControlSequences(t *testing.T) {
 	if strings.ContainsAny(f.Path, "\x1b\x07") {
 		t.Errorf("path %q kept a control character", f.Path)
 	}
-	if f.Lines[1].Text != "evil ]52;c;ZXZpbA== clipboard" || f.Lines[2].Text != "ok\ttab" {
+	if f.Lines[1].Text != "evil  clipboard" || f.Lines[2].Text != "ok\ttab" {
 		t.Errorf("printable text and tabs must survive: %q / %q", f.Lines[1].Text, f.Lines[2].Text)
 	}
 }

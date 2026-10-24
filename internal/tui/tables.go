@@ -75,11 +75,7 @@ func fetchWorkflows(r ghcli.RepoRef) (table, error) {
 	return t, nil
 }
 
-func rollupState(checks []struct {
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	State      string `json:"state"`
-}) (string, state) {
+func rollupState(checks []rollupRef) (string, state) {
 	res, st := "-", stOther
 	if len(checks) == 0 {
 		return res, st
@@ -158,25 +154,39 @@ func fetchIssues(r ghcli.RepoRef, f ghcli.IssueFilter) (table, error) {
 	return t, nil
 }
 
+type prAuthor struct {
+	Login string `json:"login"`
+}
+
+// prListItem is one entry of `gh pr list --json ...`.
+type prListItem struct {
+	Number       int         `json:"number"`
+	Title        string      `json:"title"`
+	Author       *prAuthor   `json:"author"` // null for a deleted account
+	Head         string      `json:"headRefName"`
+	Draft        bool        `json:"isDraft"`
+	Review       string      `json:"reviewDecision"`
+	UpdatedAt    string      `json:"updatedAt"`
+	URL          string      `json:"url"`
+	StatusRollup []rollupRef `json:"statusCheckRollup"`
+}
+
+type rollupRef struct {
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	State      string `json:"state"`
+}
+
 func fetchPRs(r ghcli.RepoRef, currentBranch string, f ghcli.PRFilter) (table, error) {
-	var prs []struct {
-		Number       int                    `json:"number"`
-		Title        string                 `json:"title"`
-		Author       struct{ Login string } `json:"author"`
-		Head         string                 `json:"headRefName"`
-		Draft        bool                   `json:"isDraft"`
-		Review       string                 `json:"reviewDecision"`
-		UpdatedAt    string                 `json:"updatedAt"`
-		URL          string                 `json:"url"`
-		StatusRollup []struct {
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			State      string `json:"state"`
-		} `json:"statusCheckRollup"`
-	}
+	var prs []prListItem
 	if err := ghcli.JSON(&prs, prListArgs(r, f)...); err != nil {
 		return table{}, err
 	}
+	return prRows(prs, currentBranch), nil
+}
+
+// prRows turns the PR list into table rows. A * marks the PR of currentBranch ("" marks none).
+func prRows(prs []prListItem, currentBranch string) table {
 	t := table{cols: []string{"#", "CHECKS", "TITLE", "AUTHOR", "BRANCH", "REVIEW", "UPDATED"}}
 	for _, p := range prs {
 		label, st := rollupState(p.StatusRollup)
@@ -185,17 +195,21 @@ func fetchPRs(r ghcli.RepoRef, currentBranch string, f ghcli.PRFilter) (table, e
 		if p.Draft {
 			title = "[draft] " + title
 		}
-		if p.Head == currentBranch {
+		if currentBranch != "" && p.Head == currentBranch {
 			num = "*" + num
 		}
 		review := p.Review
 		if review == "" {
 			review = "-"
 		}
+		author := "ghost"
+		if p.Author != nil && p.Author.Login != "" {
+			author = p.Author.Login
+		}
 		t.rows = append(t.rows, row{id: fmt.Sprint(p.Number), state: st, url: p.URL,
-			cells: []string{num, label, title, p.Author.Login, p.Head, review, age(p.UpdatedAt)}})
+			cells: []string{num, label, title, author, p.Head, review, age(p.UpdatedAt)}})
 	}
-	return t, nil
+	return t
 }
 
 func fetchChecks(r ghcli.RepoRef, pr string) (table, error) {

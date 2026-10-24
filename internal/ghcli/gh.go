@@ -85,6 +85,7 @@ func FetchJobLog(r RepoRef, runID, jobID string) ([]string, error) {
 
 // CleanLog drops the job-name column and timestamps that gh prefixes to each log line.
 func CleanLog(s string) []string {
+	s = CleanText(s) // job output can hold colour codes and worse; show the words only
 	var lines []string
 	for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 		parts := strings.SplitN(l, "\t", 3)

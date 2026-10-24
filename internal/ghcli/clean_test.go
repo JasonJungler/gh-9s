@@ -6,22 +6,22 @@ import (
 )
 
 func TestCleanText(t *testing.T) {
-	cases := map[string]string{
-		"plain text":                        "plain text",
-		"tab\there":                         "tab\there",
-		"two\nlines":                        "two\nlines",
-		"crlf\r\nline":                      "crlf\nline",
-		"lone\rreturn":                      "lonereturn",
-		"\x1b[31mred\x1b[0m":                "[31mred[0m",
-		"\x1b]52;c;ZXZpbA==\x07clipboard":   "]52;c;ZXZpbA==clipboard",
-		"bell\x07 and \x00null and \x7fdel": "bell and null and del",
-		"c1 \u009b31m \u009d title":         "c1 31m  title",
-		"emoji 🚧 and 日本語 stay":              "emoji 🚧 and 日本語 stay",
-		"":                                  "",
+	cases := []struct{ in, want string }{
+		{"plain text", "plain text"},
+		{"tab\there", "tab\there"},
+		{"two\nlines", "two\nlines"},
+		{"crlf\r\nline", "crlf\nline"},
+		{"lone\rreturn", "lonereturn"},
+		{"\x1b[31mred\x1b[0m", "red"},
+		{"\x1b]52;c;ZXZpbA==\x07clipboard", "clipboard"},
+		{"bell\x07 and \x00null and \x7fdel", "bell and null and del"},
+		{"c1 \u009b31m \u009d title", "c1   title"},
+		{"emoji 🚧 and 日本語 stay", "emoji 🚧 and 日本語 stay"},
+		{"", ""},
 	}
-	for in, want := range cases {
-		if got := CleanText(in); got != want {
-			t.Errorf("CleanText(%q) = %q; want %q", in, got, want)
+	for _, c := range cases {
+		if got := CleanText(c.in); got != c.want {
+			t.Errorf("CleanText(%q) = %q; want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -37,7 +37,7 @@ func TestParsePRDetailStripsControlCharacters(t *testing.T) {
 	if strings.ContainsAny(all, "\x1b\x07") {
 		t.Errorf("control characters survived: %q", all)
 	}
-	if d.Body != "a[2Jb" || d.Comments[0].Body != "hi]52;c;AAAA" {
+	if d.Body != "ab" || d.Comments[0].Body != "hi" {
 		t.Errorf("text should keep its printable parts: body %q comment %q", d.Body, d.Comments[0].Body)
 	}
 }
