@@ -9,6 +9,7 @@ import (
 type NumLine struct {
 	Line
 	Old, New int
+	Idx      int // index of the line in File.Lines
 }
 
 var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
@@ -17,8 +18,8 @@ var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 func (f File) Numbered() []NumLine {
 	out := make([]NumLine, 0, len(f.Lines))
 	var old, new int
-	for _, l := range f.Lines {
-		n := NumLine{Line: l}
+	for i, l := range f.Lines {
+		n := NumLine{Line: l, Idx: i}
 		switch l.Kind {
 		case Hunk:
 			if m := hunkHeader.FindStringSubmatch(l.Text); m != nil {

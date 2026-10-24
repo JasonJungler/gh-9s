@@ -37,6 +37,7 @@ type diffFakes struct {
 func installDiff(t *testing.T, text string, err error) *diffFakes {
 	t.Helper()
 	f := &diffFakes{}
+	installThreads(t, nil, nil)
 	old := fetchDiff
 	fetchDiff = func(r ghcli.RepoRef, number string) (string, error) {
 		f.targets = append(f.targets, r)

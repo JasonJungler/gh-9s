@@ -14,7 +14,8 @@ import (
 // Outside calls and limits of the diff screen; tests replace them.
 var (
 	fetchDiff    = ghcli.FetchPRDiff
-	maxDiffLines = 5000 // lines kept; a bigger diff is cut and the browser is offered
+	fetchThreads = ghcli.FetchReviewThreads
+	maxDiffLines = 50000 // lines kept; a bigger diff is cut and the browser is offered
 )
 
 // diffState is what the diff screen keeps in the model. The scroll position is m.top, and
@@ -25,6 +26,21 @@ type diffState struct {
 	starts   []int   // where each file starts in lines
 	listMode bool    // showing the file list instead of the diff
 	sel      int     // selected file in the list
+
+	usrc      []int           // source key of every unified row, to keep the place when the layout changes
+	sb        *sbLayout       // the side-by-side layout for the current width; nil while unified
+	sbs       int             // 0 by width, 1 always side-by-side, 2 always unified
+	focusList bool            // side-by-side: j/k move through the file list
+	threads   []ghcli.Thread  // review comments other people left
+	viewed    map[string]bool // files marked viewed, by path
+	head      string          // the PR head commit the marks belong to
+}
+
+// diffPayload is what the diff fetch delivers: the diff and, if they could be had, the threads.
+type diffPayload struct {
+	d         diff.Diff
+	threads   []ghcli.Thread
+	threadErr error
 }
 
 type dkind int
@@ -52,17 +68,35 @@ func init() {
 		fetch: func(m model) tea.Cmd {
 			tg, number, limit, id := m.target, m.pr, maxDiffLines, m.itemID(m.pr)
 			return func() tea.Msg {
+				type thr struct {
+					ts  []ghcli.Thread
+					err error
+				}
+				ch := make(chan thr, 1)
+				go func() {
+					ts, err := fetchThreads(tg, number)
+					ch <- thr{ts, err}
+				}()
 				text, err := fetchDiff(tg, number)
+				th := <-ch
 				if err != nil {
 					return screenMsg{view: viewDiff, id: id, err: err}
 				}
-				return screenMsg{view: viewDiff, id: id, data: diff.Parse(text, limit)}
+				return screenMsg{view: viewDiff, id: id, data: diffPayload{d: diff.Parse(text, limit), threads: th.ts, threadErr: th.err}}
 			}
 		},
 		apply: func(m model, msg screenMsg) model {
-			st := diffState{d: msg.data.(diff.Diff)}
-			lines, starts := diffDisplay(st.d)
-			st.lines, st.starts = lines, starts
+			p := msg.data.(diffPayload)
+			old, _ := m.screenData(viewDiff).(diffState)
+			st := diffState{d: p.d, threads: p.threads, sbs: old.sbs}
+			if pd, ok := m.screenData(viewPRDetail).(prDetailState); ok {
+				st.head = pd.d.HeadSHA
+			}
+			if st.head != "" && st.head == old.head {
+				st.viewed = old.viewed
+			}
+			lines, starts, src := diffDisplaySrc(st.d)
+			st.lines, st.starts, st.usrc = lines, starts, src
 			m.logs = make([]string, len(lines))
 			for i, l := range lines {
 				m.logs[i] = l.text
@@ -71,24 +105,42 @@ func init() {
 				m.matches = searchMatches(m.logs, m.query)
 				m.mi = min(m.mi, max(0, len(m.matches)-1))
 			}
-			return m.withScreenData(viewDiff, st)
+			m = m.withScreenData(viewDiff, st)
+			if p.threadErr != nil {
+				m.status = styErr.Render("couldn't load review comments: " + p.threadErr.Error())
+			}
+			return m.syncDiffLayout()
 		},
 		key:    diffKey,
 		body:   diffBody,
-		footer: "j/k scroll  ]/[ next/prev file  f files  / search  n/N  o browser",
+		footer: "j/k scroll  ]/[ file  }/{ hunk  tab files  v viewed  s side-by-side  / search  n/N  o browser",
 	})
 }
 
 func plusMinus(f diff.File) string { return fmt.Sprintf("+%d −%d", f.Added, f.Removed) }
 
+// srcKey identifies a source line of the diff (idx 0 is the file's header) in a way that grows
+// with the position, so rows of the two layouts can be matched up.
+func srcKey(file, idx int) int { return file<<20 | idx }
+
 // diffDisplay lays the diff out as display lines and reports where each file starts.
 func diffDisplay(d diff.Diff) (lines []dline, starts []int) {
+	lines, starts, _ = diffDisplaySrc(d)
+	return
+}
+
+// diffDisplaySrc is diffDisplay that also gives each display row's source key.
+func diffDisplaySrc(d diff.Diff) (lines []dline, starts []int, src []int) {
 	if len(d.Files) == 0 {
-		return []dline{{"(no changes)", dNote}}, nil
+		return []dline{{"(no changes)", dNote}}, nil, []int{0}
+	}
+	emit := func(l dline, key int) {
+		lines = append(lines, l)
+		src = append(src, key)
 	}
 	for i, f := range d.Files {
 		if i > 0 {
-			lines = append(lines, dline{"", dBlank})
+			emit(dline{"", dBlank}, srcKey(i, 0))
 		}
 		starts = append(starts, len(lines))
 		name := f.Path
@@ -98,40 +150,48 @@ func diffDisplay(d diff.Diff) (lines []dline, starts []int) {
 		if f.Binary {
 			name += " (binary)"
 		}
-		lines = append(lines, dline{fmt.Sprintf("── %s  %s ──", name, plusMinus(f)), dFile})
+		emit(dline{fmt.Sprintf("── %s  %s ──", name, plusMinus(f)), dFile}, srcKey(i, 0))
 		crMark, crNote := lineEndingPairs(f.Lines)
 		for li, l := range f.Lines {
+			key := srcKey(i, li+1)
 			text := strings.ReplaceAll(l.Text, "\t", "    ")
 			if crMark[li] {
 				text += " ␍"
 			}
 			switch l.Kind {
 			case diff.Add:
-				lines = append(lines, dline{"+ " + text, dAdd})
+				emit(dline{"+ " + text, dAdd}, key)
 				if crNote[li] {
-					lines = append(lines, dline{"    ↳ only the line ending changed (CRLF ↔ LF)", dMeta})
+					emit(dline{"    ↳ only the line ending changed (CRLF ↔ LF)", dMeta}, key)
 				}
 			case diff.Del:
-				lines = append(lines, dline{"- " + text, dDel})
+				emit(dline{"- " + text, dDel}, key)
 			case diff.Context:
-				lines = append(lines, dline{"  " + text, dCtx})
+				emit(dline{"  " + text, dCtx}, key)
 			case diff.Hunk:
-				lines = append(lines, dline{text, dHunk})
+				emit(dline{text, dHunk}, key)
 			default:
-				lines = append(lines, dline{"  " + text, dMeta})
+				emit(dline{"  " + text, dMeta}, key)
 			}
 		}
 	}
 	if d.Truncated {
-		lines = append(lines, dline{"", dBlank}, dline{fmt.Sprintf(
-			"… diff truncated at %d of %d lines; press o to see the whole PR in the browser", maxDiffLines, d.TotalLines), dNote})
+		end := srcKey(len(d.Files), 0)
+		emit(dline{"", dBlank}, end)
+		emit(dline{fmt.Sprintf("… diff truncated at %d of %d lines; press o to see the whole PR in the browser", maxDiffLines, d.TotalLines), dNote}, end)
 	}
-	return lines, starts
+	return lines, starts, src
 }
 
 func diffKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
+	if next, cmd, ok := reviewKey(m, k); ok {
+		return next, cmd, true
+	}
 	st, _ := m.screenData(viewDiff).(diffState)
 	starts := st.starts
+	if st.sb != nil {
+		starts = st.sb.starts
+	}
 	if st.listMode {
 		switch k.String() {
 		case "j", "down":
@@ -214,6 +274,9 @@ func diffKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 
 func diffBody(m model) string {
 	st, _ := m.screenData(viewDiff).(diffState)
+	if st.sb != nil {
+		return sideBody(m, st)
+	}
 	h := m.logHeight()
 	var b strings.Builder
 	if m.err != nil {

@@ -20,6 +20,7 @@ type sbLine struct {
 	kind        dkind
 	thread      bool // a comment from a review thread
 	hunk        bool // a hunk header
+	idx         int  // 1+index in File.Lines of the line this row shows (its thread rows share it); 0 none
 }
 
 func hlDel(s string) string { return ui.Fail.Reverse(true).Render(s) }
@@ -72,7 +73,7 @@ func sideBySide(f diff.File, threads []ghcli.Thread, width int) []sbLine {
 			if r.Old.Kind == diff.Hunk {
 				k, st = dHunk, ui.Cols
 			}
-			out = append(out, sbLine{left: fit(st.Render(expandTabs(r.Old.Text)), pw), right: fit("", pw), kind: k, hunk: k == dHunk})
+			out = append(out, sbLine{left: fit(st.Render(expandTabs(r.Old.Text)), pw), right: fit("", pw), kind: k, hunk: k == dHunk, idx: r.Old.Idx + 1})
 			continue
 		}
 		var spOld, spNew []diff.Span
@@ -87,10 +88,19 @@ func sideBySide(f diff.File, threads []ghcli.Thread, width int) []sbLine {
 				kind = dAdd
 			}
 		}
-		out = append(out, sbLine{left: cell(r.Old, true, spOld, gw, cw), right: cell(r.New, false, spNew, gw, cw), kind: kind})
+		idx := 0
+		for _, n := range []*diff.NumLine{r.Old, r.New} {
+			if n != nil && (idx == 0 || n.Idx+1 < idx) {
+				idx = n.Idx + 1
+			}
+		}
+		out = append(out, sbLine{left: cell(r.Old, true, spOld, gw, cw), right: cell(r.New, false, spNew, gw, cw), kind: kind, idx: idx})
 		for _, t := range mine {
 			if (t.Side == "RIGHT" && r.New != nil && r.New.New == t.Line) || (t.Side == "LEFT" && r.Old != nil && r.Old.Old == t.Line) {
-				out = append(out, threadRows(t, pw)...)
+				for _, tr := range threadRows(t, pw) {
+					tr.idx = idx
+					out = append(out, tr)
+				}
 			}
 		}
 	}
