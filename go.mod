@@ -1,4 +1,4 @@
-module github.com/MurabitoB/gh9s
+module github.com/MurabitoB/gh-9s
 
 go 1.27.3
 
