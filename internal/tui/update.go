@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
 	"github.com/MurabitoB/gh-9s/internal/workflow"
@@ -54,6 +56,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				f.err = ""
 			}
 			m.form = &f
+		}
+		return m, nil
+	case dialogResultMsg:
+		if h, ok := dialogHandlers[msg.id]; ok {
+			return h(m, msg)
+		}
+		return m, nil
+	case editedMsg:
+		if m.dlg != nil && m.dlg.kind == dialogText {
+			d := *m.dlg
+			if msg.err != nil {
+				d.err = msg.err.Error()
+			} else {
+				d.text, d.err = strings.TrimRight(msg.text, "\r\n"), ""
+			}
+			m.dlg = &d
 		}
 		return m, nil
 	case pickerLoadedMsg, pickerDebounceMsg, pickerResultMsg:

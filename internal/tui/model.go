@@ -75,6 +75,7 @@ type model struct {
 	note      string           // explanation tied to the current view (cleared when the view changes)
 	banner    string           // sticky startup problem, always shown
 	runStatus string           // last seen status of the watched run, for the finished notification
+	dlg       *dialog          // a question being asked (text, choice or yes/no)
 	picker    *picker          // the repo picker overlay, when open
 	recents   *recent.Store    // repos chosen before; nil if the file could not be read
 	sdata     map[viewKind]any // per-screen data, see screen.go
