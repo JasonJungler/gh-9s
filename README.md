@@ -1,33 +1,58 @@
-# gh9s
+# gh-9s
 
-A [k9s](https://k9scli.io)-style terminal UI for GitHub Actions and pull requests, as a `gh` extension.
+A [k9s](https://k9scli.io)-style terminal UI for GitHub Actions, as a `gh` extension.
+Release 1 is workflow-focused: trigger workflows, watch runs as a live job graph, and keep your favorite workflows one keypress away.
 
 ## Install / develop
 
 ```sh
 mise install                          # pins go + gh (see mise.toml)
-mise exec -- go build -o gh-9s .      # binary must be named after the repo: gh-9s
+mise exec -- go build -o gh-9s .      # the binary must be named after the repo: gh-9s
 gh extension install .                # then run: gh 9s
 ```
 
-Publish the repo as `gh-9s` (tag `v*` triggers the precompiled release workflow).
-Run inside any git repo with a GitHub remote.
+Run it inside any git repo with a GitHub remote. All GitHub access goes through the `gh` CLI, so
+authentication, proxies and GitHub Enterprise follow whatever `gh` is logged in to (or `GH_HOST`).
+Enterprise has not been tested yet.
+
+Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release.yml`.
 
 ## Views
 
-| key | view |
-|-----|------|
-| `1` / `:runs` | workflow runs (auto-refresh every 5s) |
-| `2` / `:wf` | workflows |
+| key / command | view |
+|---|---|
+| `1` / `:runs` | workflow runs (refreshes every 5s) |
+| `2` / `:wf` | workflows; your favorites are pinned on top with a ★ |
 | `3` / `:pr` | open pull requests (`*` marks the current branch) |
-| `enter` on a run | jobs of that run, then `enter` again for the job's log |
 | `P` / `:cpr` | checks of the current branch's PR |
+| `:fav` | favorite workflows from every repo, with the latest run's status |
+| `:<alias>` | open the runs of the favorite with that alias |
 
 ## Keys
 
-`j/k` move · `g/G` top/bottom · `/` filter · `:` command · `esc` back · `R` refresh · `o` open in browser · `q` quit
+Everywhere: `j/k` move, `g/G` top/bottom, `/` filter, `:` command bar, `esc` back, `R` refresh, `o` open in browser, `q` quit.
 
-- Runs: `enter` jobs → logs, `l` full log in pager, `L` failed logs in pager, `w` watch (`gh run watch`), `r` rerun, `F` rerun failed, `c` cancel, `d` delete
-- Workflows: `enter` runs of that workflow, `t` trigger (`<ref> [key=value ...]`), `e` enable/disable
-- Logs: `j/k` scroll, `space`/`ctrl-d` page, `g/G` top/bottom, `f` follow a running job
-- Pulls: `enter` checks
+**Runs** — `enter` job graph · `l` full log in pager · `L` failed log · `w` watch (`gh run watch`) · `r` rerun · `F` rerun failed · `c` cancel · `d` delete
+
+**Workflows / favorites** — `enter` runs · `t` trigger form · `f` favorite/unfavorite · `a` set alias · `e` enable/disable
+
+**Job graph** (watching a run)
+- `hjkl` or arrows move between jobs, `enter` opens the job's log, `v` switches style, `ctrl-d/u` scroll
+- Styles: **boxes** (default, left-to-right with arrows), **tree** (top-to-bottom, fits narrow terminals), **lanes** (timeline). Boxes too wide for the terminal fall back to the tree.
+- Matrix and reusable-workflow jobs are collapsed into one node showing counts (`3/8 ✓`); `enter` expands, `x` collapses.
+- Dependencies come from the `needs:` entries of the workflow file at the run's commit. If they cannot be determined, gh-9s shows the plain jobs list and says why — it never draws a guessed graph.
+- You get a terminal bell and a desktop notification when a run you are watching finishes.
+
+**Logs** — `j/k` scroll, `space`/`ctrl-d` page, `/` search (smart-case; `n`/`N` next/previous), `f` follow a running job
+
+## Trigger
+
+`t` opens a form built from the workflow's declared `workflow_dispatch` inputs: text fields, dropdowns (`←/→`), booleans (`space`), and a branch picker. Required inputs block submission. After you submit, gh-9s finds the run that was created and opens its graph. If it cannot identify the run within 30s it says so and leaves you on the list; the workflow has still been dispatched.
+
+## Favorites
+
+A favorite is a workflow in a specific host/repo (`github.com/acme/api · deploy.yml`), stored in your personal config file (`~/Library/Application Support/gh-9s/favorites.json` on macOS, `~/.config/gh-9s/favorites.json` on Linux), never inside a repo. Give one an alias with `a`, then type `:<alias>` to jump to its runs. Aliases cannot shadow built-in commands. If the file is unreadable, favorites are disabled for the session and the file is left untouched.
+
+## Design
+
+See `docs/superpowers/specs/2026-10-24-gh-9s-release1-design.md` and the implementation plan in `docs/superpowers/plans/`.
