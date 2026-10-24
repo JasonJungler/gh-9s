@@ -108,3 +108,41 @@ func TestEscFromFavoriteRunsReturnsToFavs(t *testing.T) {
 		t.Errorf("after esc: view=%v target=%+v wf=%q", m.view, m.target, m.wfID)
 	}
 }
+
+func TestTriggerFormLifecycle(t *testing.T) {
+	m := favModel(t)
+	form := newTriggerForm(repoRef{}, "deploy.yml", "main", []string{"main", "dev"},
+		[]dispatchInput{{Name: "tag", Type: "string", Required: true}})
+	next, _ := m.Update(formReadyMsg{form: form, name: "Deploy", dispatchable: true})
+	m = next.(model)
+	if m.form == nil || !strings.Contains(m.View(), "Trigger deploy.yml") {
+		t.Fatal("form should be open and rendered")
+	}
+	// enter with the required input empty keeps the form open
+	m = keys(m, "enter")
+	if m.form == nil || m.form.err == "" {
+		t.Fatalf("expected blocked submit, form=%+v", m.form)
+	}
+	// changing the ref asks for the inputs to be re-read
+	next, cmd := m.Update(k("right"))
+	m = next.(model)
+	if m.form.ref != "dev" {
+		t.Errorf("ref = %q; want dev", m.form.ref)
+	}
+	if cmd == nil {
+		t.Error("ref change should return a reload command")
+	}
+	m = keys(m, "esc")
+	if m.form != nil {
+		t.Error("esc should close the form")
+	}
+}
+
+func TestNonDispatchableShowsMessage(t *testing.T) {
+	m := favModel(t)
+	next, _ := m.Update(formReadyMsg{name: "CI", dispatchable: false})
+	m = next.(model)
+	if m.form != nil || !strings.Contains(m.status, "no workflow_dispatch") {
+		t.Errorf("form=%v status=%q", m.form, m.status)
+	}
+}

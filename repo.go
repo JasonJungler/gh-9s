@@ -66,3 +66,17 @@ func currentRepo() (repoRef, error) {
 	}
 	return r, nil
 }
+
+// apiEndpoint builds a `gh api` endpoint under this repo plus any flags it needs
+// (--hostname for non-default hosts). The zero repoRef uses gh's {owner}/{repo}
+// placeholders, which resolve to the current directory's repo.
+func (r repoRef) apiEndpoint(rest string) (endpoint string, flags []string) {
+	repo := "{owner}/{repo}"
+	if r != (repoRef{}) {
+		repo = r.Owner + "/" + r.Name
+		if r.Host != "" {
+			flags = []string{"--hostname", r.Host}
+		}
+	}
+	return "repos/" + repo + rest, flags
+}

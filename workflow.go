@@ -134,18 +134,10 @@ func parseJobSpecs(src []byte) ([]jobSpec, error) {
 
 // fetchWorkflowFile returns the raw workflow file at path for the given ref.
 func fetchWorkflowFile(r repoRef, path, ref string) ([]byte, error) {
-	repo := "{owner}/{repo}"
-	var args []string
-	if r != (repoRef{}) {
-		repo = r.Owner + "/" + r.Name
-		if r.Host != "" {
-			args = append(args, "--hostname", r.Host)
-		}
-	}
-	endpoint := "repos/" + repo + "/contents/" + strings.TrimPrefix(path, "/")
+	endpoint, flags := r.apiEndpoint("/contents/" + strings.TrimPrefix(path, "/"))
 	if ref != "" {
 		endpoint += "?ref=" + url.QueryEscape(ref)
 	}
-	args = append([]string{"api", "-H", "Accept: application/vnd.github.raw"}, append(args, endpoint)...)
+	args := append([]string{"api", "-H", "Accept: application/vnd.github.raw"}, append(flags, endpoint)...)
 	return gh(args...)
 }

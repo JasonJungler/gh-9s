@@ -34,7 +34,6 @@ const (
 	modeNormal inputMode = iota
 	modeFilter
 	modeCommand
-	modeTrigger
 	modeConfirm
 	modeAlias
 )
@@ -62,8 +61,9 @@ type model struct {
 	logs                          []string
 	follow                        bool
 
-	favs     *favStore // nil when the favorites file could not be loaded
-	curRepo  repoRef   // repo of the current directory, host included
+	form     *triggerForm // non-nil while the trigger form is open
+	favs     *favStore    // nil when the favorites file could not be loaded
+	curRepo  repoRef      // repo of the current directory, host included
 	latest   map[string]latestEntry
 	aliasFor favorite
 
@@ -83,6 +83,22 @@ type actionMsg struct {
 	err error
 }
 type tickMsg struct{}
+
+// formReadyMsg carries a freshly loaded trigger form (or why there is none).
+type formReadyMsg struct {
+	form         triggerForm
+	name         string
+	dispatchable bool
+	err          error
+}
+
+// inputsMsg carries the inputs re-read for a newly chosen ref.
+type inputsMsg struct {
+	ref          string
+	inputs       []dispatchInput
+	dispatchable bool
+	err          error
+}
 type infoMsg struct {
 	repo, branch string
 	cur          repoRef
@@ -208,6 +224,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case infoMsg:
 		m.repo, m.branch, m.curRepo = msg.repo, msg.branch, msg.cur
+	case formReadyMsg:
+		switch {
+		case msg.err != nil:
+			m.status = styErr.Render("✗ " + msg.err.Error())
+		case !msg.dispatchable:
+			m.status = styErr.Render(msg.name + " has no workflow_dispatch trigger")
+		default:
+			f := msg.form
+			m.form = &f
+		}
+		return m, nil
+	case inputsMsg:
+		if m.form != nil && m.form.ref == msg.ref {
+			f := *m.form
+			switch {
+			case msg.err != nil:
+				f.err = "could not read inputs at " + msg.ref + ": " + msg.err.Error()
+			case !msg.dispatchable:
+				f.err = "no workflow_dispatch trigger at " + msg.ref
+			default:
+				f = f.withInputs(msg.inputs)
+			}
+			m.form = &f
+		}
+		return m, nil
 	case tickMsg:
 		if m.view == viewLogs && !m.follow {
 			return m, tick() // logs are static unless following
@@ -256,6 +297,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	if m.form != nil {
+		return m.formKey(k)
 	}
 	if m.mode == modeConfirm {
 		mode := m.mode
@@ -332,13 +376,10 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.enter()
 	case "t":
-		if m.view == viewWorkflows {
-			if _, ok := m.selected(); ok {
-				m.mode, m.input = modeTrigger, m.branch
-			}
-		} else {
-			m.status = styDim.Render("trigger works from the workflows view (2)")
+		if r, ok := m.selected(); ok && (m.view == viewWorkflows || m.view == viewFavs) {
+			return m.startTrigger(r)
 		}
+		m.status = styDim.Render("trigger works from the workflows (2) or favorites (:fav) view")
 	case "w":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
 			c := exec.Command("gh", scoped(m.target, "run", "watch", r.id, "--exit-status")...)
@@ -444,10 +485,6 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter, m.cursor, m.top = in, 0, 0
 		case modeCommand:
 			return m.command(in)
-		case modeTrigger:
-			if r, ok := m.selected(); ok {
-				return m, triggerCmd(r, in)
-			}
 		case modeAlias:
 			if err := m.favs.setAlias(m.aliasFor, in); err != nil {
 				m.status = styErr.Render("✗ " + err.Error())
@@ -584,24 +621,88 @@ func (m *model) openFavorite(f favorite, push bool) tea.Cmd {
 	return m.switchTo(viewRuns)
 }
 
+const workflowDir = ".github/workflows/"
+
+// startTrigger loads refs and the workflow's inputs, then opens the form.
+func (m model) startTrigger(r row) (tea.Model, tea.Cmd) {
+	tgt, file, name := m.target, "", r.extra
+	switch m.view {
+	case viewWorkflows:
+		file = workflowFile(r.cells[3])
+	case viewFavs:
+		f, ok := m.favForRow(r)
+		if !ok {
+			return m, nil
+		}
+		tgt, file, name = f.target(), f.Workflow, f.Workflow
+		if tgt == m.curRepo {
+			tgt = repoRef{}
+		}
+	}
+	local := ""
+	if tgt == (repoRef{}) {
+		local = m.branch
+	}
+	m.status = styDim.Render("loading " + file + "…")
+	return m, loadFormCmd(tgt, file, name, local)
+}
+
+func readInputs(tgt repoRef, file, ref string) ([]dispatchInput, bool, error) {
+	src, err := fetchWorkflowFile(tgt, workflowDir+file, ref)
+	if err != nil {
+		return nil, false, err
+	}
+	return parseDispatchInputs(src)
+}
+
+func loadFormCmd(tgt repoRef, file, name, localBranch string) tea.Cmd {
+	return func() tea.Msg {
+		refs, err := fetchBranches(tgt)
+		if err != nil {
+			return formReadyMsg{err: err}
+		}
+		ref := refs[0]
+		for _, b := range refs {
+			if b == localBranch {
+				ref = b
+			}
+		}
+		inputs, ok, err := readInputs(tgt, file, ref)
+		if err != nil {
+			return formReadyMsg{err: fmt.Errorf("cannot read %s: %w", file, err)}
+		}
+		return formReadyMsg{form: newTriggerForm(tgt, file, ref, refs, inputs), name: name, dispatchable: ok}
+	}
+}
+
+func (m model) formKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	next, submit, cancel := m.form.update(k)
+	switch {
+	case cancel:
+		m.form = nil
+		return m, nil
+	case submit:
+		m.form = nil
+		return m, runAction("triggered "+next.workflow, next.args()...)
+	}
+	var cmd tea.Cmd
+	if next.pendingReload {
+		next.pendingReload, next.loadedRef = false, next.ref
+		tgt, file, ref := next.target, next.workflow, next.ref
+		cmd = func() tea.Msg {
+			in, ok, err := readInputs(tgt, file, ref)
+			return inputsMsg{ref, in, ok, err}
+		}
+	}
+	m.form = &next
+	return m, cmd
+}
+
 func runAction(done string, args ...string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := gh(args...)
 		return actionMsg{msg: done, err: err}
 	}
-}
-
-// triggerCmd dispatches a workflow. Input is "<ref> [key=value ...]".
-func triggerCmd(r row, in string) tea.Cmd {
-	f := strings.Fields(in)
-	args := []string{"workflow", "run", r.id}
-	if len(f) > 0 {
-		args = append(args, "--ref", f[0])
-		for _, kv := range f[1:] {
-			args = append(args, "-f", kv)
-		}
-	}
-	return runAction("triggered "+r.extra, args...)
 }
 
 func logsCmd(tg repoRef, id string, failedOnly bool) tea.Cmd {
@@ -753,6 +854,9 @@ func (m model) View() string {
 	b.WriteString(styHeader.Render(strings.TrimSpace(title)) + "\n")
 	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <P>current-PR <:>cmd </>filter") + "\n")
 
+	if m.form != nil {
+		return b.String() + "\n" + m.form.view(m.width)
+	}
 	if m.view == viewLogs {
 		return b.String() + m.logBody() + m.footer()
 	}
@@ -866,8 +970,6 @@ func (m model) footer() string {
 		return styKey.Render("/") + m.input + "█"
 	case modeCommand:
 		return styKey.Render(":") + m.input + "█"
-	case modeTrigger:
-		return styKey.Render("trigger ref [k=v ...] > ") + m.input + "█"
 	case modeAlias:
 		return styKey.Render("alias for "+m.aliasFor.Workflow+" > ") + m.input + "█"
 	case modeConfirm:
