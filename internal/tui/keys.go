@@ -234,7 +234,11 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if err := m.favs.Save(); err != nil {
 				m.status = styErr.Render("✗ " + err.Error())
 			} else {
-				m.status = styOK.Render("✓ alias set: " + in)
+				if in == "" {
+					m.status = styOK.Render("✓ alias cleared")
+				} else {
+					m.status = styOK.Render("✓ alias set: " + in)
+				}
 			}
 			return m, m.fetch()
 		}

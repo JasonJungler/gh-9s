@@ -119,7 +119,10 @@ func ParseDispatchInputs(src []byte) (inputs []DispatchInput, dispatchable bool,
 					in.Default = v.Value
 				}
 				if v := mapGet(spec, "required"); v != nil {
-					in.Required = v.Value == "true"
+					var b bool
+					if v.Decode(&b) == nil { // true, True and TRUE are all YAML booleans
+						in.Required = b
+					}
 				}
 				in.Options = scalars(mapGet(spec, "options"))
 				inputs = append(inputs, in)

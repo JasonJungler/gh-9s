@@ -52,7 +52,7 @@ func TestSetAliasRejects(t *testing.T) {
 	s, _ := Load(tmpFavs(t))
 	s.Toggle(fa)
 	s.Toggle(fb)
-	for _, bad := range []string{"runs", "FAV", "a b", ""} {
+	for _, bad := range []string{"runs", "FAV", "favs", "Favorites", "a b"} {
 		if err := s.SetAlias(fa, bad); err == nil {
 			t.Errorf("alias %q should be rejected", bad)
 		}
@@ -98,5 +98,25 @@ func TestForRepo(t *testing.T) {
 	got := s.ForRepo(ghcli.RepoRef{Host: "github.com", Owner: "acme", Name: "api"})
 	if len(got) != 1 || got[0].Workflow != "deploy.yml" {
 		t.Errorf("forRepo = %+v", got)
+	}
+}
+
+func TestSetAliasEmptyClearsTheAlias(t *testing.T) {
+	s, _ := Load(tmpFavs(t))
+	s.Toggle(fa)
+	if err := s.SetAlias(fa, "prod"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAlias(fa, ""); err != nil {
+		t.Fatalf("clearing should work: %v", err)
+	}
+	if s.Items[0].Alias != "" {
+		t.Errorf("alias = %q; want it cleared", s.Items[0].Alias)
+	}
+	if _, ok := s.ByAlias("prod"); ok {
+		t.Error("cleared alias still resolves")
+	}
+	if err := s.SetAlias(fb, ""); err == nil {
+		t.Error("clearing an alias of a non-favorite should still fail")
 	}
 }

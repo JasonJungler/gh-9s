@@ -96,3 +96,13 @@ jobs:
 		t.Errorf("got %+v\nwant %+v", got, want)
 	}
 }
+
+func TestRequiredAcceptsEveryYAMLBoolean(t *testing.T) {
+	for val, want := range map[string]bool{"true": true, "True": true, "TRUE": true, "false": false, "False": false} {
+		src := "on:\n  workflow_dispatch:\n    inputs:\n      a:\n        required: " + val + "\n"
+		in, _, err := ParseDispatchInputs([]byte(src))
+		if err != nil || len(in) != 1 || in[0].Required != want {
+			t.Errorf("required: %s -> %+v err=%v; want %v", val, in, err, want)
+		}
+	}
+}

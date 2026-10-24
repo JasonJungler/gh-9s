@@ -18,7 +18,7 @@ import (
 // aliases may not shadow them.
 var ReservedCommands = []string{
 	"runs", "run", "r", "workflows", "workflow", "wf", "w", "pulls", "pull",
-	"prs", "pr", "cpr", "checks", "fav", "q", "quit", "exit",
+	"prs", "pr", "cpr", "checks", "fav", "favs", "favorites", "q", "quit", "exit",
 }
 
 // Favorite is a workflow in a specific host and repo, optionally with an alias.
@@ -132,14 +132,18 @@ func (s *Store) Toggle(f Favorite) (added bool) {
 	return true
 }
 
-// SetAlias names a favorite. Aliases are non-empty, free of spaces, unique (case-insensitive) and never a built-in command.
+// SetAlias names a favorite ("" clears it). Aliases are free of spaces, unique (case-insensitive) and never a built-in command.
 func (s *Store) SetAlias(f Favorite, alias string) error {
 	i := s.Index(f)
 	if i < 0 {
 		return errors.New("not a Favorite")
 	}
-	if alias == "" || strings.ContainsAny(alias, " \t") {
-		return errors.New("alias must be non-empty and contain no spaces")
+	if alias == "" { // clearing
+		s.Items[i].Alias = ""
+		return nil
+	}
+	if strings.ContainsAny(alias, " \t") {
+		return errors.New("alias must contain no spaces")
 	}
 	for _, r := range ReservedCommands {
 		if strings.EqualFold(r, alias) {

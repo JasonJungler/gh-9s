@@ -19,6 +19,8 @@ func keys(m tea.Model, ks ...string) model {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		case "esc":
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		case "backspace":
+			msg = tea.KeyMsg{Type: tea.KeyBackspace}
 		case "ctrl+u":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlU}
 		case "ctrl+d":
@@ -151,5 +153,17 @@ func TestNonDispatchableShowsMessage(t *testing.T) {
 	m = next.(model)
 	if m.form != nil || !strings.Contains(m.status, "no workflow_dispatch") {
 		t.Errorf("form=%v status=%q", m.form, m.status)
+	}
+}
+
+func TestAliasCanBeClearedFromTheUI(t *testing.T) {
+	m := favModel(t)
+	m = keys(m, "f", "a", "p", "r", "o", "d", "enter")
+	if m.favs.Items[0].Alias != "prod" {
+		t.Fatalf("setup: alias = %q", m.favs.Items[0].Alias)
+	}
+	m = keys(m, "a", "backspace", "backspace", "backspace", "backspace", "enter")
+	if m.favs.Items[0].Alias != "" || !strings.Contains(m.status, "cleared") {
+		t.Errorf("alias = %q status = %q; want cleared", m.favs.Items[0].Alias, m.status)
 	}
 }
