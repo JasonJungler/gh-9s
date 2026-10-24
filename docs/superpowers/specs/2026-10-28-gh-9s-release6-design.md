@@ -32,7 +32,7 @@ Today `:fav` lists favorite workflows only. The user works across several repos 
 - Title line: `<project title>  OWNER/#N`. A tab bar with one tab per Status value in the Project's own order, plus `No status` if some items have none; each tab shows its count. `tab`/`shift+tab`/`h`/`l` switch tabs; all items are also reachable through the first tab `All`. (My call: `All` first, then the statuses.)
 - Rows in a tab: type icon (issue open/closed, PR open/draft/merged/closed, draft item), `REPO #N`, title, assignees, labels (compact), updated. Sorted as the Project returns them (its own order).
 - `enter` opens the item in the existing PR or issue screen of its own repo and host (like inbox rows); a draft item (no repo) has nothing to open and says so. `o` opens the item in the browser (a draft item opens the Project). `/` filters the tab, `R` refreshes (not more often than every 5 s), `esc` back. The preview pane (release 5d) works on board rows that are issues or PRs, exactly as in the inbox.
-- Loads at most the first 200 items (one request); if the Project has more, the screen says "N more in the browser".
+- Loads at most the first 200 items (two pages of 100, one after the other); if the Project has more (`totalCount`), the screen says "N more in the browser" and the tab counts are shown as `N+`.
 - The board is not polled; it refreshes on `R` and when re-entered after more than a minute.
 
 ### Errors
@@ -41,13 +41,21 @@ Today `:fav` lists favorite workflows only. The user works across several repos 
 
 ## Constraints
 
-- Go, Bubble Tea v1, everything through the `gh` CLI (only `internal/ghcli` runs it; calls to a host go with `--hostname`/`--owner` correctly; use the timeouts helpers). Project data comes from `gh project view` / `gh project item-list --format json` (read commands only).
+- Go, Bubble Tea v1, everything through the `gh` CLI (only `internal/ghcli` runs it; calls to a host go with `--hostname`/`--owner` correctly; use the timeouts helpers). Project data comes from one read-only GraphQL query per page through `gh api graphql` (as the inbox does): `repositoryOwner(login:){... on ProjectV2Owner{projectV2(number:){title closed field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100, after:){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{number title state url updatedAt repository{nameWithOwner} assignees(first:5){nodes{login}} labels(first:5){nodes{name}}} ... on PullRequest{number title state isDraft merged url updatedAt repository{nameWithOwner} assignees(first:5){nodes{login}} labels(first:5){nodes{name}}} ... on DraftIssue{title}}}}}}}`. One query gives the status order, each item's status, state and update time, so there is no second request. `gh project ...` commands are not used.
 - Remote text is sanitised (`CleanText`); names from the pins file are validated like favorites are (no leading `-`, plain tokens) before they reach a command line; a hand-edited or broken `pins.json` is never overwritten, the screen says so and the pins stay in memory only for the session (same rule as settings and favorites).
 - Pins file: `pins.json` next to `favorites.json`, atomic write, mode 0600, re-read before write, shape `{"repos":[{"host","repo"}],"projects":[{"host","owner","number","title"}]}`; `GH9S_PINS` overrides the path (for tests); no test touches the real config.
 - All existing keys keep working; the Workflows tab behaves exactly as the old screen (its tests stay).
 - Safety principles of the project hold: stale async results are dropped by identity (project, tab, request), an action uses the identity captured when the key was pressed, no write operation exists.
 - TDD, no network in tests (seams), one fresh-reviewer pass at the end, finishing menu; no push/tag without the user's approval. README updated.
 
+## Calls I made while writing this (from the builder check; say if you disagree)
+
+- Item state, draft/merged flags and updated time come with the same GraphQL query (above), not from `gh project item-list`, which does not return them. Status order is read in that query too; no second request.
+- The screen has partial counts when the Project is bigger than 200 items: tab counts read `N+` and the footer says how many more exist.
+- `:fav` and the existing entry points all open the tabbed screen; the Workflows tab keeps every old key; aliases (`:ALIAS`) work as before.
+- The last tab used is remembered for the session only (not saved).
+- `enter` on a pinned repo does what `:repo OWNER/NAME` does (switches the repo and resets the screen stack the same way), so `esc` behaves as it does after `:repo`.
+
 ## Left to the builder
 
-Icons and colours for the new tab bar and item types (use the icon table; plain + Nerd sets), key choices not named above, the column layout of rows, how `gh project item-list` fields are mapped (its JSON uses lower-cased field names, `content` holds type/number/repository/url), how a Status order is found (`gh project field-list` single-select options), whether repo metadata is fetched for the Repos tab, the wording of messages.
+Icons and colours for the new tab bar and item types (use the icon table; plain + Nerd sets), key choices not named above, the column layout of rows, how the GraphQL result is mapped to rows, whether repo metadata is fetched for the Repos tab, the wording of messages.
