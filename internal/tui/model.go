@@ -4,6 +4,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/MurabitoB/gh-9s/internal/drafts"
 	"github.com/MurabitoB/gh-9s/internal/favorites"
@@ -115,6 +116,11 @@ type model struct {
 	curRepo      ghcli.RepoRef                 // repo of the current directory, host included
 	latest       map[string]latestEntry
 	aliasFor     favorites.Favorite
+
+	prChecks     map[string]prCheck // the checks column of the PR list, by PR number, for prChecksKey
+	prChecksKey  string             // which repo and filter prChecks is of
+	prChecksAt   time.Time          // when they were last asked for
+	prChecksBusy bool
 
 	confirm    func() tea.Cmd
 	confirmMsg string

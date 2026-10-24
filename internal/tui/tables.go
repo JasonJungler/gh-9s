@@ -105,9 +105,15 @@ func rollupState(checks []rollupRef) (string, state) {
 }
 
 // prListArgs is the `gh pr list` command for r, narrowed by f.
+// The list leaves the checks out: statusCheckRollup is by far its heaviest field and makes GitHub time
+// out (504) on repos whose PRs have many checks. They are fetched on their own, see prchecks.go.
 func prListArgs(r ghcli.RepoRef, f ghcli.PRFilter) []string {
-	args := append([]string{"pr", "list", "-L", "50", "--json",
-		"number,title,author,headRefName,isDraft,reviewDecision,updatedAt,url,statusCheckRollup"}, ghcli.PRFilterArgs(f)...)
+	return prQueryArgs(r, f, 50, "number,title,author,headRefName,isDraft,reviewDecision,updatedAt,url")
+}
+
+// prQueryArgs is the `gh pr list` command for r, narrowed by f, asking for the given JSON fields.
+func prQueryArgs(r ghcli.RepoRef, f ghcli.PRFilter, limit int, fields string) []string {
+	args := append([]string{"pr", "list", "-L", fmt.Sprint(limit), "--json", fields}, ghcli.PRFilterArgs(f)...)
 	return ghcli.Scoped(r, args...)
 }
 
@@ -185,7 +191,7 @@ type rollupRef struct {
 
 func fetchPRs(r ghcli.RepoRef, currentBranch string, f ghcli.PRFilter) (table, error) {
 	var prs []prListItem
-	if err := ghcli.JSON(&prs, prListArgs(r, f)...); err != nil {
+	if err := withRetry(func() error { return ghcli.JSON(&prs, prListArgs(r, f)...) }); err != nil {
 		return table{}, err
 	}
 	return prRows(prs, currentBranch), nil

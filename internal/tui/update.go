@@ -122,6 +122,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, runMetaCmd(m.target, m.runID)) // keep watching the run while reading a log
 		}
 		return m, tea.Batch(cmds...)
+	case prChecksMsg:
+		return m.prChecksArrived(msg), nil
 	case runMetaMsg:
 		if msg.err == nil && msg.runID == m.runID && msg.meta.Status != "" {
 			return m.observeRun(msg.meta)
@@ -183,6 +185,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tbl = msg.tbl
 			if n := len(m.visible()); m.cursor >= n {
 				m.cursor = max(0, n-1)
+			}
+			if m.view == viewPRs {
+				var checksCmd tea.Cmd
+				m, checksCmd = m.prChecksAfterList()
+				return m, tea.Batch(notifyCmd, checksCmd)
 			}
 		}
 		return m, notifyCmd
