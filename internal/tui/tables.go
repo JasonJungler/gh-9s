@@ -102,7 +102,14 @@ func rollupState(checks []struct {
 	return fmt.Sprintf("✓ %d/%d", ok, len(checks)), stOK
 }
 
-func fetchPRs(r ghcli.RepoRef, currentBranch string) (table, error) {
+// prListArgs is the `gh pr list` command for r, narrowed by f.
+func prListArgs(r ghcli.RepoRef, f ghcli.PRFilter) []string {
+	args := append([]string{"pr", "list", "-L", "50", "--json",
+		"number,title,author,headRefName,isDraft,reviewDecision,updatedAt,url,statusCheckRollup"}, ghcli.PRFilterArgs(f)...)
+	return ghcli.Scoped(r, args...)
+}
+
+func fetchPRs(r ghcli.RepoRef, currentBranch string, f ghcli.PRFilter) (table, error) {
 	var prs []struct {
 		Number       int                    `json:"number"`
 		Title        string                 `json:"title"`
@@ -118,8 +125,7 @@ func fetchPRs(r ghcli.RepoRef, currentBranch string) (table, error) {
 			State      string `json:"state"`
 		} `json:"statusCheckRollup"`
 	}
-	if err := ghcli.JSON(&prs, ghcli.Scoped(r, "pr", "list", "-L", "50", "--json",
-		"number,title,author,headRefName,isDraft,reviewDecision,updatedAt,url,statusCheckRollup")...); err != nil {
+	if err := ghcli.JSON(&prs, prListArgs(r, f)...); err != nil {
 		return table{}, err
 	}
 	t := table{cols: []string{"#", "CHECKS", "TITLE", "AUTHOR", "BRANCH", "REVIEW", "UPDATED"}}

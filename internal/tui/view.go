@@ -75,9 +75,14 @@ func (m model) View() string {
 	if m.wfName != "" && m.view == viewRuns {
 		title += " workflow=" + m.wfName
 	}
-	if m.view == viewChecks {
+	if m.view == viewChecks || m.view == viewPRDetail {
 		if m.pr != "" {
 			title += " pr=#" + m.pr
+		}
+	}
+	if m.view == viewPRs {
+		if name := prFilterName(m.prFilter); name != "" {
+			title += " filter=" + name
 		}
 	}
 	if m.view == viewJobs || m.view == viewLogs || m.view == viewGraph {
@@ -276,7 +281,7 @@ func (m model) footer() string {
 	case viewWorkflows:
 		keys = "enter runs  t trigger  f favorite  a alias  e enable/disable  o open"
 	case viewPRs:
-		keys = "enter checks  o open"
+		keys = "enter detail  u mine  e review-requested  a all  o open"
 	case viewFavs:
 		keys = "enter runs  f unfavorite  a alias"
 	case viewChecks:

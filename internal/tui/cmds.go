@@ -21,6 +21,7 @@ func (m model) fetch() tea.Cmd {
 		return s.fetch(m)
 	}
 	v, wf, pr, br, run, job, tg := m.view, m.wfID, m.pr, m.prBranch(), m.runID, m.jobID, m.target
+	prf := m.prFilter
 	var pinned []favorites.Favorite
 	var snap *favorites.Store
 	if m.favs != nil {
@@ -45,7 +46,7 @@ func (m model) fetch() tea.Cmd {
 			t, err = fetchWorkflows(tg)
 			t.rows = pinFavorites(t.rows, pinned)
 		case viewPRs:
-			t, err = fetchPRs(tg, br)
+			t, err = fetchPRs(tg, br, prf)
 		case viewChecks:
 			t, err = fetchChecks(tg, pr)
 		case viewJobs:

@@ -45,6 +45,11 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 	}
+	if m.view == viewPRs {
+		if next, cmd, handled := m.prListKey(k); handled {
+			return next, cmd
+		}
+	}
 	if s, ok := screens[m.view]; ok && s.key != nil {
 		if next, cmd, handled := s.key(m, k); handled {
 			return next, cmd
@@ -192,7 +197,8 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 		}
 	case viewPRs:
 		m.pr = r.id
-		return m, m.push(viewChecks)
+		m = m.withScreenData(viewPRDetail, prDetailState{}) // a different PR starts at the top
+		return m, m.push(viewPRDetail)
 	case viewChecks:
 		if r.url != "" {
 			_ = ghcli.OpenURL(r.url)
@@ -455,4 +461,33 @@ func (m *model) reselect(id string) {
 		}
 	}
 	m.gsel = min(m.gsel, max(0, len(nodes)-1))
+}
+
+// prListKey sets the PR list filter: u = opened by me, e = review requested from me, a = all.
+func (m model) prListKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	switch k.String() {
+	case "u":
+		m.prFilter = ghcli.PRFilter{Mine: true}
+	case "e":
+		m.prFilter = ghcli.PRFilter{ReviewRequested: true}
+	case "a":
+		m.prFilter = ghcli.PRFilter{}
+	default:
+		return m, nil, false
+	}
+	m.cursor, m.top, m.loading = 0, 0, true
+	return m, m.fetch(), true
+}
+
+// prFilterName words the active PR filter for the title ("" when there is none).
+func prFilterName(f ghcli.PRFilter) string {
+	switch {
+	case f.Mine && f.ReviewRequested:
+		return "opened by me + review requested"
+	case f.Mine:
+		return "opened by me"
+	case f.ReviewRequested:
+		return "review requested"
+	}
+	return ""
 }

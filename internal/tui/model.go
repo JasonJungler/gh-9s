@@ -24,6 +24,7 @@ const (
 	viewLogs
 	viewFavs
 	viewGraph
+	viewPRDetail
 )
 
 var viewNames = map[viewKind]string{
@@ -53,10 +54,11 @@ type model struct {
 	status        string
 
 	// scope for the current view
-	base         ghcli.RepoRef // the repo chosen with :repo; zero value: the current directory's repo
-	target       ghcli.RepoRef // what the current view shows: base, or a favorite's repo while visiting one
-	wfID, wfName string        // runs filtered by workflow
-	pr           string        // checks for a PR ("" = current branch)
+	base         ghcli.RepoRef  // the repo chosen with :repo; zero value: the current directory's repo
+	target       ghcli.RepoRef  // what the current view shows: base, or a favorite's repo while visiting one
+	wfID, wfName string         // runs filtered by workflow
+	pr           string         // the PR shown (checks, detail); "" = the current branch's PR
+	prFilter     ghcli.PRFilter // PR list filter
 
 	mode                          inputMode
 	input                         string
