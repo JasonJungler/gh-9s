@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/MurabitoB/gh-9s/internal/diff"
+	"github.com/MurabitoB/gh-9s/internal/drafts"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/highlight"
 	"github.com/MurabitoB/gh-9s/internal/ui"
@@ -28,8 +29,11 @@ type diffState struct {
 	listMode bool    // showing the file list instead of the diff
 	sel      int     // selected file in the list
 
-	usrc      []int             // source key of every unified row, to keep the place when the layout changes
-	sb        *sbLayout         // the side-by-side layout for the current width; nil while unified
+	usrc      []int          // source key of every unified row, to keep the place when the layout changes
+	sb        *sbLayout      // the side-by-side layout for the current width; nil while unified
+	drafts    []drafts.Draft // inline comments written but not sent
+	anchored  bool           // a range is being selected from row anchor to the cursor
+	anchor    int
 	cur       int               // the cursor's display row
 	curKey    int               // the source line the cursor is on, to find it again in the other layout
 	sbs       int               // 0 by width, 1 always side-by-side, 2 always unified
@@ -101,7 +105,9 @@ func init() {
 			if st.head != "" && st.head == old.head {
 				st.viewed = old.viewed
 			}
-			lines, starts, src := diffDisplaySrc(st.d)
+			var draftNote string
+			st.drafts, draftNote = m.loadDrafts(old, st)
+			lines, starts, src := diffDisplayThreads(st.d, allThreads(st))
 			st.lines, st.starts, st.usrc = lines, starts, src
 			st.hl = p.hl
 			st.curKey = old.curKey
@@ -122,6 +128,9 @@ func init() {
 			m = m.withScreenData(viewDiff, st)
 			if p.threadErr != nil {
 				m.status = styErr.Render("couldn't load review comments: " + p.threadErr.Error())
+			}
+			if draftNote != "" {
+				m.status = styErr.Render(draftNote)
 			}
 			return m.syncDiffLayout()
 		},
@@ -145,6 +154,11 @@ func diffDisplay(d diff.Diff) (lines []dline, starts []int) {
 
 // diffDisplaySrc is diffDisplay that also gives each display row's source key.
 func diffDisplaySrc(d diff.Diff) (lines []dline, starts []int, src []int) {
+	return diffDisplayThreads(d, nil)
+}
+
+// diffDisplayThreads is diffDisplaySrc with review threads (and drafts) drawn under their lines.
+func diffDisplayThreads(d diff.Diff, threads []ghcli.Thread) (lines []dline, starts []int, src []int) {
 	if len(d.Files) == 0 {
 		return []dline{{"(no changes)", dNote}}, nil, []int{0}
 	}
@@ -166,6 +180,17 @@ func diffDisplaySrc(d diff.Diff) (lines []dline, starts []int, src []int) {
 		}
 		emit(dline{fmt.Sprintf("── %s  %s ──", name, plusMinus(f)), dFile}, srcKey(i, 0))
 		crMark, crNote := lineEndingPairs(f.Lines)
+		nums := f.Numbered()
+		var here, stale []ghcli.Thread
+		for _, t := range threads {
+			switch {
+			case t.Path != f.Path:
+			case t.Outdated:
+				stale = append(stale, t)
+			default:
+				here = append(here, t)
+			}
+		}
 		for li, l := range f.Lines {
 			key := srcKey(i, li+1)
 			text := strings.ReplaceAll(l.Text, "\t", "    ")
@@ -186,6 +211,18 @@ func diffDisplaySrc(d diff.Diff) (lines []dline, starts []int, src []int) {
 				emit(dline{text, dHunk}, key)
 			default:
 				emit(dline{"  " + text, dMeta}, key)
+			}
+			for _, t := range here {
+				if (t.Side == "RIGHT" && nums[li].New == t.Line) || (t.Side == "LEFT" && nums[li].Old == t.Line) {
+					for _, r := range threadTextRows(t) {
+						emit(dline{r, dMeta}, key)
+					}
+				}
+			}
+		}
+		for _, t := range stale {
+			for _, r := range threadTextRows(t) {
+				emit(dline{r, dMeta}, srcKey(i, len(f.Lines)+1))
 			}
 		}
 	}
@@ -323,8 +360,11 @@ func diffBody(m model) string {
 	default:
 		for i := m.top; i < len(st.lines) && n < h; i++ {
 			mark := " "
-			if i == st.cur {
+			switch {
+			case i == st.cur:
 				mark = ui.Key.Render("▶")
+			case inRange(st, i):
+				mark = ui.Key.Render("▌")
 			}
 			emit(mark + m.styledDiffLine(i, st.lines[i], w-1))
 		}

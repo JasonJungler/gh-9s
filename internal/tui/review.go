@@ -136,7 +136,7 @@ func buildSB(st diffState, width int) *sbLayout {
 		if fi < len(st.hl) {
 			hf = st.hl[fi]
 		}
-		for _, row := range sideBySideHL(f, st.threads, rw, hf) {
+		for _, row := range sideBySideHL(f, allThreads(st), rw, hf) {
 			add2(row, srcKey(fi, row.idx), srcKey(fi, row.idx2))
 		}
 	}
@@ -237,6 +237,9 @@ func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	if side {
 		starts = st.sb.starts
 	}
+	if nm, cmd, ok := draftKeys(m, st, k.String()); ok {
+		return nm, cmd, true
+	}
 	if !(side && st.focusList) {
 		if nm, nst, ok := moveCursor(m, st, k.String()); ok {
 			return nm.withScreenData(viewDiff, nst), nil, true
@@ -323,7 +326,7 @@ func reviewKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 }
 
 // listLine draws one entry of the file list column.
-func listLine(f diff.File, threads []ghcli.Thread, selected, viewed bool, w int) string {
+func listLine(f diff.File, threads []ghcli.Thread, nDrafts int, selected, viewed bool, w int) string {
 	mark := " "
 	if selected {
 		mark = "▸"
@@ -335,6 +338,9 @@ func listLine(f diff.File, threads []ghcli.Thread, selected, viewed bool, w int)
 	stats := " " + plusMinus(f)
 	if n := threadCount(threads, f.Path); n > 0 {
 		stats += fmt.Sprintf(" ◆%d", n)
+	}
+	if nDrafts > 0 {
+		stats += fmt.Sprintf(" ✎%d", nDrafts)
 	}
 	name := f.Path
 	avail := w - 3 - ansi.StringWidth(stats)
@@ -383,14 +389,23 @@ func sideBody(m model, st diffState) string {
 		list := strings.Repeat(" ", l.lw)
 		if fi := listTop + n; fi < len(st.d.Files) {
 			f := st.d.Files[fi]
-			list = listLine(f, st.threads, fi == sel, st.viewed[f.Path], l.lw)
+			nd := 0
+			for _, d := range st.drafts {
+				if d.Path == f.Path {
+					nd++
+				}
+			}
+			list = listLine(f, st.threads, nd, fi == sel, st.viewed[f.Path], l.lw)
 		}
 		row := ""
 		if i := m.top + n; i < len(l.lines) {
 			r := l.lines[i]
 			sep := styDim.Render("│")
-			if i == st.cur {
+			switch {
+			case i == st.cur:
 				sep = ui.Key.Render("▶")
+			case inRange(st, i):
+				sep = ui.Key.Render("▌")
 			}
 			row = r.left + sep + r.right
 			switch {
