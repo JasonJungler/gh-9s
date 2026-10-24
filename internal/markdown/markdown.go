@@ -3,8 +3,10 @@
 package markdown
 
 import (
+	"crypto/sha256"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -53,6 +55,44 @@ var (
 	anyTag  = regexp.MustCompile(`(?s)<!--.*?-->|</?[A-Za-z][^>]*>`)
 )
 
+var (
+	parses     int // how many times Render really parsed; for the tests
+	cacheMu    sync.Mutex
+	cache      = map[[32]byte]Doc{}
+	blockStart = regexp.MustCompile(`^ {0,3}(?:>[ ]?|[-*+] |[0-9]{1,9}[.)] )`)
+)
+
+const maxCache = 64
+
+// limitNesting keeps at most maxDepth block markers (">", "-", "1.") at the start of a line and
+// at most 64 columns of indent: deeper nesting costs the parser quadratic time and is shown flat.
+func limitNesting(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		trimmed := strings.TrimLeft(l, " ")
+		if indent := len(l) - len(trimmed); indent > 64 {
+			l = strings.Repeat(" ", 64) + trimmed
+		}
+		rest, kept, n := l, strings.Builder{}, 0
+		for {
+			m := blockStart.FindString(rest)
+			if m == "" {
+				break
+			}
+			rest = rest[len(m):]
+			if n++; n <= maxDepth {
+				kept.WriteString(m)
+			}
+		}
+		if n > maxDepth {
+			lines[i] = kept.String() + rest
+		} else {
+			lines[i] = l
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // line is one output line; img is 1+index into the collected images, or 0.
 type line struct {
 	s   string
@@ -64,13 +104,32 @@ type renderer struct {
 	images []Image
 }
 
-// Render lays src out in lines of at most width columns.
+// Render lays src out in lines of at most width columns. Results are cached; treat them as read-only.
 func Render(src string, width int) Doc {
 	width = max(width, 1)
 	if len(src) > maxInput {
 		src = src[:maxInput]
 	}
-	b := []byte(safe.Text(src))
+	key := sha256.Sum256([]byte(string(rune(width)) + "\x00" + src))
+	cacheMu.Lock()
+	if d, ok := cache[key]; ok {
+		cacheMu.Unlock()
+		return d
+	}
+	cacheMu.Unlock()
+	doc := render(src, width)
+	cacheMu.Lock()
+	if len(cache) >= maxCache {
+		cache = map[[32]byte]Doc{}
+	}
+	cache[key] = doc
+	cacheMu.Unlock()
+	return doc
+}
+
+func render(src string, width int) Doc {
+	parses++
+	b := []byte(limitNesting(strings.ReplaceAll(safe.Text(src), "\t", "    ")))
 	root := parser.Parse(text.NewReader(b))
 	r := &renderer{src: b}
 	lines := r.blocks(root, width, 0)
@@ -142,12 +201,18 @@ func (r *renderer) block(n ast.Node, w, depth int) []line {
 		}
 		return out
 	case *ast.Blockquote:
+		if w < 12 { // no room left for another level: show the rest as it is
+			return plainLines(r.flat(n), w)
+		}
 		inner := r.blocks(n, max(w-2, 1), depth+1)
 		for i := range inner {
 			inner[i].s = styDim.Render("│ ") + inner[i].s
 		}
 		return inner
 	case *ast.List:
+		if w < 12 {
+			return plainLines(r.flat(n), w)
+		}
 		return r.list(n, w, depth)
 	case *ast.ListItem:
 		return r.blocks(n, w, depth+1)

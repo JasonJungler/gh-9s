@@ -182,7 +182,7 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 			next, cmd := showImage(m, doc.images[st.img-1].URL)
 			return next, cmd, true
 		case imgOpen:
-			return m.open(doc.images[st.img-1].URL), nil, true
+			return m.openImageLink(doc.images[st.img-1].URL), nil, true
 		}
 		return m, nil, true
 	}
@@ -251,6 +251,7 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	default:
 		return m, nil, false
 	}
+	st.img = visibleSel(doc, st.img, st.scroll, h)
 	return m.withScreenData(viewIssue, st), nil, true
 }
 

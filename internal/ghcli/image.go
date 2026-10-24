@@ -1,6 +1,7 @@
 package ghcli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"image"
@@ -14,7 +15,10 @@ import (
 	"time"
 )
 
-const maxImageBytes = 5 << 20
+const (
+	maxImageBytes  = 5 << 20
+	maxImagePixels = 25_000_000 // decoded, an image takes 4 bytes a pixel
+)
 
 var imageClient = &http.Client{Timeout: 20 * time.Second, CheckRedirect: imageRedirect}
 
@@ -53,7 +57,7 @@ func FetchImage(host, rawURL string) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	if u.Hostname() == host {
+	if u.Scheme == "https" && u.Hostname() == host && (u.Port() == "" || u.Port() == "443") {
 		if tok, err := ghToken(host); err == nil && tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
@@ -79,11 +83,31 @@ func FetchImage(host, rawURL string) (image.Image, error) {
 	if len(data) == 0 {
 		return nil, errors.New("the image is empty")
 	}
-	img, _, err := image.Decode(strings.NewReader(string(data)))
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, errors.New("unsupported image type (only png, jpeg and gif can be shown)")
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > maxImagePixels {
+		return nil, fmt.Errorf("image is too large (%d×%d pixels)", cfg.Width, cfg.Height)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, errors.New("unsupported image type (only png, jpeg and gif can be shown)")
 	}
 	return img, nil
+}
+
+// ResolveImageURL is the absolute http(s) link a reference in some text stands for; anything else
+// (files, other schemes, option-looking strings) is refused. Only this value may be opened.
+func ResolveImageURL(host, raw string) (string, error) {
+	if host == "" {
+		host = "github.com"
+	}
+	u, err := resolveImageURL(host, raw)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
 }
 
 func resolveImageURL(host, raw string) (*url.URL, error) {

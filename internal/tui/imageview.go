@@ -77,6 +77,8 @@ func (v *imageViewer) Run() error {
 		}
 	}
 	defer restore()
+	fmt.Fprint(v.out, "\x1b[?1049h") // the alternate screen: nothing is left on the user's shell screen
+	defer fmt.Fprint(v.out, "\x1b[?1049l")
 
 	cols, rows := 80, 24
 	if v.size != nil {
@@ -105,8 +107,8 @@ func (v *imageViewer) Run() error {
 		case 0x1b, 'q', '\r', '\n', 3:
 			return nil
 		case 'o':
-			if v.open != nil {
-				_ = v.open(v.url)
+			if link, err := ghcli.ResolveImageURL(v.host, v.url); err == nil && v.open != nil {
+				_ = v.open(link)
 			}
 		}
 	}

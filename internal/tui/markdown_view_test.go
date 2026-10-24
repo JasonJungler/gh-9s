@@ -120,3 +120,38 @@ func TestDetailLinesStayWithinTheWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyAFetchableLinkIsEverOpenedFromAMarker(t *testing.T) {
+	for _, src := range []string{"-aTerminal", `\\attacker.example\share\x.exe`, "file:///System/Applications/Calculator.app"} {
+		opened := recordOpenURL(t)
+		m := prWithBody(t, "<img src=\""+src+"\" alt=\"x\">")
+		m = keys(m, "tab", "o")
+		if len(*opened) != 0 || !strings.Contains(m.status, "can't open") {
+			t.Errorf("%q: opened=%v status=%q; want nothing opened and a refusal", src, *opened, m.status)
+		}
+	}
+	opened := recordOpenURL(t)
+	m := prWithBody(t, "![x](/org/repo/raw/p.png)")
+	keys(m, "tab", "o")
+	if len(*opened) != 1 || (*opened)[0] != "https://github.com/org/repo/raw/p.png" {
+		t.Errorf("a relative link is opened as the absolute https link: %v", *opened)
+	}
+}
+
+func TestScrollingAwayFromTheMarkerReleasesO(t *testing.T) {
+	opened := recordOpenURL(t)
+	m := prWithBody(t, "![a](https://h/1.png)\n\n"+strings.Repeat("filler\n\n", 80))
+	m = keys(m, "tab", "G", "o")
+	if len(*opened) != 1 || (*opened)[0] != "https://github.com/acme/api/pull/482" {
+		t.Errorf("with the marker scrolled out of view, o must open the PR; opened %v", *opened)
+	}
+}
+
+func TestShiftTabWithNothingSelectedGoesToTheLastMarker(t *testing.T) {
+	s := recordShowImage(t)
+	m := prWithBody(t, "![a](https://h/1.png)\n\n![b](https://h/2.png)\n\n![c](https://h/3.png)")
+	keys(keys(m, "shift+tab"), "enter")
+	if len(s.urls) != 1 || s.urls[0] != "https://h/3.png" {
+		t.Errorf("shown %v; want the last image", s.urls)
+	}
+}

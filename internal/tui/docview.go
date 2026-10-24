@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/markdown"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
@@ -63,9 +64,10 @@ func imageKeys(d detailDoc, sel, scroll, h int, key string) (newSel, newScroll i
 		if key == "tab" {
 			sel = sel%n + 1
 		} else {
-			sel = (sel+n-2)%n + 1
-			if sel < 1 {
+			if sel <= 1 {
 				sel = n
+			} else {
+				sel--
 			}
 		}
 		line := d.images[sel-1].Line
@@ -84,6 +86,27 @@ func imageKeys(d detailDoc, sel, scroll, h int, key string) (newSel, newScroll i
 		}
 	}
 	return sel, scroll, imgNone
+}
+
+// openImageLink opens an image reference in the browser, but only as the absolute http(s) link it
+// stands for: the text came from whoever wrote the PR, so it never goes to the OS opener as it is.
+func (m model) openImageLink(raw string) model {
+	link, err := ghcli.ResolveImageURL(m.curTarget().Host, raw)
+	if err != nil {
+		m.status = "can't open this image link: " + err.Error()
+		return m
+	}
+	return m.open(link)
+}
+
+// visibleSel drops the selection when its marker has been scrolled out of view.
+func visibleSel(d detailDoc, sel, scroll, h int) int {
+	if sel > 0 && sel <= len(d.images) {
+		if line := d.images[sel-1].Line; line >= scroll && line < scroll+h {
+			return sel
+		}
+	}
+	return 0
 }
 
 // paintDoc writes the visible part of d, with the selected image marker highlighted.

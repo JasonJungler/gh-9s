@@ -62,6 +62,24 @@ func TestViewerDrawsTheImageAndWaitsForEsc(t *testing.T) {
 	}
 }
 
+func TestViewerUsesTheAlternateScreen(t *testing.T) {
+	r := newViewer("q", nil)
+	_ = r.v.Run()
+	out := r.out.String()
+	if !strings.HasPrefix(out, "\x1b[?1049h") || !strings.HasSuffix(out, "\x1b[?1049l") {
+		t.Errorf("the viewer must draw on the alternate screen and leave it again: %q", out)
+	}
+}
+
+func TestViewerNeverOpensAnUnfetchableLink(t *testing.T) {
+	r := newViewer("oq", nil)
+	r.v.url = "-aTerminal"
+	_ = r.v.Run()
+	if len(r.opened) != 0 {
+		t.Errorf("opened %v", r.opened)
+	}
+}
+
 func TestViewerOOpensTheBrowserAndKeepsWaiting(t *testing.T) {
 	r := newViewer("oq", nil)
 	if err := r.v.Run(); err != nil {

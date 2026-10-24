@@ -2,7 +2,9 @@ package ghcli
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
@@ -159,5 +161,66 @@ func TestRedirectDoesNotForwardTheTokenToAnotherHost(t *testing.T) {
 	}
 	if err := imageRedirect(same, many); err == nil {
 		t.Error("too many redirects should stop")
+	}
+}
+
+func TestResolveImageURLIsWhatGetsOpened(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://h/p.png": "https://h/p.png",
+		"/a/b.png":        "https://github.com/a/b.png",
+	} {
+		if got, err := ResolveImageURL("github.com", in); err != nil || got != want {
+			t.Errorf("%s -> %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"-aTerminal", `\\attacker.example\share\x.exe`, "file:///System/Applications/Calculator.app", "smb://x/y", "javascript:1", ""} {
+		if got, err := ResolveImageURL("github.com", bad); err == nil {
+			t.Errorf("%q resolved to %q; want a refusal", bad, got)
+		}
+	}
+}
+
+func TestTokenNeverGoesOverPlainHTTPOrAnotherPort(t *testing.T) {
+	f := &fakeHTTP{body: pngBytes(t)}
+	f.install(t)
+	for _, u := range []string{"http://github.com/x.png", "https://github.com:1234/x.png"} {
+		f.reqs = nil
+		if _, err := FetchImage("github.com", u); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.reqs[0].Header.Get("Authorization"); got != "" {
+			t.Errorf("%s was sent the token: %q", u, got)
+		}
+	}
+	f.reqs = nil
+	_, _ = FetchImage("github.com", "https://github.com:443/x.png")
+	if f.reqs[0].Header.Get("Authorization") == "" {
+		t.Error("the default https port should still get the token")
+	}
+}
+
+// bombPNG is a valid header declaring w×h pixels, with no pixel data.
+func bombPNG(w, h uint32) []byte {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], w)
+	binary.BigEndian.PutUint32(ihdr[4:], h)
+	ihdr[8], ihdr[9] = 8, 0 // 8-bit grayscale
+	chunk := func(kind string, data []byte) []byte {
+		var b bytes.Buffer
+		_ = binary.Write(&b, binary.BigEndian, uint32(len(data)))
+		b.WriteString(kind)
+		b.Write(data)
+		_ = binary.Write(&b, binary.BigEndian, crc32.ChecksumIEEE(append([]byte(kind), data...)))
+		return b.Bytes()
+	}
+	return append(append([]byte("\x89PNG\r\n\x1a\n"), chunk("IHDR", ihdr)...), chunk("IEND", nil)...)
+}
+
+func TestHugeImageDimensionsAreRefusedBeforeDecoding(t *testing.T) {
+	f := &fakeHTTP{body: bombPNG(20000, 20000)}
+	f.install(t)
+	_, err := FetchImage("github.com", "https://h/bomb.png")
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Errorf("err = %v; want a refusal that says the image is too large", err)
 	}
 }

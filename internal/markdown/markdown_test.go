@@ -141,3 +141,38 @@ func TestPathologicalInputFinishesQuickly(t *testing.T) {
 		t.Error("empty input should give no lines")
 	}
 }
+
+func TestTabsNeverReachTheOutput(t *testing.T) {
+	for _, in := range []string{"a\tb\tc\td\te", "- a\tb", "| a\tb |\n|-|\n| c\td |", "# h\tx", "```\na\tb\n```"} {
+		for _, l := range Render(in, 10).Lines {
+			if strings.ContainsRune(l, '\t') {
+				t.Errorf("%q: line %q contains a tab", in, l)
+			}
+		}
+	}
+}
+
+func TestHostileNestingIsBoundedAndKeepsItsText(t *testing.T) {
+	start := time.Now()
+	d := Render(strings.Repeat("> ", 32000)+"x", 40)
+	Render(strings.Repeat("- ", 32000)+"x", 40)
+	if el := time.Since(start); el > time.Second {
+		t.Errorf("hostile nesting took %v", el)
+	}
+	if !strings.Contains(plain(d), "x") {
+		t.Errorf("the text under deep nesting was lost: %q", plain(d))
+	}
+}
+
+func TestRenderingTheSameTextTwiceParsesOnce(t *testing.T) {
+	parses = 0
+	src := "same text " + t.Name()
+	a, b := Render(src, 30), Render(src, 30)
+	if parses != 1 || plain(a) != plain(b) {
+		t.Errorf("parsed %d times", parses)
+	}
+	Render(src, 31)
+	if parses != 2 {
+		t.Errorf("a different width must render again; parses = %d", parses)
+	}
+}
