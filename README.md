@@ -53,7 +53,7 @@ Code in diffs is coloured by language (chroma, chosen by file name), in both the
 
 The `:` command bar, `/` filter, log search and alias entry open in a box under the header, like k9s. The command bar completes as you type: the rest of the best match shows in grey, `Tab` (or `→`) accepts it and `Tab` again cycles through the other matches. Commands complete from the built-ins, your favorite aliases and (after `:repo `) your recent and cached repos. `Enter` on a unique prefix runs it (`:wo` opens workflows), and `↑`/`↓` walk the commands you typed before. Dialogs, forms and the repo picker are boxed at the top too.
 
-**Runs** — `enter` job graph · `l` full log in pager · `L` failed log · `w` watch (`gh run watch`) · `r` rerun · `F` rerun failed · `c` cancel · `d` delete
+**Runs** — `enter` job graph · `l` full log in pager · `L` failed log · `w` watch (`gh run watch`) · `r` rerun · `F` rerun failed · `c` cancel · `d` delete (each asks first, naming the repo and run, and says why when it does not apply; the same keys work on the job graph and the job list, and an accepted re-run goes to that run's graph and is watched again) · on the job graph `f` opens the log of the first failed job at its first error
 
 **Workflows / favorites** — `enter` runs · `t` trigger form · `f` favorite/unfavorite · `a` set alias · `e` enable/disable
 

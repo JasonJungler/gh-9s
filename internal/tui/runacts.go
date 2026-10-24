@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -130,7 +131,61 @@ func (m model) runActDone(msg runActDoneMsg) (model, tea.Cmd) {
 		m.status = styOK.Render("✓ cancelled run " + msg.act.id)
 	default:
 		m.status = styOK.Render("✓ deleted run " + msg.act.id)
+		if m.view == viewGraph || m.view == viewJobs { // the run being looked at is gone: back to where we came from
+			status := m.status
+			next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+			nm := next.(model)
+			nm.status = status
+			return nm, cmd
+		}
 	}
 	m.loading = true
 	return m, m.fetch()
+}
+
+// runActOnShown is a run action on the run the graph or job list is showing.
+func (m model) runActOnShown(a ghcli.RunAction) (model, tea.Cmd) {
+	if m.runMeta.Status == "" {
+		m.status = styDim.Render("still loading this run…")
+		return m, nil
+	}
+	return m.startRunAct(a, m.runID, m.runMeta.Status, m.runMeta.Conclusion)
+}
+
+var errorWord = regexp.MustCompile(`(?i)\b(error|failed|failure)\b`)
+
+// firstFailureLine is where a failed job's log should open: GitHub's own ##[error] annotation, else
+// the first line with an error word, else the top.
+func firstFailureLine(lines []string) int {
+	for i, l := range lines {
+		if strings.Contains(l, "##[error]") {
+			return i
+		}
+	}
+	for i, l := range lines {
+		if errorWord.MatchString(l) {
+			return i
+		}
+	}
+	return 0
+}
+
+// jumpToFailure opens the log of the first failed job of the graph, at its first failure.
+func (m model) jumpToFailure() (model, tea.Cmd) {
+	for _, n := range m.graph.Nodes {
+		jobs := n.Members
+		if len(jobs) == 0 {
+			jobs = []graph.Job{n.Job}
+		}
+		for _, j := range jobs {
+			if _, st := runState(j.Status, j.Conclusion); st == stFail && j.ID != "" {
+				m.jobID, m.jobName, m.jobURL = j.ID, j.Name, j.URL
+				m.logJump = true
+				cmd := m.push(viewLogs)
+				return m, cmd
+			}
+		}
+	}
+	m.status = styDim.Render("no failed job in this run")
+	return m, nil
 }

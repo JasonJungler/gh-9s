@@ -172,6 +172,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.follow {
 				m.top = m.maxTop()
 			}
+			if m.logJump { // opened from "first failure": start there, once
+				m.logJump = false
+				m.top = min(max(firstFailureLine(m.logs)-3, 0), m.maxTop())
+			}
 		} else if msg.err == nil {
 			m.tbl = msg.tbl
 			if n := len(m.visible()); m.cursor >= n {

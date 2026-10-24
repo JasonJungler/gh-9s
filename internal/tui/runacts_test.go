@@ -2,10 +2,13 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/graph"
+	"github.com/MurabitoB/gh-9s/internal/workflow"
 )
 
 func TestRunRule(t *testing.T) {
@@ -178,5 +181,139 @@ func TestPressingYTwiceRunsOnce(t *testing.T) {
 	keyAll(runsModel(runRow("123", "completed", "failure")), "r", "y", "y")
 	if len(f.calls) != 1 {
 		t.Errorf("%d calls", len(f.calls))
+	}
+}
+
+func failedGraphModel() model {
+	jobs := []graph.Job{ok("lint"), job("test", "completed", "failure"), job("e2e", "completed", "failure"), ok("docs")}
+	specs := []workflow.JobSpec{{ID: "lint", Name: "lint"}, {ID: "test", Name: "test", Needs: []string{"lint"}},
+		{ID: "e2e", Name: "e2e", Needs: []string{"lint"}}, {ID: "docs", Name: "docs"}}
+	return model{view: viewGraph, runID: "777", target: acme, width: 120, height: 30,
+		graph: graph.Build(jobs, specs), runStatus: "completed", runMeta: ghcli.RunMeta{Status: "completed", Conclusion: "failure"},
+		back: []viewKind{viewRuns}}
+}
+
+func TestTheGraphHasTheSameRunKeys(t *testing.T) {
+	f := installRunActs(t)
+	m := keyAll(failedGraphModel(), "F")
+	if m.dlg == nil || !strings.Contains(m.dlg.title, "run 777") || !strings.Contains(m.dlg.title, "acme/api") {
+		t.Fatalf("dialog = %+v", m.dlg)
+	}
+	m = keyAll(m, "y")
+	if len(f.calls) != 1 || f.calls[0] != (runCall{acme, "777", ghcli.RunRerunFailed}) {
+		t.Errorf("calls = %+v", f.calls)
+	}
+	if m.view != viewGraph || m.runID != "777" || m.runStatus != "" {
+		t.Errorf("a re-run restarts the watch of the same run: view=%v runStatus=%q", m.view, m.runStatus)
+	}
+	collapse := failedGraphModel()
+	collapse = keyAll(collapse, "x") // x is still the graph's own key
+	if collapse.dlg != nil {
+		t.Error("x must not open a run action dialog")
+	}
+}
+
+func TestTheJobListHasTheSameRunKeys(t *testing.T) {
+	f := installRunActs(t)
+	m := model{view: viewJobs, runID: "888", target: acme, width: 120, height: 30,
+		runMeta: ghcli.RunMeta{Status: "in_progress"},
+		tbl:     table{cols: []string{"JOB"}, rows: []row{{id: "1", cells: []string{"build"}}}}}
+	m = keyAll(m, "c")
+	if m.dlg == nil || !strings.Contains(m.dlg.title, "Cancel run 888") {
+		t.Fatalf("dialog = %+v", m.dlg)
+	}
+	keyAll(m, "y")
+	if len(f.calls) != 1 || f.calls[0] != (runCall{acme, "888", ghcli.RunCancel}) {
+		t.Errorf("calls = %+v", f.calls)
+	}
+}
+
+func TestRunKeysWaitForTheRunToLoad(t *testing.T) {
+	f := installRunActs(t)
+	m := failedGraphModel()
+	m.runMeta = ghcli.RunMeta{}
+	m = keyAll(m, "r")
+	if m.dlg != nil || len(f.calls) != 0 || !strings.Contains(m.status, "loading") {
+		t.Errorf("dialog=%v status=%q; the rules need the run's state", m.dlg != nil, m.status)
+	}
+}
+
+func TestAReRunUsesTheRunsOwnRepoEvenWhenThereIsNoTarget(t *testing.T) {
+	f := installRunActs(t)
+	ghe := ghcli.RepoRef{Host: "ghe.corp", Owner: "acme", Name: "api"}
+	m := failedGraphModel()
+	m.target, m.curRepo = ghcli.RepoRef{}, ghe
+	m = keyAll(m, "r", "y")
+	if len(f.calls) != 1 || f.calls[0].target != ghe || m.target != ghe {
+		t.Errorf("calls = %+v target = %+v; want the Enterprise repo, kept for the new graph", f.calls, m.target)
+	}
+}
+
+func TestDeletingTheRunYouAreLookingAtLeavesTheScreen(t *testing.T) {
+	installRunActs(t)
+	m := keyAll(failedGraphModel(), "d", "y")
+	if m.view != viewRuns {
+		t.Errorf("view = %v; a deleted run's graph is gone, so go back", m.view)
+	}
+}
+
+func TestFJumpsToTheFirstFailedJobsLog(t *testing.T) {
+	m := keys(failedGraphModel(), "f")
+	if m.view != viewLogs || m.jobID != "test" || m.target != acme {
+		t.Fatalf("view=%v jobID=%q; want the log of the first failed job (test)", m.view, m.jobID)
+	}
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i)
+	}
+	lines[120] = "##[error]Process completed with exit code 1."
+	next, _ := m.Update(dataMsg{view: viewLogs, logs: lines})
+	m = next.(model)
+	if m.top < 100 || m.top > 120 {
+		t.Errorf("top = %d; the log should open around the error line (120)", m.top)
+	}
+	next, _ = m.Update(dataMsg{view: viewLogs, logs: lines}) // a refresh does not jump again
+	m.top = 5
+	next, _ = m.Update(dataMsg{view: viewLogs, logs: lines})
+	if next.(model).top != 5 {
+		t.Error("the jump happens once, on the first load")
+	}
+}
+
+func TestFWithNothingFailedSaysSo(t *testing.T) {
+	m := failedGraphModel()
+	m.graph = graph.Build([]graph.Job{ok("lint")}, []workflow.JobSpec{{ID: "lint", Name: "lint"}})
+	m = keys(m, "f")
+	if m.view != viewGraph || !strings.Contains(m.status, "no failed job") {
+		t.Errorf("view=%v status=%q", m.view, m.status)
+	}
+}
+
+func TestFirstFailureLine(t *testing.T) {
+	cases := []struct {
+		lines []string
+		want  int
+	}{
+		{[]string{"a", "b", "##[error]boom", "##[error]again"}, 2},
+		{[]string{"a", "Some error: x", "b", "FAILED y"}, 1},
+		{[]string{"a", "b"}, 0},
+		{nil, 0},
+		{[]string{"terror of the deep", "an error occurred"}, 1}, // whole words only
+	}
+	for _, c := range cases {
+		if got := firstFailureLine(c.lines); got != c.want {
+			t.Errorf("%q: %d; want %d", c.lines, got, c.want)
+		}
+	}
+}
+
+func TestFOpensTheJobByItsIDNotItsName(t *testing.T) {
+	failed := job("test", "completed", "failure")
+	failed.ID = "9876543210"
+	m := failedGraphModel()
+	m.graph = graph.Build([]graph.Job{ok("lint"), failed}, []workflow.JobSpec{{ID: "lint", Name: "lint"}, {ID: "test", Name: "test", Needs: []string{"lint"}}})
+	m = keys(m, "f")
+	if m.jobID != "9876543210" || m.jobName != "test" {
+		t.Errorf("jobID=%q jobName=%q; the log is fetched by the job's id", m.jobID, m.jobName)
 	}
 }

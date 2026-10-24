@@ -141,6 +141,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.selected(); ok && m.view == viewRuns {
 			return m.startRunAct(runActionOf(k.String()), r.id, r.status, r.conclusion)
 		}
+		if m.view == viewJobs {
+			return m.runActOnShown(runActionOf(k.String()))
+		}
 	case "f":
 		if r, ok := m.selected(); ok && (m.view == viewWorkflows || m.view == viewFavs) {
 			return m.toggleFavorite(r)
@@ -352,6 +355,12 @@ func (m model) graphKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		m.jobID, m.jobName, m.jobURL = n.Job.ID, n.Job.Name, n.Job.URL
 		return m, m.push(viewLogs), true
+	case "r", "F", "c", "d":
+		next, cmd := m.runActOnShown(runActionOf(s))
+		return next, cmd, true
+	case "f":
+		next, cmd := m.jumpToFailure()
+		return next, cmd, true
 	case "o":
 		if m.gsel < len(g.Nodes) && g.Nodes[m.gsel].Job.URL != "" {
 			m = m.open(g.Nodes[m.gsel].Job.URL)

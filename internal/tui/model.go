@@ -89,6 +89,7 @@ type model struct {
 	pendingMerge *mergeAction              // the merge being collected through dialogs
 	prefsFile    string                    // where small remembered choices live ("" = do not persist)
 	drafts       *drafts.Store             // inline review comments not sent yet, kept on disk
+	logJump      bool                      // the next log to load opens at its first failure
 	pendingRun   *runAct                   // a run action waiting for its confirmation
 	sendingKey   string                    // the PR whose review is being sent right now
 	pendingDraft *pendingDraft             // a comment being written in a dialog
@@ -193,6 +194,9 @@ func (m *model) push(v viewKind) tea.Cmd {
 func (m *model) switchTo(v viewKind) tea.Cmd {
 	m.view, m.tbl, m.cursor, m.top, m.filter, m.err = v, table{}, 0, 0, "", nil
 	m.logs, m.follow = nil, false
+	if v != viewLogs {
+		m.logJump = false
+	}
 	m.query, m.matches, m.mi = "", nil, 0
 	m.note = ""
 	m.pending, m.pendingMerge = nil, nil // half-finished actions belong to the screen we are leaving
