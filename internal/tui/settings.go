@@ -33,6 +33,17 @@ func defaultSettingsPath() string {
 	return ""
 }
 
+// joinBanner puts startup problems on one line, apart from each other.
+func joinBanner(parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
 // loadSettings reads the settings and words any problem for the banner.
 func loadSettings() (*settings.Store, string) {
 	legacy := ""

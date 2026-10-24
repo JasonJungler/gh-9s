@@ -84,7 +84,7 @@ func Load(path string, getenv func(string) string, legacyPrefs string) (*Store, 
 			continue
 		}
 		v, err := parse(d, in)
-		if err == nil && len(d.EnvOptions) > 0 && !contains(d.EnvOptions, v.(string)) {
+		if err == nil && d.Kind == Enum && len(d.EnvOptions) > 0 && !contains(d.EnvOptions, v.(string)) {
 			err = fmt.Errorf("must be one of %s", strings.Join(d.EnvOptions, ", "))
 		}
 		if err != nil {
@@ -149,6 +149,11 @@ func readRaw(path string) (map[string]json.RawMessage, error) {
 }
 
 func fromJSON(d Def, rv json.RawMessage) (any, error) {
+	if t := bytes.TrimSpace(rv); bytes.Equal(t, []byte("null")) {
+		return nil, errors.New("must not be null")
+	} else if d.Kind != Enum && len(t) > 0 && t[0] == '"' {
+		return nil, errors.New("must not be in quotes")
+	}
 	switch d.Kind {
 	case Bool:
 		var v bool
@@ -270,15 +275,15 @@ func Display(d Def, v any) string {
 func (s *Store) Set(key, value string) (string, error) {
 	d, ok := Lookup(key)
 	if !ok {
-		return "", fmt.Errorf("unknown setting %q", clip(key)[1:len(clip(key))-1])
+		return "", fmt.Errorf("unknown setting %s", clip(key))
 	}
 	v, err := parse(d, value)
 	if err != nil {
-		return "", fmt.Errorf("%s %s", key, err)
+		return "", fmt.Errorf("%s %s", d.Key, err)
 	}
 	s.mu.Lock()
-	s.file[key] = v
-	s.dirty[key] = true
+	s.file[d.Key] = v
+	s.dirty[d.Key] = true
 	s.mu.Unlock()
 	if err := s.save(); err != nil {
 		return Display(d, v), fmt.Errorf("%w: %v", ErrNotSaved, err)
@@ -290,9 +295,9 @@ func (s *Store) Set(key, value string) (string, error) {
 func (s *Store) Cycle(key string, dir int) (string, error) {
 	d, ok := Lookup(key)
 	if !ok {
-		return "", fmt.Errorf("unknown setting %q", clip(key))
+		return "", fmt.Errorf("unknown setting %s", clip(key))
 	}
-	cur, _, _ := s.fileValue(key)
+	cur, _, _ := s.fileValue(d.Key)
 	var next string
 	switch d.Kind {
 	case Bool:
@@ -313,7 +318,7 @@ func (s *Store) Cycle(key string, dir int) (string, error) {
 		}
 		next = d.Options[(i+dir+len(d.Options))%len(d.Options)]
 	}
-	return s.Set(key, next)
+	return s.Set(d.Key, next)
 }
 
 // fileValue is the value as the file (or the default) has it, ignoring the environment: what a
@@ -351,7 +356,15 @@ func (s *Store) save() error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(s.path)
+	target := s.path
+	if real, err := filepath.EvalSymlinks(s.path); err == nil {
+		target = real // a link to a dotfiles copy stays a link: the real file is the one rewritten
+	}
+	mode := os.FileMode(0o600)
+	if st, err := os.Stat(target); err == nil {
+		mode = st.Mode().Perm() // an existing file keeps its permissions
+	}
+	dir := filepath.Dir(target)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -360,7 +373,7 @@ func (s *Store) save() error {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if err := f.Chmod(0o600); err != nil {
+	if err := f.Chmod(mode); err != nil {
 		f.Close()
 		return err
 	}
@@ -371,7 +384,11 @@ func (s *Store) save() error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(f.Name(), s.path)
+	if err := os.Rename(f.Name(), target); err != nil {
+		return err
+	}
+	s.dirty = map[string]bool{} // written: later saves must not put these old values back over someone else's change
+	return nil
 }
 
 var memory = func() *Store { s, _ := Load("", nil, ""); return s }()

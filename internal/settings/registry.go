@@ -3,6 +3,8 @@
 // without ever overwriting a file it could not understand. Adding a setting is adding one Def.
 package settings
 
+import "strings"
+
 // Kind is the type of a setting's value.
 type Kind int
 
@@ -39,6 +41,7 @@ var Registry = []Def{
 
 // Lookup finds a setting by key.
 func Lookup(key string) (Def, bool) {
+	key = strings.ToLower(strings.TrimSpace(key))
 	for _, d := range Registry {
 		if d.Key == key {
 			return d, true

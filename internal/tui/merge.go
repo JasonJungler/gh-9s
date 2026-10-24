@@ -131,7 +131,7 @@ func init() {
 		}
 		note := ""
 		if _, err := m.cfg().Set("delete_branch_after_merge", on); err != nil { // the merge goes ahead either way
-			note = " — couldn't remember the branch choice: " + err.Error()
+			note = " — couldn't remember the branch choice (" + strings.TrimPrefix(err.Error(), "not saved: ") + ")"
 		}
 		return m, func() tea.Msg {
 			err := mergePR(p.target, p.number, p.method, r.toggled, p.head)

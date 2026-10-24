@@ -265,3 +265,77 @@ func TestRegistryLookup(t *testing.T) {
 		seen[d.Key] = true
 	}
 }
+
+func TestSavingThroughASymlinkWritesTheRealFile(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "dotfiles", "settings.json")
+	write(t, real, `{"icons":"plain"}`)
+	if err := os.Chmod(real, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("no symlinks here")
+	}
+	s := load(t, link, nil)
+	if _, err := s.Set("preview", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("the link must still be a link")
+	}
+	if b, _ := os.ReadFile(real); !strings.Contains(string(b), `"preview": false`) {
+		t.Errorf("the target file was not updated: %s", b)
+	}
+	if fi, _ := os.Stat(real); fi.Mode().Perm() != 0o644 {
+		t.Errorf("an existing file keeps its permissions, got %v", fi.Mode().Perm())
+	}
+}
+
+func TestAnOlderChangeIsNotWrittenAgain(t *testing.T) {
+	path := tmpPath(t)
+	a, b := load(t, path, nil), load(t, path, nil)
+	if _, err := a.Set("icons", "nerd"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Set("icons", "plain"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Set("preview", "off"); err != nil { // a saves another key: icons must stay what b wrote
+		t.Fatal(err)
+	}
+	if c := load(t, path, nil); c.String("icons") != "plain" || c.Bool("preview") {
+		t.Errorf("icons=%q preview=%v; a's old icons value must not come back", c.String("icons"), c.Bool("preview"))
+	}
+}
+
+func TestNullAndQuotedNumbersAreNotValues(t *testing.T) {
+	path := tmpPath(t)
+	write(t, path, `{"preview": null, "preview_width": "40", "icons": null}`)
+	s := load(t, path, nil)
+	if !s.Bool("preview") || s.Int("preview_width") != 40 || s.String("icons") != "ask" {
+		t.Error("defaults expected")
+	}
+	if len(s.Notes()) != 3 {
+		t.Errorf("each one is reported: %q", s.Notes())
+	}
+	if s.Source("preview") != FromDefault || s.Source("preview_width") != FromDefault {
+		t.Error("they are not 'from the file'")
+	}
+}
+
+func TestKeysAreMatchedIgnoringCase(t *testing.T) {
+	s := load(t, tmpPath(t), nil)
+	if got, err := s.Set("PREVIEW_Width", "50"); err != nil || got != "50" || s.Int("preview_width") != 50 {
+		t.Errorf("Set = %q %v width=%d", got, err, s.Int("preview_width"))
+	}
+	if d, ok := Lookup("Icons"); !ok || d.Key != "icons" {
+		t.Errorf("Lookup = %+v %v", d, ok)
+	}
+	if _, err := s.Set("zzz", "1"); err == nil || strings.Count(err.Error(), `"`) != 2 {
+		t.Errorf("an unknown key is quoted once: %v", err)
+	}
+}

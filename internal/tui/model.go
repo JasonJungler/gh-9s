@@ -171,11 +171,9 @@ func Run() error {
 	}
 	var banner string
 	m.settings, banner = loadSettings()
-	if banner != "" {
-		m.banner = strings.TrimSpace(m.banner + " " + banner)
-	}
+	m.banner = joinBanner(m.banner, banner)
 	if ds, err := drafts.Load(drafts.DefaultPath()); err != nil {
-		m.banner += " drafts are not saved: " + err.Error()
+		m.banner = joinBanner(m.banner, "drafts are not saved: "+err.Error())
 	} else {
 		m.drafts = ds
 	}

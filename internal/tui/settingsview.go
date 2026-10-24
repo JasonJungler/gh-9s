@@ -75,6 +75,9 @@ func settingsBody(m model) string {
 		b.WriteString(" " + styErr.Render(trunc("not saved: "+err.Error(), w-1)) + "\n")
 	}
 	rows := m.settingsRows()
+	if st.sel >= st.top+rows { // the terminal shrank since the last key: keep the selection in view
+		st.top = st.sel - rows + 1
+	}
 	lines := 0
 	for i := st.top; i < len(settings.Registry) && lines < rows; i++ {
 		d := settings.Registry[i]

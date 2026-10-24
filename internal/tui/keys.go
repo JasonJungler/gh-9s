@@ -296,6 +296,9 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 	case "inbox", "in":
 		return m.goTop(viewInbox)
 	case "settings":
+		if m.view == viewSettings {
+			return m, nil
+		}
 		cmd := m.push(viewSettings)
 		return m, cmd
 	case "fav", "favs", "favorites":

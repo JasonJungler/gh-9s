@@ -6,8 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MurabitoB/gh-9s/internal/favorites"
 	"github.com/MurabitoB/gh-9s/internal/settings"
 )
 
@@ -202,5 +205,43 @@ func TestSettingsScrollAndFitANarrowTerminal(t *testing.T) {
 	m = keys(m, "G")
 	if !strings.Contains(ansi.Strip(m.View()), "▸") {
 		t.Error("G keeps the selection visible")
+	}
+}
+
+func TestReservedWordsCannotBeFavoriteAliases(t *testing.T) {
+	for _, w := range []string{"set", "settings", "inbox", "in"} {
+		if !favorites.IsReserved(w) {
+			t.Errorf("%q must be reserved: it is a command", w)
+		}
+	}
+}
+
+func TestSettingsWhileOnSettingsDoesNotStackScreens(t *testing.T) {
+	m, _ := settingsModel(t, "", nil)
+	m = openSettings(m)
+	depth := len(m.back)
+	m = keyAll(cmdLine(m, "settings"), "enter")
+	if len(m.back) != depth {
+		t.Errorf("back stack %d -> %d", depth, len(m.back))
+	}
+}
+
+func TestTheSelectionStaysVisibleAfterTheTerminalShrinks(t *testing.T) {
+	m, _ := settingsModel(t, "", nil)
+	m.height = 30
+	m = openSettings(m)
+	m = keys(m, "G")
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 11})
+	if v := ansi.Strip(next.(model).View()); !strings.Contains(v, "▸") {
+		t.Errorf("the selected row must still be shown:\n%s", v)
+	}
+}
+
+func TestBannerPartsAreSeparatedAndTheMergeNoteDoesNotStutter(t *testing.T) {
+	if got := joinBanner("favorites disabled: X", "settings are not saved: Y"); got != "favorites disabled: X; settings are not saved: Y" {
+		t.Errorf("banner = %q", got)
+	}
+	if got := joinBanner("", "only"); got != "only" {
+		t.Errorf("banner = %q", got)
 	}
 }

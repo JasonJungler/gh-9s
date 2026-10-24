@@ -18,7 +18,17 @@ import (
 // aliases may not shadow them.
 var ReservedCommands = []string{
 	"runs", "run", "r", "workflows", "workflow", "wf", "w", "pulls", "pull",
-	"prs", "pr", "cpr", "checks", "fav", "favs", "favorites", "issues", "issue", "is", "repo", "q", "quit", "exit",
+	"prs", "pr", "cpr", "checks", "fav", "favs", "favorites", "issues", "issue", "is", "inbox", "in", "settings", "set", "repo", "q", "quit", "exit",
+}
+
+// IsReserved says whether a name is a built-in command (ignoring case).
+func IsReserved(name string) bool {
+	for _, r := range ReservedCommands {
+		if strings.EqualFold(r, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // Favorite is a workflow in a specific host and repo, optionally with an alias.
