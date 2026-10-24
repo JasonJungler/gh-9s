@@ -276,10 +276,8 @@ func (r *renderer) inline(n ast.Node, segs *[]seg, wrap *lipgloss.Style) {
 		switch c := c.(type) {
 		case *ast.Text:
 			add(string(c.Segment.Value(r.src)))
-			if c.HardLineBreak() {
+			if c.HardLineBreak() || c.SoftLineBreak() { // GitHub shows a single newline as a line break
 				add("\n")
-			} else if c.SoftLineBreak() {
-				add(" ")
 			}
 		case *ast.String:
 			add(string(c.Value))

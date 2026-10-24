@@ -27,6 +27,7 @@ var (
 type issueState struct {
 	d      ghcli.IssueDetail
 	scroll int
+	img    int // selected image marker, 1+index; 0 none
 }
 
 func init() {
@@ -64,7 +65,7 @@ func init() {
 		},
 		apply: func(m model, msg screenMsg) model {
 			old, _ := m.screenData(viewIssue).(issueState)
-			return m.withScreenData(viewIssue, issueState{d: msg.data.(ghcli.IssueDetail), scroll: old.scroll})
+			return m.withScreenData(viewIssue, issueState{d: msg.data.(ghcli.IssueDetail), scroll: old.scroll, img: old.img})
 		},
 		key:    issueKey,
 		body:   issueBody,
@@ -171,7 +172,20 @@ func issuesKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	st, _ := m.screenData(viewIssue).(issueState)
 	h := m.logHeight()
-	maxScroll := max(0, len(issueLines(st.d, m.contentWidth()))-h)
+	doc := issueLines(st.d, m.contentWidth())
+	maxScroll := max(0, len(doc.lines)-h)
+	var act imageAction
+	if st.img, st.scroll, act = imageKeys(doc, st.img, st.scroll, h, k.String()); act != imgNone {
+		m = m.withScreenData(viewIssue, st)
+		switch act {
+		case imgShow:
+			next, cmd := showImage(m, doc.images[st.img-1].URL)
+			return next, cmd, true
+		case imgOpen:
+			return m.open(doc.images[st.img-1].URL), nil, true
+		}
+		return m, nil, true
+	}
 	switch k.String() {
 	case "j", "down":
 		st.scroll = min(st.scroll+1, maxScroll)
@@ -248,24 +262,17 @@ func issueBody(m model) string {
 		b.WriteString(ui.Err.Render(" "+m.err.Error()) + "\n")
 		h--
 	}
-	lines := issueLines(st.d, m.contentWidth())
-	n := 0
-	for i := min(st.scroll, max(0, len(lines)-1)); i < len(lines) && n < h; i++ {
-		b.WriteString(" " + lines[i] + "\n")
-		n++
-	}
-	for ; n < h; n++ {
-		b.WriteString("\n")
-	}
+	paintDoc(&b, issueLines(st.d, m.contentWidth()), st.img, st.scroll, h)
 	return b.String()
 }
 
 // issueLines lays out the issue screen as plain lines at the given width.
-func issueLines(d ghcli.IssueDetail, width int) []string {
+func issueLines(d ghcli.IssueDetail, width int) detailDoc {
 	if d.Number == 0 && d.Title == "" {
-		return []string{"loading…"}
+		return detailDoc{lines: []string{"loading…"}}
 	}
-	out := []string{fmt.Sprintf("#%d  %s", d.Number, d.Title), fmt.Sprintf("%s   %s", d.Author, d.State)}
+	var out detailDoc
+	out.add(fmt.Sprintf("#%d  %s", d.Number, d.Title), fmt.Sprintf("%s   %s", d.Author, d.State))
 	labels, assignees := "no labels", "unassigned"
 	if len(d.Labels) > 0 {
 		labels = "Labels: " + strings.Join(d.Labels, ", ")
@@ -273,14 +280,15 @@ func issueLines(d ghcli.IssueDetail, width int) []string {
 	if len(d.Assignees) > 0 {
 		assignees = "Assignees: " + strings.Join(d.Assignees, ", ")
 	}
-	out = append(out, labels+"   "+assignees, "", "── Description ──")
+	out.add(labels+"   "+assignees, "", "── Description ──")
 	if strings.TrimSpace(d.Body) == "" {
-		out = append(out, "(no description)")
+		out.add("(no description)")
 	} else {
-		out = append(out, wrap(d.Body, width)...)
+		out.addMarkdown(d.Body, width, "")
 	}
-	out = append(out, "", "── Discussion ──")
-	return append(out, discussionLines(d.Comments, nil, width)...)
+	out.add("", "── Discussion ──")
+	out.addDoc(discussionLines(d.Comments, nil, width))
+	return out
 }
 
 // startIssueAction remembers which issue an action was started for.

@@ -30,6 +30,7 @@ func (m model) open(url string) model {
 type prDetailState struct {
 	d      ghcli.PRDetail
 	scroll int
+	img    int // selected image marker, 1+index; 0 none
 }
 
 func init() {
@@ -45,7 +46,7 @@ func init() {
 		},
 		apply: func(m model, msg screenMsg) model {
 			old, _ := m.screenData(viewPRDetail).(prDetailState)
-			return m.withScreenData(viewPRDetail, prDetailState{d: msg.data.(ghcli.PRDetail), scroll: old.scroll})
+			return m.withScreenData(viewPRDetail, prDetailState{d: msg.data.(ghcli.PRDetail), scroll: old.scroll, img: old.img})
 		},
 		key:    prDetailKey,
 		body:   prDetailBody,
@@ -56,7 +57,20 @@ func init() {
 func prDetailKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	st, _ := m.screenData(viewPRDetail).(prDetailState)
 	h := m.logHeight()
-	maxScroll := max(0, len(prDetailLines(st.d, m.contentWidth()))-h)
+	doc := prDetailLines(st.d, m.contentWidth())
+	maxScroll := max(0, len(doc.lines)-h)
+	var act imageAction
+	if st.img, st.scroll, act = imageKeys(doc, st.img, st.scroll, h, k.String()); act != imgNone {
+		m = m.withScreenData(viewPRDetail, st)
+		switch act {
+		case imgShow:
+			next, cmd := showImage(m, doc.images[st.img-1].URL)
+			return next, cmd, true
+		case imgOpen:
+			return m.open(doc.images[st.img-1].URL), nil, true
+		}
+		return m, nil, true
+	}
 	switch k.String() {
 	case "j", "down":
 		st.scroll = min(st.scroll+1, maxScroll)
@@ -104,15 +118,7 @@ func prDetailBody(m model) string {
 		b.WriteString(ui.Err.Render(m.err.Error()) + "\n")
 		h--
 	}
-	lines := prDetailLines(st.d, m.contentWidth())
-	n := 0
-	for i := min(st.scroll, max(0, len(lines)-1)); i < len(lines) && n < h; i++ {
-		b.WriteString(" " + lines[i] + "\n")
-		n++
-	}
-	for ; n < h; n++ {
-		b.WriteString("\n")
-	}
+	paintDoc(&b, prDetailLines(st.d, m.contentWidth()), st.img, st.scroll, h)
 	return b.String()
 }
 
@@ -122,31 +128,31 @@ var reviewLabels = map[string]string{
 }
 
 // prDetailLines lays out the whole detail screen as plain lines at the given width.
-func prDetailLines(d ghcli.PRDetail, width int) []string {
+func prDetailLines(d ghcli.PRDetail, width int) detailDoc {
 	if d.Number == 0 && d.Title == "" {
-		return []string{"loading…"}
+		return detailDoc{lines: []string{"loading…"}}
 	}
-	var out []string
-	out = append(out, fmt.Sprintf("#%d  %s", d.Number, d.Title))
+	var out detailDoc
+	out.add(fmt.Sprintf("#%d  %s", d.Number, d.Title))
 	state := d.State
 	if d.IsDraft {
 		state += " (draft)"
 	}
-	out = append(out, fmt.Sprintf("%s   %s ← %s   %s", d.Author, d.BaseRef, d.HeadRef, state))
-	out = append(out, fmt.Sprintf("Review: %s   Merge: %s   Checks: ✓%d ✗%d ●%d   +%d −%d in %d files",
+	out.add(fmt.Sprintf("%s   %s ← %s   %s", d.Author, d.BaseRef, d.HeadRef, state))
+	out.add(fmt.Sprintf("Review: %s   Merge: %s   Checks: ✓%d ✗%d ●%d   +%d −%d in %d files",
 		orDash(d.ReviewDecision), orDash(d.MergeState), d.ChecksPassed, d.ChecksFailed, d.ChecksPending,
 		d.Additions, d.Deletions, d.ChangedFiles))
 	if len(d.Labels) > 0 {
-		out = append(out, "Labels: "+strings.Join(d.Labels, ", "))
+		out.add("Labels: " + strings.Join(d.Labels, ", "))
 	}
-	out = append(out, "", "── Description ──")
+	out.add("", "── Description ──")
 	if strings.TrimSpace(d.Body) == "" {
-		out = append(out, "(no description)")
+		out.add("(no description)")
 	} else {
-		out = append(out, wrap(d.Body, width)...)
+		out.addMarkdown(d.Body, width, "")
 	}
-	out = append(out, "", "── Discussion ──")
-	out = append(out, discussionLines(d.Comments, d.Reviews, width)...)
+	out.add("", "── Discussion ──")
+	out.addDoc(discussionLines(d.Comments, d.Reviews, width))
 	return out
 }
 
@@ -202,7 +208,7 @@ func wrap(s string, w int) []string {
 }
 
 // discussionLines lists comments and reviews in time order, each under a "who did what · age" line.
-func discussionLines(comments []ghcli.Comment, reviews []ghcli.Review, width int) []string {
+func discussionLines(comments []ghcli.Comment, reviews []ghcli.Review, width int) detailDoc {
 	type entry struct{ when, head, body string }
 	var entries []entry
 	for _, c := range comments {
@@ -217,15 +223,13 @@ func discussionLines(comments []ghcli.Comment, reviews []ghcli.Review, width int
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].when < entries[j].when })
 	if len(entries) == 0 {
-		return []string{"(no comments)"}
+		return detailDoc{lines: []string{"(no comments)"}}
 	}
-	var out []string
+	var out detailDoc
 	for _, e := range entries {
-		out = append(out, "", fmt.Sprintf("%s · %s", e.head, ui.Age(e.when)))
+		out.add("", fmt.Sprintf("%s · %s", e.head, ui.Age(e.when)))
 		if strings.TrimSpace(e.body) != "" {
-			for _, l := range wrap(e.body, width-2) {
-				out = append(out, "  "+l)
-			}
+			out.addMarkdown(e.body, width, "  ")
 		}
 	}
 	return out
