@@ -68,6 +68,31 @@ func splitValues(s string) []string {
 	return append(out, cur.String())
 }
 
+// knownValues checks the values of the keys with a fixed set (is:, no:); other keys take free text.
+func knownValues(key, v string) bool {
+	var ok []string
+	switch key {
+	case "is":
+		ok = []string{"open", "closed", "merged", "issue", "pr", "pull-request", "draft"}
+	case "no":
+		ok = []string{"assignee", "label", "status"}
+	default:
+		return true
+	}
+	for _, w := range splitValues(v) {
+		found := false
+		for _, o := range ok {
+			if strings.EqualFold(unquote(w), o) {
+				found = true
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 // Parse reads a view's filter text. An empty filter matches everything.
 func Parse(s string) Filter {
 	var f Filter
@@ -89,6 +114,10 @@ func Parse(s string) Filter {
 				continue
 			}
 			body = v
+			if !knownValues(t.key, v) {
+				f.Unsupported = append(f.Unsupported, tk)
+				continue
+			}
 		}
 		for _, w := range splitValues(body) {
 			if w = unquote(w); w != "" {

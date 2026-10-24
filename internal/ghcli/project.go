@@ -51,7 +51,7 @@ func ScopeHint(host string) string {
 
 const projectPageSize = 100
 
-const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:5){nodes{login}} labels(first:5){nodes{name}}`
+const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:20){nodes{login}} labels(first:20){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
 const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed url views(first:20){nodes{name layout filter sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title}}}}}}}}`

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,6 +36,7 @@ type boardState struct {
 	loaded   bool
 	loadedAt time.Time
 	tab      int
+	viewName string // the chosen view by name; its position can change
 	view     int    // 0 is "All items", n is the Project's view n-1
 	me       string // the logged-in user, when a view's filter asks for @me
 	force    bool   // the next fetch ignores the reuse window (R)
@@ -85,11 +87,7 @@ func boardFetchCmd(m model) tea.Cmd {
 		me := ""
 		for _, v := range p.Views {
 			if err == nil && me == "" && pfilter.Parse(v.Filter).NeedsMe() {
-				host := b.Host
-				if host == "" {
-					host = "github.com"
-				}
-				me, _ = inboxLogin(host) // a failure leaves me empty: the view says so
+				me = boardLogin(b.Host)
 			}
 		}
 		return screenMsg{view: viewBoard, id: key, data: boardPayload{key: key, p: p, me: me}, err: err}
@@ -109,9 +107,17 @@ func boardApply(m model, msg screenMsg) model {
 	if r, ok := m.selected(); ok && m.view == viewBoard {
 		keep = r.id
 	}
+	name := st.viewName
+	if name == "" {
+		name = m.boardViewMemo[st.key]
+	}
 	st.data, st.loaded, st.loadedAt, st.force, st.me = pl.p, true, boardNow(), false, pl.me
-	if st.view > len(pl.p.Views) { // the view was deleted on GitHub
-		st.view = 0
+	st.view, st.viewName = 0, ""
+	for i, v := range pl.p.Views { // the view is found again by name: views may have been added, moved or deleted
+		if name != "" && v.Name == name {
+			st.view, st.viewName = i+1, name
+			break
+		}
 	}
 	return m.rebuildBoard(st, keep)
 }
@@ -489,7 +495,41 @@ func (m model) switchBoardView(delta int) model {
 	}
 	n := len(st.data.Views) + 1
 	st.view = (st.view + delta + n) % n
+	st.viewName = ""
+	if st.view > 0 {
+		st.viewName = st.data.Views[st.view-1].Name
+	}
+	memo := make(map[string]string, len(m.boardViewMemo)+1)
+	for k, v := range m.boardViewMemo {
+		memo[k] = v
+	}
+	memo[st.key] = st.viewName
+	m.boardViewMemo = memo
 	st.tab = 0
 	m.filter = ""
 	return m.rebuildBoard(st, "")
+}
+
+// The login is asked once per host for the session; a failed lookup is not remembered and does not
+// replace a login that worked.
+var (
+	boardLogins   = map[string]string{}
+	boardLoginsMu sync.Mutex
+)
+
+func boardLogin(host string) string {
+	if host == "" {
+		host = "github.com"
+	}
+	boardLoginsMu.Lock()
+	defer boardLoginsMu.Unlock()
+	if me, ok := boardLogins[host]; ok {
+		return me
+	}
+	me, err := inboxLogin(host)
+	if err != nil || me == "" {
+		return ""
+	}
+	boardLogins[host] = me
+	return me
 }

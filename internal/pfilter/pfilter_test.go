@@ -106,3 +106,10 @@ func TestHostileFilterDoesNotPanic(t *testing.T) {
 		}
 	}
 }
+
+func TestUnknownIsAndNoValuesAreReported(t *testing.T) {
+	f := Parse("no:milestone -no:priority is:blocked is:open no:label")
+	if !reflect.DeepEqual(f.Unsupported, []string{"no:milestone", "-no:priority", "is:blocked"}) {
+		t.Errorf("%v", f.Unsupported)
+	}
+}

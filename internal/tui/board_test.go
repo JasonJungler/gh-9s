@@ -45,6 +45,8 @@ func sampleProject() ghcli.Project {
 func installBoard(t *testing.T) *boardFakes {
 	t.Helper()
 	f := &boardFakes{project: sampleProject(), now: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
+	boardLogins = map[string]string{}
+	t.Cleanup(func() { boardLogins = map[string]string{} })
 	oldFetch, oldNow, oldOpen, oldList, oldHosts := fetchProject, boardNow, openURL, listProjects, inboxHosts
 	listProjects = func(host string) ([]ghcli.ProjectRef, error) { return f.listed[host], f.listErr }
 	inboxHosts = func() ([]string, error) { return []string{"github.com"}, nil }
@@ -583,5 +585,49 @@ func TestBoardViewRowFitsNarrowTerminals(t *testing.T) {
 		if w == 50 && !strings.Contains(ansi.Strip(lines[2]), "Plan") {
 			t.Errorf("selected view not visible: %q", ansi.Strip(lines[2]))
 		}
+	}
+}
+
+func TestBoardKeepsTheViewByNameAcrossRefreshAndProjects(t *testing.T) {
+	m, f := boardWithViews(t, "ann")
+	m = keyAll(m, "]", "]", "]") // Bugs by title
+	// a view before it is deleted: the same view must stay selected
+	f.project.Views = append([]ghcli.ProjectView{}, f.project.Views[1:]...)
+	f.now = f.now.Add(10 * time.Second)
+	m = keyAll(m, "R")
+	if st := m.boardSt(); st.viewName != "Bugs by title" || st.view != 2 {
+		t.Errorf("view %d %q after a view before it was deleted", st.view, st.viewName)
+	}
+	// leave for another Project and come back
+	m = keyAll(m, "esc")
+	other := pins.Project{Owner: "other", Number: 1, Title: "Other"}
+	m.pins.ToggleProject(other)
+	m = pump(m, m.fetch())
+	m, _ = m.openBoard(other)
+	m = pump(m, m.fetch())
+	m = keyAll(m, "esc")
+	m = pump(m, m.fetch())
+	m = keyAll(m, "k", "enter")
+	if st := m.boardSt(); st.viewName != "Bugs by title" {
+		t.Errorf("the view was not kept for the Project: %d %q", st.view, st.viewName)
+	}
+}
+
+func TestLoginIsAskedOnceAndAFailureKeepsTheOldOne(t *testing.T) {
+	m, f := boardWithViews(t, "ann")
+	asks := 0
+	inboxLogin = func(string) (string, error) { asks++; return "ann", nil }
+	f.now = f.now.Add(10 * time.Second)
+	m = keyAll(m, "R")
+	f.now = f.now.Add(10 * time.Second)
+	m = keyAll(m, "R")
+	if asks != 0 {
+		t.Errorf("asked %d times although the login was known", asks)
+	}
+	inboxLogin = func(string) (string, error) { return "", errors.New("offline") }
+	f.now = f.now.Add(10 * time.Second)
+	m = keyAll(m, "R")
+	if m.boardSt().me != "ann" {
+		t.Errorf("a failed lookup wiped the login: %q", m.boardSt().me)
 	}
 }
