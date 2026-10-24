@@ -70,6 +70,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.choicesLoaded(msg), nil
 	case mergeInfoMsg:
 		return m.mergeInfo(msg), nil
+	case runActDoneMsg:
+		return m.runActDone(msg)
 	case prActionDoneMsg:
 		m.sendingKey = ""
 		if msg.err != nil {
@@ -218,6 +220,6 @@ func (m model) observeRun(meta ghcli.RunMeta) (model, tea.Cmd) {
 		text := "gh-9s: run " + m.runID + " " + runOutcome(meta.Conclusion)
 		cmd = func() tea.Msg { notifier(text, text); return nil }
 	}
-	m.runStatus = meta.Status
+	m.runStatus, m.runMeta = meta.Status, meta
 	return m, cmd
 }

@@ -15,6 +15,8 @@ type row struct {
 	state state
 	url   string
 	extra string // view specific: workflow id, PR number, ...
+
+	status, conclusion string // runs: the run's own status and conclusion, which decide what can be done to it
 }
 
 type table struct {
@@ -46,7 +48,7 @@ func fetchRuns(r ghcli.RepoRef, workflowID string) (table, error) {
 	for _, r := range runs {
 		label, st := runState(r.Status, r.Conclusion)
 		id := fmt.Sprint(r.ID)
-		t.rows = append(t.rows, row{id: id, state: st, url: r.URL,
+		t.rows = append(t.rows, row{id: id, state: st, url: r.URL, status: r.Status, conclusion: r.Conclusion,
 			cells: []string{id, label, r.Workflow, r.Title, r.Branch, r.Event, age(r.CreatedAt)}})
 	}
 	return t, nil

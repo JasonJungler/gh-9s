@@ -84,10 +84,12 @@ type model struct {
 
 	note         string                    // explanation tied to the current view (cleared when the view changes)
 	banner       string                    // sticky startup problem, always shown
+	runMeta      ghcli.RunMeta             // the watched run's status and conclusion as last seen
 	runStatus    string                    // last seen status of the watched run, for the finished notification
 	pendingMerge *mergeAction              // the merge being collected through dialogs
 	prefsFile    string                    // where small remembered choices live ("" = do not persist)
 	drafts       *drafts.Store             // inline review comments not sent yet, kept on disk
+	pendingRun   *runAct                   // a run action waiting for its confirmation
 	sendingKey   string                    // the PR whose review is being sent right now
 	pendingDraft *pendingDraft             // a comment being written in a dialog
 	pending      *prAction                 // the PR action being collected through dialogs

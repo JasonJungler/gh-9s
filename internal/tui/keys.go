@@ -137,27 +137,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.selected(); ok && m.view == viewRuns {
 			return m, logsCmd(m.target, r.id, true)
 		}
-	case "r":
+	case "r", "F", "c", "d":
 		if r, ok := m.selected(); ok && m.view == viewRuns {
-			return m, runAction("rerun run "+r.id, ghcli.Scoped(m.target, "run", "rerun", r.id)...)
-		}
-	case "F":
-		if r, ok := m.selected(); ok && m.view == viewRuns {
-			return m, runAction("rerun failed jobs of "+r.id, ghcli.Scoped(m.target, "run", "rerun", r.id, "--failed")...)
-		}
-	case "c":
-		if r, ok := m.selected(); ok && m.view == viewRuns {
-			m.mode, m.confirmMsg = modeConfirm, "cancel run "+r.id+"? (y/N)"
-			m.confirm = func() tea.Cmd {
-				return runAction("cancelled run "+r.id, ghcli.Scoped(m.target, "run", "cancel", r.id)...)
-			}
-		}
-	case "d":
-		if r, ok := m.selected(); ok && m.view == viewRuns {
-			m.mode, m.confirmMsg = modeConfirm, "delete run "+r.id+"? (y/N)"
-			m.confirm = func() tea.Cmd {
-				return runAction("deleted run "+r.id, ghcli.Scoped(m.target, "run", "delete", r.id)...)
-			}
+			return m.startRunAct(runActionOf(k.String()), r.id, r.status, r.conclusion)
 		}
 	case "f":
 		if r, ok := m.selected(); ok && (m.view == viewWorkflows || m.view == viewFavs) {
