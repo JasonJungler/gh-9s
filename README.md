@@ -45,6 +45,8 @@ PR and issue descriptions and comments are rendered as formatted markdown (headi
 
 **Reviewing a PR** (`d` on a PR): on a terminal at least 120 columns wide the diff is shown side by side — old on the left, new on the right, changed words highlighted — with the file list on the left. Narrower terminals get the single-column diff; `s` switches by hand. `tab` moves between the file list and the diff, `]` / `[` jump between files, `}` / `{` between hunks, `v` marks a file viewed (kept until the PR gets a new commit), `/` searches. Comments other people left on lines of the diff appear under those lines (`◆n` in the list counts them).
 
+Fenced code blocks in descriptions and comments (```` ```go ````) are coloured the same way, by the language written after the fence; blocks without one, or with an unknown one, stay plain.
+
 Code in diffs is coloured by language (chroma, chosen by file name), in both the side-by-side and the single-column view. It is computed per hunk, so a string or comment that starts above a hunk can be coloured wrongly; unknown languages, lines over 400 characters, and anything past a 2 MB / 3-second budget stay in plain red/green.
 
 The `:` command bar, `/` filter, log search and alias entry open in a box under the header, like k9s. The command bar completes as you type: the rest of the best match shows in grey, `Tab` (or `→`) accepts it and `Tab` again cycles through the other matches. Commands complete from the built-ins, your favorite aliases and (after `:repo `) your recent and cached repos. `Enter` on a unique prefix runs it (`:wo` opens workflows), and `↑`/`↓` walk the commands you typed before. Dialogs, forms and the repo picker are boxed at the top too.

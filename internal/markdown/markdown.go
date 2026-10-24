@@ -4,9 +4,11 @@ package markdown
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -16,6 +18,7 @@ import (
 	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/text"
 
+	"github.com/MurabitoB/gh-9s/internal/highlight"
 	"github.com/MurabitoB/gh-9s/internal/safe"
 )
 
@@ -102,6 +105,77 @@ type line struct {
 type renderer struct {
 	src    []byte
 	images []Image
+
+	codeLeft  int       // lines of code that may still be coloured in this document
+	codeUntil time.Time // when colouring stops
+}
+
+// What may be coloured by language in one document; the rest of the code stays plain. Render runs
+// on the screen's own goroutine, so this has to stay small.
+const (
+	maxCodeBlockLines = 300
+	maxCodeLines      = 600
+	maxCodeTime       = 300 * time.Millisecond
+)
+
+// code draws a code block, coloured by its language when it has a known one and is within budget.
+func (r *renderer) code(n ast.Node, lang string, w int) []line {
+	var texts []string
+	for i := 0; i < n.Lines().Len(); i++ {
+		seg := n.Lines().At(i)
+		texts = append(texts, strings.TrimRight(string(seg.Value(r.src)), "\n"))
+	}
+	var segs [][]highlight.Seg
+	if lang != "" && len(texts) <= maxCodeBlockLines && len(texts) <= r.codeLeft {
+		if left := time.Until(r.codeUntil); left > 0 {
+			if segs = highlight.Code(lang, strings.Join(texts, "\n"), left); segs != nil {
+				r.codeLeft -= len(texts)
+			}
+		}
+	}
+	var out []line
+	for i, l := range texts {
+		if i < len(segs) && segs[i] != nil {
+			out = append(out, line{s: styBlock.Render("  ") + codeSegs(segs[i], max(w-2, 1))})
+			continue
+		}
+		out = append(out, line{s: styBlock.Render("  " + ansi.Truncate(strings.ReplaceAll(l, "\t", "    "), max(w-2, 1), "…"))})
+	}
+	return out
+}
+
+// codeSegs draws coloured segments on the code background, cut to w columns before styling.
+func codeSegs(segs []highlight.Seg, w int) string {
+	total := 0
+	for _, s := range segs {
+		total += ansi.StringWidth(s.Text)
+	}
+	room, cut := w, total > w
+	if cut {
+		room = max(w-1, 0)
+	}
+	var b strings.Builder
+	for _, s := range segs {
+		text := s.Text
+		if cw := ansi.StringWidth(text); cw > room {
+			text = ansi.Truncate(text, room, "")
+		}
+		room -= ansi.StringWidth(text)
+		if text != "" {
+			st := styBlock.Bold(s.Bold).Italic(s.Italic)
+			if s.FG != "" {
+				st = st.Foreground(lipgloss.Color(s.FG))
+			}
+			b.WriteString(st.Render(text))
+		}
+		if room <= 0 {
+			break
+		}
+	}
+	if cut {
+		b.WriteString(styBlock.Render("…"))
+	}
+	return b.String()
 }
 
 // Render lays src out in lines of at most width columns. Results are cached; treat them as read-only.
@@ -110,7 +184,7 @@ func Render(src string, width int) Doc {
 	if len(src) > maxInput {
 		src = src[:maxInput]
 	}
-	key := sha256.Sum256([]byte(string(rune(width)) + "\x00" + src))
+	key := sha256.Sum256([]byte(fmt.Sprint(width, lipgloss.ColorProfile()) + "\x00" + src))
 	cacheMu.Lock()
 	if d, ok := cache[key]; ok {
 		cacheMu.Unlock()
@@ -131,7 +205,7 @@ func render(src string, width int) Doc {
 	parses++
 	b := []byte(limitNesting(strings.ReplaceAll(safe.Text(src), "\t", "    ")))
 	root := parser.Parse(text.NewReader(b))
-	r := &renderer{src: b}
+	r := &renderer{src: b, codeLeft: maxCodeLines, codeUntil: time.Now().Add(maxCodeTime)}
 	lines := r.blocks(root, width, 0)
 	var doc Doc
 	doc.Images = r.images
@@ -192,14 +266,10 @@ func (r *renderer) block(n ast.Node, w, depth int) []line {
 		return r.inlineBlock(n, w, &styH)
 	case *ast.Paragraph, *ast.TextBlock:
 		return r.inlineBlock(n, w, nil)
-	case *ast.FencedCodeBlock, *ast.CodeBlock:
-		var out []line
-		for i := 0; i < n.Lines().Len(); i++ {
-			seg := n.Lines().At(i)
-			l := strings.TrimRight(string(seg.Value(r.src)), "\n")
-			out = append(out, line{s: styBlock.Render("  " + ansi.Truncate(strings.ReplaceAll(l, "\t", "    "), max(w-2, 1), "…"))})
-		}
-		return out
+	case *ast.FencedCodeBlock:
+		return r.code(n, string(n.Language(r.src)), w)
+	case *ast.CodeBlock:
+		return r.code(n, "", w)
 	case *ast.Blockquote:
 		if w < 12 { // no room left for another level: show the rest as it is
 			return plainLines(r.flat(n), w)

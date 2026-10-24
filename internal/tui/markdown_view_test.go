@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 )
@@ -153,5 +155,23 @@ func TestShiftTabWithNothingSelectedGoesToTheLastMarker(t *testing.T) {
 	keys(keys(m, "shift+tab"), "enter")
 	if len(s.urls) != 1 || s.urls[0] != "https://h/3.png" {
 		t.Errorf("shown %v; want the last image", s.urls)
+	}
+}
+
+func TestIssueAndPRCodeBlocksAreColouredByLanguage(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+	body := "Repro:\n\n```go\npackage main\n```\n\nand ```zzzz\nnot code\n```"
+	d := fixtureIssue()
+	d.Body = body
+	installIssues(t, d)
+	m := keyAll(issuesLoaded(t), "enter")
+	if v := m.View(); !strings.Contains(v, "38;2;249;38;113") {
+		t.Errorf("the issue's go block should be coloured:\n%q", v)
+	}
+	pm := prWithBody(t, body)
+	if v := pm.View(); !strings.Contains(v, "38;2;249;38;113") {
+		t.Errorf("the PR's go block should be coloured:\n%q", v)
 	}
 }

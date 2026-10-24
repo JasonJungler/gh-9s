@@ -119,21 +119,12 @@ func build(f diff.File, lexer chroma.Lexer) *File {
 
 func expandTabs(s string) string { return strings.ReplaceAll(s, "\t", "    ") }
 
-// side tokenises the lines idx of f as one text and stores each line's segments in into.
-func side(f diff.File, lexer chroma.Lexer, style *chroma.Style, idx []int, into map[int][]Seg) {
-	if len(idx) == 0 {
-		return
-	}
-	texts := make([]string, len(idx))
-	for n, i := range idx {
-		if t := f.Lines[i].Text; len(t) <= maxLineLen {
-			texts[n] = t
-		}
-	}
+// tokenLines runs the lexer over text and returns the segments of every line.
+func tokenLines(lexer chroma.Lexer, style *chroma.Style, text string) ([][]Seg, error) {
 	plain := style.Get(chroma.Text)
-	it, err := lexer.Tokenise(nil, strings.Join(texts, "\n")+"\n")
+	it, err := lexer.Tokenise(nil, text)
 	if err != nil {
-		return
+		return nil, err
 	}
 	lines := [][]Seg{nil}
 	for _, tok := range it.Tokens() {
@@ -152,16 +143,83 @@ func side(f diff.File, lexer chroma.Lexer, style *chroma.Style, idx []int, into 
 			lines[len(lines)-1] = append(lines[len(lines)-1], Seg{Text: expandTabs(piece), FG: fg, Bold: entry.Bold == chroma.Yes, Italic: entry.Italic == chroma.Yes})
 		}
 	}
+	return lines, nil
+}
+
+// segsFor returns line n's segments when they add up to exactly the line's text, else nil.
+func segsFor(lines [][]Seg, n int, text string) []Seg {
+	if n >= len(lines) || len(text) > maxLineLen {
+		return nil
+	}
+	var b strings.Builder
+	for _, s := range lines[n] {
+		b.WriteString(s.Text)
+	}
+	if b.String() == expandTabs(text) && b.Len() > 0 { // anything odd: leave the line plain
+		return lines[n]
+	}
+	return nil
+}
+
+// side tokenises the lines idx of f as one text and stores each line's segments in into.
+func side(f diff.File, lexer chroma.Lexer, style *chroma.Style, idx []int, into map[int][]Seg) {
+	if len(idx) == 0 {
+		return
+	}
+	texts := make([]string, len(idx))
 	for n, i := range idx {
-		if n >= len(lines) || len(f.Lines[i].Text) > maxLineLen {
-			continue
+		if t := f.Lines[i].Text; len(t) <= maxLineLen {
+			texts[n] = t
 		}
-		var b strings.Builder
-		for _, s := range lines[n] {
-			b.WriteString(s.Text)
+	}
+	lines, err := tokenLines(lexer, style, strings.Join(texts, "\n")+"\n")
+	if err != nil {
+		return
+	}
+	for n, i := range idx {
+		if segs := segsFor(lines, n, f.Lines[i].Text); segs != nil {
+			into[i] = segs
 		}
-		if b.String() == expandTabs(f.Lines[i].Text) && b.Len() > 0 { // anything odd: leave the line plain
-			into[i] = lines[n]
+	}
+}
+
+// Code colours a piece of code (a fenced block in some markdown) by language name or alias, one
+// entry per line; a line that stays plain is nil. nil comes back for an unknown, empty or risky
+// language, and when the lexer fails, panics or takes longer than limit.
+func Code(lang, text string, limit time.Duration) [][]Seg {
+	lexer := lexers.Get(strings.ToLower(strings.TrimSpace(lang)))
+	if lang == "" || lexer == nil || denied[lexer.Config().Name] {
+		return nil
+	}
+	src := strings.Split(text, "\n")
+	shown := make([]string, len(src))
+	for i, l := range src {
+		if len(l) <= maxLineLen {
+			shown[i] = l
 		}
+	}
+	done := make(chan [][]Seg, 1)
+	go func() {
+		defer func() {
+			if recover() != nil {
+				done <- nil
+			}
+		}()
+		lines, err := tokenLines(chroma.Coalesce(lexer), styles.Get("monokai"), strings.Join(shown, "\n")+"\n")
+		if err != nil {
+			done <- nil
+			return
+		}
+		out := make([][]Seg, len(src))
+		for i, l := range src {
+			out[i] = segsFor(lines, i, l)
+		}
+		done <- out
+	}()
+	select {
+	case out := <-done:
+		return out
+	case <-time.After(limit):
+		return nil
 	}
 }

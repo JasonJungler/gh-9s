@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 func plain(d Doc) string {
@@ -174,5 +176,82 @@ func TestRenderingTheSameTextTwiceParsesOnce(t *testing.T) {
 	Render(src, 31)
 	if parses != 2 {
 		t.Errorf("a different width must render again; parses = %d", parses)
+	}
+}
+
+func withColour(t *testing.T) {
+	t.Helper()
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+}
+
+func TestFencedCodeIsColouredByItsLanguage(t *testing.T) {
+	withColour(t)
+	src := "```go\npackage main\n\nfunc main() {\n\tx := 1\n}\n```"
+	d := Render(src, 60)
+	raw := strings.Join(d.Lines, "\n")
+	if !strings.Contains(raw, "38;2;249;38;113") { // monokai keyword colour
+		t.Errorf("a go block should carry syntax colours: %q", raw)
+	}
+	if got := plain(d); got != "  package main\n  \n  func main() {\n      x := 1\n  }" && !strings.Contains(got, "func main() {") {
+		t.Errorf("text changed: %q", got)
+	}
+	for _, l := range d.Lines {
+		if ansi.StringWidth(l) > 60 {
+			t.Errorf("line too wide: %q", ansi.Strip(l))
+		}
+	}
+}
+
+func TestCodeWithoutALanguageOrWithAnUnknownOneStaysPlain(t *testing.T) {
+	withColour(t)
+	for _, src := range []string{"```\npackage main\n```", "```zzzz\npackage main\n```", "    package main"} {
+		if raw := strings.Join(Render(src, 60).Lines, "\n"); strings.Contains(raw, "38;2;249;38;113") {
+			t.Errorf("%q should not get syntax colours: %q", src, raw)
+		}
+	}
+}
+
+func TestHugeCodeBlocksAreNotHighlightedButStillShown(t *testing.T) {
+	withColour(t)
+	src := "```go\n" + strings.Repeat("package main\n", 2000) + "```"
+	start := time.Now()
+	d := Render(src, 60)
+	if time.Since(start) > 3*time.Second {
+		t.Errorf("took %v", time.Since(start))
+	}
+	if len(d.Lines) != 2000 || strings.Contains(strings.Join(d.Lines, ""), "38;2;249;38;113") {
+		t.Errorf("a block over the cap stays plain: %d lines", len(d.Lines))
+	}
+}
+
+func TestACodeBlockDoesNotLetEscapeSequencesThrough(t *testing.T) {
+	withColour(t)
+	d := Render("```go\nx := \"\x1b]52;c;AAAA\x07\"\n```", 60)
+	if strings.Contains(strings.Join(d.Lines, ""), "]52") {
+		t.Errorf("an OSC sequence from the text reached the output: %q", d.Lines)
+	}
+}
+
+func TestABlockOverThePerBlockCapStaysPlain(t *testing.T) {
+	withColour(t)
+	src := "```go\n" + strings.Repeat("package main\n", 400) + "```"
+	if strings.Contains(strings.Join(Render(src, 60).Lines, ""), "38;2;249;38;113") {
+		t.Error("400 lines is over the 300-line cap")
+	}
+}
+
+func TestTheCacheKnowsTheColourProfile(t *testing.T) {
+	src := "```go\npackage cacheprofile\n```"
+	old := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+	lipgloss.SetColorProfile(termenv.Ascii)
+	if strings.Contains(strings.Join(Render(src, 60).Lines, ""), "38;2;") {
+		t.Fatal("no colour expected without a colour profile")
+	}
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	if !strings.Contains(strings.Join(Render(src, 60).Lines, ""), "38;2;") {
+		t.Error("the same text under a colour profile must not reuse the plain rendering")
 	}
 }

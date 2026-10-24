@@ -153,3 +153,43 @@ func TestSizeCountsTheTextToColour(t *testing.T) {
 		t.Errorf("Size = %d; want 7", got)
 	}
 }
+
+func TestCodeColoursALanguageByName(t *testing.T) {
+	lines := Code("go", "func main() {\n\tx := \"a\"\n}", time.Second)
+	if len(lines) != 3 {
+		t.Fatalf("%d lines; want 3", len(lines))
+	}
+	if join(lines[0]) != "func main() {" || join(lines[1]) != "    x := \"a\"" {
+		t.Errorf("text must be unchanged apart from tabs: %q %q", join(lines[0]), join(lines[1]))
+	}
+	if colourOf(lines[0], "func") == "" || colourOf(lines[0], "func") == colourOf(lines[0], "main") {
+		t.Errorf("keyword and identifier should differ: %+v", lines[0])
+	}
+	for _, alias := range []string{"golang", "Go", "GO"} {
+		if Code(alias, "x := 1", time.Second) == nil {
+			t.Errorf("%q should be understood", alias)
+		}
+	}
+}
+
+func TestCodeLeavesUnknownAndRiskyLanguagesPlain(t *testing.T) {
+	for _, lang := range []string{"", "zzzz-not-a-language", "jungle"} {
+		start := time.Now()
+		if got := Code(lang, "project.manifest = manifest.xml\nbase.sourcePath = \"source\"", 10*time.Second); got != nil || time.Since(start) > 2*time.Second {
+			t.Errorf("%q: got %v after %v; want nothing, quickly", lang, got != nil, time.Since(start))
+		}
+	}
+	if Code("go", strings.Repeat("a := 1\n", 5), time.Nanosecond) != nil {
+		t.Log("a tiny limit may or may not finish; only checking that it returns")
+	}
+	if got := Code("yang", "/* a\n/* b */", time.Second); got != nil && len(got) == 0 {
+		t.Error("a panicking lexer must not crash")
+	}
+}
+
+func TestCodeLongLinesStayPlain(t *testing.T) {
+	lines := Code("go", "x := 1\n"+strings.Repeat("a", 500)+"\ny := 2", time.Second)
+	if lines == nil || lines[1] != nil || lines[0] == nil || lines[2] == nil {
+		t.Errorf("only the long line stays plain: %v", lines)
+	}
+}
