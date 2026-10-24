@@ -5,6 +5,7 @@ package ghcli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -15,8 +16,15 @@ import (
 )
 
 // Run runs the gh CLI in the current directory and returns stdout.
-func Run(args ...string) ([]byte, error) {
+func Run(args ...string) ([]byte, error) { return RunHost("", args...) }
+
+// RunHost is Run against another host: GH_HOST is set for commands that have no --hostname flag.
+// An empty host or github.com leaves gh's own choice alone.
+func RunHost(host string, args ...string) ([]byte, error) {
 	cmd := exec.Command("gh", args...)
+	if host != "" && host != "github.com" {
+		cmd.Env = append(os.Environ(), "GH_HOST="+host)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
@@ -39,8 +47,8 @@ func JSON(v any, args ...string) error {
 	return json.Unmarshal(out, v)
 }
 
-// RepoInfo returns the current directory's OWNER/REPO and checked-out git branch.
-func RepoInfo() (repo, branch string) {
+// LocalRepo returns the current directory's OWNER/REPO and checked-out git branch.
+func LocalRepo() (repo, branch string) {
 	var r struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	}

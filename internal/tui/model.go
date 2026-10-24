@@ -143,7 +143,7 @@ func Run() error {
 // Init starts the first fetch, the refresh tick, and the repo lookup.
 func (m model) Init() tea.Cmd {
 	return tea.Batch(m.fetch(), tick(), func() tea.Msg {
-		r, b := ghcli.RepoInfo()
+		r, b := ghcli.LocalRepo()
 		cur, _ := ghcli.CurrentRepo()
 		return infoMsg{r, b, cur}
 	})
