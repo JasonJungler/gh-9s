@@ -22,10 +22,11 @@ const (
 	viewJobs
 	viewLogs
 	viewFavs
+	viewGraph
 )
 
 var viewNames = map[viewKind]string{
-	viewRuns: "runs", viewWorkflows: "workflows", viewPRs: "pulls", viewChecks: "checks", viewJobs: "jobs", viewLogs: "logs", viewFavs: "favorites",
+	viewRuns: "runs", viewWorkflows: "workflows", viewPRs: "pulls", viewChecks: "checks", viewJobs: "jobs", viewLogs: "logs", viewFavs: "favorites", viewGraph: "graph",
 }
 
 type inputMode int
@@ -61,9 +62,14 @@ type model struct {
 	logs                          []string
 	follow                        bool
 
-	form     *triggerForm // non-nil while the trigger form is open
-	favs     *favStore    // nil when the favorites file could not be loaded
-	curRepo  repoRef      // repo of the current directory, host included
+	graph    graph
+	gstyle   graphStyle
+	gsel     int
+	expanded map[string]bool
+	specs    map[string][]jobSpec // workflow job specs, by run ID
+	form     *triggerForm         // non-nil while the trigger form is open
+	favs     *favStore            // nil when the favorites file could not be loaded
+	curRepo  repoRef              // repo of the current directory, host included
 	latest   map[string]latestEntry
 	aliasFor favorite
 
@@ -76,6 +82,9 @@ type dataMsg struct {
 	tbl    table
 	logs   []string
 	latest map[string]latestEntry
+	graph  *graph
+	jobs   []runJob
+	specs  map[string][]jobSpec
 	err    error
 }
 type actionMsg struct {
@@ -156,9 +165,13 @@ func (m model) fetch() tea.Cmd {
 		snap = &favStore{items: append([]favorite(nil), m.favs.items...)}
 	}
 	cache := m.latest
+	specCache := m.specs
 	return func() tea.Msg {
 		var t table
 		var latest map[string]latestEntry
+		var gr *graph
+		var gjobs []runJob
+		var newSpecs map[string][]jobSpec
 		var logs []string
 		var err error
 		switch v {
@@ -175,12 +188,28 @@ func (m model) fetch() tea.Cmd {
 			t, err = fetchJobs(tg, run)
 		case viewLogs:
 			logs, err = fetchJobLog(tg, run, job)
+		case viewGraph:
+			var sha, path string
+			gjobs, sha, path, err = fetchRunJobs(tg, run)
+			if err != nil {
+				break
+			}
+			sp, cached := specCache[run]
+			if !cached && path != "" {
+				if src, e := fetchWorkflowFile(tg, path, sha); e == nil {
+					if parsed, e := parseJobSpecs(src); e == nil {
+						sp, newSpecs = parsed, map[string][]jobSpec{run: parsed}
+					}
+				}
+			}
+			g := buildGraph(gjobs, sp)
+			gr = &g
 		case viewFavs:
 			if snap != nil {
 				t, latest = fetchFavorites(snap, cache, time.Now())
 			}
 		}
-		return dataMsg{v, t, logs, latest, err}
+		return dataMsg{v, t, logs, latest, gr, gjobs, newSpecs, err}
 	}
 }
 
@@ -253,6 +282,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewLogs && !m.follow {
 			return m, tick() // logs are static unless following
 		}
+		if m.view == viewGraph && !m.graph.active() {
+			return m, tick() // a finished run does not change
+		}
 		return m, tea.Batch(m.fetch(), tick())
 	case dataMsg:
 		if msg.view != m.view {
@@ -262,6 +294,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		if msg.latest != nil {
 			m.latest = msg.latest
+		}
+		for k, v := range msg.specs {
+			if m.specs == nil {
+				m.specs = map[string][]jobSpec{}
+			}
+			m.specs[k] = v
+		}
+		if msg.err == nil && msg.graph != nil {
+			if msg.graph.flat {
+				// dependencies unknown: show the plain jobs list instead of guessing a graph
+				m.view, m.tbl, m.cursor, m.top = viewJobs, jobsTable(msg.jobs), 0, 0
+				m.status = styDim.Render("graph unavailable: " + msg.graph.reason)
+				return m, nil
+			}
+			m.graph = *msg.graph
+			m.gsel = min(m.gsel, max(0, len(m.shown().nodes)-1))
+			return m, nil
 		}
 		if msg.err == nil && m.view == viewLogs {
 			m.logs = msg.logs
@@ -317,6 +366,11 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.status = ""
 	if m.view == viewLogs {
 		if next, cmd, ok := m.logKey(k); ok {
+			return next, cmd
+		}
+	}
+	if m.view == viewGraph {
+		if next, cmd, ok := m.graphKey(k); ok {
 			return next, cmd
 		}
 	}
@@ -450,7 +504,8 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 		return m, m.push(viewRuns)
 	case viewRuns:
 		m.runID = r.id
-		return m, m.push(viewJobs)
+		m.graph, m.gsel, m.top, m.expanded = graph{}, 0, 0, nil
+		return m, m.push(viewGraph)
 	case viewJobs:
 		m.jobID, m.jobName, m.jobURL = r.id, r.extra, r.url
 		return m, m.push(viewLogs)
@@ -675,6 +730,92 @@ func loadFormCmd(tgt repoRef, file, name, localBranch string) tea.Cmd {
 	}
 }
 
+func (m model) shown() graph { return expandGraph(m.graph, m.expanded) }
+
+func (g graph) active() bool {
+	if len(g.nodes) == 0 {
+		return true // nothing loaded yet
+	}
+	for _, n := range g.nodes {
+		if n.State == stRun {
+			return true
+		}
+	}
+	return false
+}
+
+func (m model) graphLines() ([]string, graphStyle) {
+	return renderGraph(m.shown(), m.gstyle, m.gsel, m.width, time.Now())
+}
+
+// graphKey handles the keys of the graph view; ok=false falls through to the
+// shared handler (quit, back, refresh, view switching).
+func (m model) graphKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	g := m.shown()
+	switch s := k.String(); s {
+	case "h", "left", "l", "right", "j", "down", "k", "up":
+		dir := map[string]rune{"h": 'h', "left": 'h', "l": 'l', "right": 'l', "j": 'j', "down": 'j', "k": 'k', "up": 'k'}[s]
+		m.gsel = moveSel(g, m.gsel, dir)
+	case "v":
+		m.gstyle = m.gstyle.next()
+	case "x":
+		if m.gsel < len(g.nodes) && g.nodes[m.gsel].Group != "" {
+			id := g.nodes[m.gsel].Group
+			m.expanded = withKey(m.expanded, id, false)
+			for i, n := range m.shown().nodes {
+				if n.ID == id {
+					m.gsel = i
+				}
+			}
+		}
+	case "enter":
+		if m.gsel >= len(g.nodes) {
+			break
+		}
+		n := g.nodes[m.gsel]
+		if len(n.Members) > 0 {
+			m.expanded = withKey(m.expanded, n.ID, true)
+			for i, e := range m.shown().nodes {
+				if e.Group == n.ID {
+					m.gsel = i
+					break
+				}
+			}
+			break
+		}
+		m.jobID, m.jobName, m.jobURL = n.Job.ID, n.Job.Name, n.Job.URL
+		return m, m.push(viewLogs), true
+	case "o":
+		if m.gsel < len(g.nodes) && g.nodes[m.gsel].Job.URL != "" {
+			_ = openURL(g.nodes[m.gsel].Job.URL)
+		}
+	case "ctrl+d", "pgdown", "ctrl+u", "pgup":
+		lines, _ := m.graphLines()
+		step := max(1, m.logHeight()/2)
+		if s == "ctrl+u" || s == "pgup" {
+			step = -step
+		}
+		m.top = min(max(m.top+step, 0), max(0, len(lines)-m.logHeight()))
+	case "esc", "backspace", "q", "ctrl+c", "R", "ctrl+r", "1", "2", "3", ":", "P":
+		return m, nil, false
+	}
+	return m, nil, true
+}
+
+// withKey returns a copy of the set with key set to on.
+func withKey(set map[string]bool, key string, on bool) map[string]bool {
+	out := map[string]bool{}
+	for k, v := range set {
+		out[k] = v
+	}
+	if on {
+		out[key] = true
+	} else {
+		delete(out, key)
+	}
+	return out
+}
+
 func (m model) formKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	next, submit, cancel := m.form.update(k)
 	switch {
@@ -830,8 +971,15 @@ func (m model) View() string {
 			title += " pr=#" + m.pr
 		}
 	}
-	if m.view == viewJobs || m.view == viewLogs {
+	if m.view == viewJobs || m.view == viewLogs || m.view == viewGraph {
 		title += " run=" + m.runID
+	}
+	if m.view == viewGraph {
+		_, used := m.graphLines()
+		title += " style=" + used.String()
+		if used != m.gstyle {
+			title += " (" + m.gstyle.String() + " too wide)"
+		}
 	}
 	if m.view == viewLogs {
 		title += " job=" + m.jobName
@@ -843,6 +991,9 @@ func (m model) View() string {
 	count := len(vis)
 	if m.view == viewLogs {
 		count = len(m.logs)
+	}
+	if m.view == viewGraph {
+		count = len(m.shown().nodes)
 	}
 	title += fmt.Sprintf("  [%d]", count)
 	if m.filter != "" {
@@ -856,6 +1007,9 @@ func (m model) View() string {
 
 	if m.form != nil {
 		return b.String() + "\n" + m.form.view(m.width)
+	}
+	if m.view == viewGraph {
+		return b.String() + m.graphBody() + m.footer()
 	}
 	if m.view == viewLogs {
 		return b.String() + m.logBody() + m.footer()
@@ -933,6 +1087,26 @@ func (m model) logBody() string {
 	return b.String()
 }
 
+func (m model) graphBody() string {
+	lines, _ := m.graphLines()
+	h := m.logHeight()
+	top := min(m.top, max(0, len(lines)-h))
+	var b strings.Builder
+	if m.err != nil {
+		b.WriteString(styErr.Render(m.err.Error()) + "\n")
+		h--
+	}
+	n := 0
+	for i := top; i < len(lines) && n < h; i++ {
+		b.WriteString(lines[i] + "\n")
+		n++
+	}
+	for ; n < h; n++ {
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -989,6 +1163,8 @@ func (m model) footer() string {
 		keys = "enter/o open check  esc back"
 	case viewJobs:
 		keys = "enter logs  o open  esc back"
+	case viewGraph:
+		keys = "hjkl/arrows move  enter logs or expand  x collapse  v style  o open  ctrl-d/u scroll  esc back"
 	case viewLogs:
 		keys = "j/k scroll  space/ctrl-d page  g/G top/bottom  f follow  esc back"
 	}

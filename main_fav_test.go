@@ -16,6 +16,10 @@ func keys(m tea.Model, ks ...string) model {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		case "esc":
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		case "ctrl+u":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlU}
+		case "ctrl+d":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlD}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}

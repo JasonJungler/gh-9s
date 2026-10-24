@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -276,41 +277,34 @@ func openURL(url string) error {
 }
 
 func fetchJobs(r repoRef, runID string) (table, error) {
-	var v struct {
-		Jobs []struct {
-			ID          int64  `json:"databaseId"`
-			Name        string `json:"name"`
-			Status      string `json:"status"`
-			Conclusion  string `json:"conclusion"`
-			StartedAt   string `json:"startedAt"`
-			CompletedAt string `json:"completedAt"`
-			URL         string `json:"url"`
-			Steps       []struct {
-				Name       string `json:"name"`
-				Status     string `json:"status"`
-				Conclusion string `json:"conclusion"`
-			} `json:"steps"`
-		} `json:"jobs"`
-	}
-	if err := ghJSON(&v, scoped(r, "run", "view", runID, "--json", "jobs")...); err != nil {
+	jobs, _, _, err := fetchRunJobs(r, runID)
+	if err != nil {
 		return table{}, err
 	}
+	return jobsTable(jobs), nil
+}
+
+// jobsTable lists a run's jobs; it is the fallback when no graph can be drawn.
+func jobsTable(jobs []runJob) table {
 	t := table{cols: []string{"ID", "STATUS", "JOB", "STEP", "DURATION"}}
-	for _, j := range v.Jobs {
-		label, st := runState(j.Status, j.Conclusion)
-		// Show the step that is running, or the one that failed.
-		step := "-"
-		for _, s := range j.Steps {
-			if isActiveStep(s.Status, s.Conclusion) {
-				step = s.Name
-				break
-			}
+	for _, j := range jobs {
+		label, st := j.state()
+		step := j.Step
+		if step == "" {
+			step = "-"
 		}
-		id := fmt.Sprint(j.ID)
-		t.rows = append(t.rows, row{id: id, state: st, url: j.URL, extra: j.Name,
-			cells: []string{id, label, j.Name, step, duration(j.StartedAt, j.CompletedAt)}})
+		end := ""
+		if !j.End.IsZero() {
+			end = j.End.Format(time.RFC3339)
+		}
+		start := ""
+		if !j.Start.IsZero() {
+			start = j.Start.Format(time.RFC3339)
+		}
+		t.rows = append(t.rows, row{id: j.ID, state: st, url: j.URL, extra: j.Name,
+			cells: []string{j.ID, label, j.Name, step, duration(start, end)}})
 	}
-	return t, nil
+	return t
 }
 
 func duration(start, end string) string {
@@ -355,6 +349,10 @@ func cleanLog(s string) []string {
 	return lines
 }
 
+// wfPaths remembers workflow file paths by repo and workflow ID, so refreshing a
+// live graph does not list workflows every few seconds.
+var wfPaths sync.Map
+
 // isActiveStep marks the step worth showing next to a job: the one running or the one that failed.
 func isActiveStep(status, conclusion string) bool {
 	return status == "in_progress" || conclusion == "failure"
@@ -395,6 +393,10 @@ func fetchRunJobs(r repoRef, runID string) (jobs []runJob, headSHA, workflowPath
 		}
 		jobs = append(jobs, rj)
 	}
+	key := fmt.Sprintf("%s#%d", r, v.WorkflowID)
+	if p, ok := wfPaths.Load(key); ok {
+		return jobs, v.HeadSHA, p.(string), nil
+	}
 	var wfs []struct {
 		ID   int64  `json:"id"`
 		Path string `json:"path"`
@@ -405,6 +407,7 @@ func fetchRunJobs(r repoRef, runID string) (jobs []runJob, headSHA, workflowPath
 	for _, w := range wfs {
 		if w.ID == v.WorkflowID {
 			workflowPath = w.Path
+			wfPaths.Store(key, w.Path)
 		}
 	}
 	return jobs, v.HeadSHA, workflowPath, nil

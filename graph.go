@@ -20,6 +20,8 @@ type gNode struct {
 	Start, End            time.Time
 	Needs                 []int // indices into graph.nodes
 	Members               []runJob
+	Job                   runJob // the job itself, for single-job nodes
+	Group                 string // ID of the group this node was expanded from
 }
 
 // graph is the dependency graph of a run. When flat is set the dependencies
@@ -107,6 +109,7 @@ func newNode(id, name string, jobs []runJob) gNode {
 		n.End = time.Time{} // still going: renderers measure up to "now"
 	}
 	if len(jobs) == 1 {
+		n.Job = jobs[0]
 		n.Label, n.State = jobs[0].state()
 		return n
 	}
