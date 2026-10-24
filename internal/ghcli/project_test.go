@@ -58,9 +58,13 @@ func TestParseProjectPageErrors(t *testing.T) {
 	if err == nil || errors.Is(err, ErrMissingScope) {
 		t.Errorf("%v", err)
 	}
-	_, _, _, err = ParseProjectPage([]byte(`{"data":null,"errors":[{"message":"Your token has not been granted the required scopes to execute this query"}]}`))
+	_, _, _, err = ParseProjectPage([]byte(`{"data":null,"errors":[{"message":"Your token has not been granted the required scopes to execute this query. The projectV2 field requires one of: [read:project]"}]}`))
 	if !errors.Is(err, ErrMissingScope) {
 		t.Errorf("scope: %v", err)
+	}
+	_, _, _, err = ParseProjectPage([]byte(`{"data":null,"errors":[{"message":"Your token has not been granted the required scopes: read:org"}]}`))
+	if errors.Is(err, ErrMissingScope) {
+		t.Errorf("another scope reported as the project one: %v", err)
 	}
 	if _, _, _, err = ParseProjectPage([]byte(`nope`)); err == nil {
 		t.Error("garbage accepted")
@@ -91,7 +95,7 @@ func stubRun(t *testing.T, f func(args []string) ([]byte, error)) *[][]string {
 func TestFetchProjectTwoPages(t *testing.T) {
 	calls := stubRun(t, func(args []string) ([]byte, error) {
 		if strings.Contains(strings.Join(args, " "), "after=c1") {
-			return []byte(pageJSON(100, true, "c2", 250)), nil
+			return []byte(pageJSON(100, false, "", 250)), nil
 		}
 		return []byte(pageJSON(100, true, "c1", 250)), nil
 	})
@@ -199,7 +203,7 @@ func TestParseProjectViews(t *testing.T) {
 	if v[0].SortField != "Priority" || v[0].SortDesc || v[1].Filter != "assignee:@me" || !v[1].SortDesc || strings.ContainsRune(v[1].Name, 0x1b) || v[2].Layout != "ROADMAP_LAYOUT" || v[2].SortField != "" {
 		t.Errorf("%+v", v)
 	}
-	if !strings.Contains(projectQuery, "views(first:20)") || strings.Contains(strings.ToLower(projectQuery), "mutation") {
+	if !strings.Contains(projectQuery, "views(first:100)") || strings.Contains(strings.ToLower(projectQuery), "mutation") {
 		t.Error("query")
 	}
 }
@@ -212,5 +216,60 @@ func TestDraftIssueBodyIsRead(t *testing.T) {
 	}
 	if !strings.Contains(projectQuery, "DraftIssue{title body}") {
 		t.Error("query does not ask for the body")
+	}
+}
+
+func TestFetchProjectReadsManyPagesUpToTheCap(t *testing.T) {
+	calls := stubRun(t, func(args []string) ([]byte, error) { return []byte(pageJSON(100, true, "c", 5000)), nil })
+	p, err := FetchProject("", "acme", 3)
+	if err != nil || len(p.Items) != maxProjectPages*100 || len(*calls) != maxProjectPages {
+		t.Fatalf("%d items, %d calls, err %v", len(p.Items), len(*calls), err)
+	}
+}
+
+func TestFetchProjectKeepsWhatItReadWhenALaterPageFails(t *testing.T) {
+	n := 0
+	stubRun(t, func(args []string) ([]byte, error) {
+		n++
+		if n == 3 {
+			return nil, errors.New("HTTP 500 boom")
+		}
+		return []byte(pageJSON(100, true, "c", 900)), nil
+	})
+	p, err := FetchProject("", "acme", 3)
+	if err != nil || len(p.Items) != 200 || !strings.Contains(p.Note, "page 3") {
+		t.Fatalf("%d items, note %q, err %v", len(p.Items), p.Note, err)
+	}
+}
+
+func TestFirstPageFailureIsStillAnError(t *testing.T) {
+	stubRun(t, func(args []string) ([]byte, error) { return nil, errors.New("boom") })
+	if _, err := FetchProject("", "acme", 3); err == nil {
+		t.Fatal("no error")
+	}
+}
+
+func TestDateValuesAndRoadmapDateFieldsAreRead(t *testing.T) {
+	b := `{"data":{"repositoryOwner":{"projectV2":{"id":"P","title":"P","closed":false,
+"views":{"nodes":[{"name":"Road","layout":"ROADMAP_LAYOUT","configuration":{"visibleFields":{"nodes":[{"name":"Title","dataType":"TITLE"},{"name":"Target date","dataType":"DATE"},{"name":"Start","dataType":"DATE"}]}}}]},
+"items":{"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"id":"i","fieldValues":{"nodes":[{"__typename":"ProjectV2ItemFieldDateValue","date":"2026-11-03","field":{"name":"Target date"}},{"__typename":"ProjectV2ItemFieldTextValue"}]},"content":{"__typename":"Issue","number":1,"title":"t","state":"OPEN","url":"u","updatedAt":"t","repository":{"nameWithOwner":"a/b"}}}]}}}}}`
+	p, _, _, err := ParseProjectPage([]byte(b))
+	if err != nil || len(p.Items) != 1 || p.Items[0].Dates["Target date"] != "2026-11-03" || len(p.Items[0].Dates) != 1 {
+		t.Fatalf("%+v %v", p.Items, err)
+	}
+	if df := p.Views[0].DateFields; len(df) != 2 || df[0] != "Target date" {
+		t.Errorf("date fields %v", df)
+	}
+}
+
+func TestMoreViewsThanReadAreSaid(t *testing.T) {
+	var vs []string
+	for i := 0; i < maxViews; i++ {
+		vs = append(vs, `{"name":"v","layout":"TABLE_LAYOUT"}`)
+	}
+	b := `{"data":{"repositoryOwner":{"projectV2":{"id":"P","title":"P","views":{"nodes":[` + strings.Join(vs, ",") + `]},"items":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}}`
+	p, _, _, err := ParseProjectPage([]byte(b))
+	if err != nil || !strings.Contains(p.Note, "100 views") {
+		t.Fatalf("note %q err %v", p.Note, err)
 	}
 }

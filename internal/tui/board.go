@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,7 @@ type boardState struct {
 	view     int         // 0 is "All items", n is the Project's view n-1
 	me       string      // the logged-in user, when a view's filter asks for @me
 	force    bool        // the next fetch ignores the reuse window (R)
+	back     string      // the card an issue or PR was opened from, selected again on return
 }
 
 // boardPayload is one answer of fetchProject.
@@ -103,7 +105,9 @@ func boardApply(m model, msg screenMsg) model {
 	st := m.boardSt()
 	if pl.unchanged {
 		if len(m.tbl.cols) == 0 { // coming back to the screen
-			return m.rebuildBoard(st, "")
+			keep := st.back
+			st.back = ""
+			return m.rebuildBoard(st, keep)
 		}
 		return m
 	}
@@ -111,6 +115,10 @@ func boardApply(m model, msg screenMsg) model {
 	if r, ok := m.boardSelectedRow(); ok && m.view == viewBoard {
 		keep = r.id
 	}
+	if keep == "" {
+		keep = st.back
+	}
+	st.back = ""
 	fresh := !st.loaded
 	name := st.viewName
 	if name == "" {
@@ -234,12 +242,53 @@ func boardRows(p ghcli.Project, t boardTab) []row {
 	return rows
 }
 
+// fullNote is what the board says under the cards: what could not be read, then what could not be applied.
+func (st boardState) fullNote() string {
+	_, n := st.viewItems()
+	if !st.loaded {
+		return n
+	}
+	return joinNotes(st.data.Note, n)
+}
+
+func joinNotes(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return a + "; " + b
+}
+
+// roadmapField is the date field a roadmap view is ordered by: the first date field it shows ("" if not a roadmap).
+func (st boardState) roadmapField() string {
+	if st.view == 0 || st.view > len(st.data.Views) {
+		return ""
+	}
+	v := st.data.Views[st.view-1]
+	if v.Layout != "ROADMAP_LAYOUT" || len(v.DateFields) == 0 {
+		return ""
+	}
+	return v.DateFields[0]
+}
+
 func (m model) rebuildBoard(st boardState, keepID string) model {
 	idx, _ := st.viewItems()
 	tabs := boardTabs(st.data, idx)
 	st.tab = min(max(st.tab, 0), len(tabs)-1)
 	m = m.withScreenData(viewBoard, st)
 	m.tbl = table{cols: []string{"ITEM", "TITLE", "STATE", "ASSIGNEES", "LABELS", "UPDATED"}, rows: boardRows(st.data, tabs[st.tab])}
+	if f := st.roadmapField(); f != "" { // a roadmap lists its date where the others list the age
+		m.tbl.cols[5] = strings.ToUpper(trunc(f, 12))
+		for i, it := range tabs[st.tab].items {
+			d := st.data.Items[it].Dates[f]
+			if d == "" {
+				d = "-"
+			}
+			m.tbl.rows[i].cells[5] = d
+		}
+	}
 	prev := m.cursor
 	m.cursor, m.top = 0, 0
 	found := false
@@ -302,7 +351,10 @@ func boardBody(m model) string {
 	}
 	b.WriteString(fitTabs(labels, st.tab, m.width) + "\n")
 	b.WriteString(m.tableBody())
-	_, note := st.viewItems()
+	note := st.fullNote()
+	if st.cols && st.loaded && m.width >= colsMinScreen && m.bodyHeight() < colsMinBody {
+		note = joinNotes(note, "the terminal is too short for columns; showing the list")
+	}
 	switch {
 	case note != "":
 		b.WriteString(styErr.Render(" "+trunc(note, max(m.width-2, 10))) + "\n")
@@ -381,6 +433,10 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	case "[":
 		return m.switchBoardView(-1), nil, true
 	case "R", "ctrl+r":
+		if m.loading {
+			m.status = styDim.Render("already loading")
+			return m, nil, true
+		}
 		if st.loaded && boardNow().Sub(st.loadedAt) < boardManual {
 			m.status = styDim.Render("just refreshed")
 			return m, nil, true
@@ -446,6 +502,8 @@ func (m model) openBoardItem(st boardState, id string) (model, tea.Cmd, bool) {
 	if !found || owner == "" || name == "" {
 		return m, nil, true
 	}
+	st.back = id
+	m = m.withScreenData(viewBoard, st)
 	host := m.board.Host
 	if host == "github.com" {
 		host = ""
@@ -512,9 +570,6 @@ func (st boardState) viewItems() (idx []int, note string) {
 		return idx, ""
 	}
 	v := p.Views[st.view-1]
-	if v.Layout == "ROADMAP_LAYOUT" {
-		return idx, "a roadmap view is not drawn here; showing all items"
-	}
 	f := pfilter.Parse(v.Filter)
 	var notes []string
 	if len(f.Unsupported) > 0 {
@@ -530,6 +585,21 @@ func (st boardState) viewItems() (idx []int, note string) {
 		}
 	}
 	idx = kept
+	if v.Layout == "ROADMAP_LAYOUT" {
+		field := st.roadmapField()
+		if field == "" {
+			notes = append(notes, "this roadmap shows no date field; listing in the Project's order")
+		} else {
+			sort.SliceStable(idx, func(a, b int) bool { // by date, cards without one last
+				da, db := p.Items[idx[a]].Dates[field], p.Items[idx[b]].Dates[field]
+				if (da == "") != (db == "") {
+					return da != ""
+				}
+				return da < db
+			})
+		}
+		return idx, strings.Join(notes, "; ")
+	}
 	if v.SortField != "" && !pfilter.Sort(idx, p.Items, p.StatusOrder, v.SortField, v.SortDesc) {
 		notes = append(notes, "sort by "+v.SortField+" not applied")
 	}

@@ -243,6 +243,28 @@ func Sort(idx []int, items []ghcli.ProjectItem, statusOrder []string, field stri
 		less = func(a, b ghcli.ProjectItem) int { return rank(a.Status) - rank(b.Status) }
 	case "updated at", "updated":
 		less = func(a, b ghcli.ProjectItem) int { return strings.Compare(a.Updated, b.Updated) }
+	case "assignees", "labels":
+		first := func(it ghcli.ProjectItem) string {
+			l := it.Assignees
+			if strings.EqualFold(field, "labels") {
+				l = it.Labels
+			}
+			if len(l) == 0 {
+				return ""
+			}
+			return strings.ToLower(l[0])
+		}
+		sort.SliceStable(idx, func(i, j int) bool { // empty last in both directions
+			a, b := first(items[idx[i]]), first(items[idx[j]])
+			if (a == "") != (b == "") {
+				return a != ""
+			}
+			if desc {
+				return a > b
+			}
+			return a < b
+		})
+		return true
 	default:
 		return false
 	}

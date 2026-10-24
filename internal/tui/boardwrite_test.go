@@ -62,9 +62,17 @@ func installWrites(t *testing.T) *writeFakes {
 }
 
 func writeBoard(t *testing.T) (model, *boardFakes, *writeFakes) {
+	return writeBoardWith(t, nil)
+}
+
+// writeBoardWith opens the board of a Project that edit has changed first.
+func writeBoardWith(t *testing.T, edit func(p *ghcli.Project)) (model, *boardFakes, *writeFakes) {
 	t.Helper()
 	f := installBoard(t)
 	f.project = writableProject()
+	if edit != nil {
+		edit(&f.project)
+	}
 	wf := installWrites(t)
 	m := pinsModel(t)
 	m.previewOff = true
@@ -435,5 +443,78 @@ func TestLeavingTheScreenForgetsTheWrite(t *testing.T) {
 	_ = (&m).switchTo(viewRuns)
 	if m.boardOp != nil {
 		t.Error("the op survived leaving the screen")
+	}
+}
+
+func TestRoadmapIsListedByItsDate(t *testing.T) {
+	m, _, _ := writeBoardWith(t, func(p *ghcli.Project) {
+		p.Views = []ghcli.ProjectView{{Name: "Plan", Layout: "ROADMAP_LAYOUT", DateFields: []string{"Target date"}}}
+		p.Items[0].Dates = map[string]string{"Target date": "2026-12-01"}
+		p.Items[1].Dates = map[string]string{"Target date": "2026-11-05"}
+	})
+	m = keyAll(m, "]")
+	out := ansi.Strip(m.View())
+	a, b, c := strings.Index(out, "Add retry"), strings.Index(out, "Fix login"), strings.Index(out, "Old work")
+	if a < 0 || b < 0 || a > b || !strings.Contains(out, "TARGET DATE") || !strings.Contains(out, "2026-11-05") {
+		t.Fatalf("roadmap not ordered by date:\n%s", out)
+	}
+	if c < b {
+		t.Errorf("a card without a date came before one with a date:\n%s", out)
+	}
+}
+
+func TestProjectNoteIsShown(t *testing.T) {
+	m, _, _ := writeBoardWith(t, func(p *ghcli.Project) { p.Note = "page 3 of the cards could not be read" })
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "page 3 of the cards") {
+		t.Fatalf("note missing:\n%s", out)
+	}
+}
+
+func TestRefreshWhileLoadingSaysSo(t *testing.T) {
+	m, f, _ := writeBoard(t)
+	m.loading = true
+	n := len(f.calls)
+	m = keyAll(m, "R")
+	if len(f.calls) != n || !strings.Contains(ansi.Strip(m.status), "already loading") {
+		t.Errorf("calls %d→%d status %q", n, len(f.calls), m.status)
+	}
+}
+
+func TestShortTerminalFallsBackToTheList(t *testing.T) {
+	m, _, _ := writeBoard(t)
+	m = keyAll(m, "b")
+	m.height = 14
+	out := ansi.Strip(m.View())
+	if strings.Contains(out, "‹") || !strings.Contains(out, "too short for columns") {
+		t.Errorf("no fallback:\n%s", out)
+	}
+}
+
+func TestComingBackFromAnIssueKeepsTheCard(t *testing.T) {
+	m, _, _ := writeBoard(t)
+	m = keyAll(m, "j", "j")
+	r, _ := m.boardSelectedRow()
+	m = keyAll(m, "enter")
+	if m.view == viewBoard {
+		t.Fatal("did not leave the board")
+	}
+	m = keyAll(m, "esc")
+	if m.view != viewBoard {
+		t.Fatalf("not back on the board: %v", m.view)
+	}
+	if got, _ := m.boardSelectedRow(); got.id != r.id {
+		t.Errorf("selected %q, want %q", got.id, r.id)
+	}
+}
+
+func TestComingBackAfterTheDataWentStaleKeepsTheCard(t *testing.T) {
+	m, f, _ := writeBoard(t)
+	m = keyAll(m, "j", "j")
+	r, _ := m.boardSelectedRow()
+	m = keyAll(m, "enter")
+	f.now = f.now.Add(time.Hour) // the board is read again on return
+	m = keyAll(m, "esc")
+	if got, _ := m.boardSelectedRow(); got.id != r.id {
+		t.Errorf("selected %q, want %q", got.id, r.id)
 	}
 }

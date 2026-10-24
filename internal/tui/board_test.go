@@ -522,7 +522,7 @@ func TestBoardViewFilterSortAndHonestNotes(t *testing.T) {
 	}
 	m = keyAll(m, "]") // roadmap
 	out = ansi.Strip(m.View())
-	if !strings.Contains(out, "roadmap view is not drawn") || !strings.Contains(out, "All (5)") {
+	if !strings.Contains(out, "roadmap shows no date field") || !strings.Contains(out, "All (5)") {
 		t.Errorf("roadmap:\n%s", out)
 	}
 }

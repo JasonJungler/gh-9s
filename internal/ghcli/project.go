@@ -19,6 +19,7 @@ type ProjectItem struct {
 	Draft             bool   // a draft pull request, or a draft issue that lives only in the Project
 	Updated           string
 	Assignees, Labels []string
+	Dates             map[string]string // date fields by field name, as YYYY-MM-DD
 }
 
 // ProjectView is a saved view of a Project: its layout, filter text and first sort.
@@ -26,6 +27,7 @@ type ProjectView struct {
 	Name, Layout, Filter string // Layout is BOARD_LAYOUT, TABLE_LAYOUT or ROADMAP_LAYOUT
 	SortField            string
 	SortDesc             bool
+	DateFields           []string // the date fields the view shows, in order (a roadmap is drawn by the first)
 }
 
 // Project is a GitHub Project (v2) as read from one board.
@@ -40,6 +42,7 @@ type Project struct {
 	Total       int      // how many items the Project has, which can be more than Items
 	Items       []ProjectItem
 	Views       []ProjectView // the saved views, in the Project's order
+	Note        string        // what could not be read, for the screen to say
 }
 
 // ErrMissingScope is returned when gh's token lacks the read:project scope.
@@ -54,12 +57,16 @@ func ScopeHint(host string) string {
 	return s
 }
 
-const projectPageSize = 100
+const (
+	projectPageSize = 100
+	maxViews        = 100
+	maxProjectPages = 20 // 2000 cards
+)
 
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:20){nodes{login}} labels(first:20){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:20){nodes{name layout filter sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
+const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:100){nodes{name layout filter configuration{visibleFields(first:30){nodes{... on ProjectV2Field{name dataType}}}} sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValues(first:30){nodes{__typename ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{name}}}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
 
 type nameNodes struct {
 	Nodes []struct {
@@ -108,7 +115,15 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 						Nodes []struct {
 							Name, Layout string
 							Filter       *string
-							Sort         struct {
+							Config       *struct {
+								Visible struct {
+									Nodes []struct {
+										Name     string `json:"name"`
+										DataType string `json:"dataType"`
+									} `json:"nodes"`
+								} `json:"visibleFields"`
+							} `json:"configuration"`
+							Sort struct {
 								Nodes []struct {
 									Field     *struct{ Name string } `json:"field"`
 									Direction string                 `json:"direction"`
@@ -131,6 +146,14 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 						} `json:"pageInfo"`
 						Nodes []*struct {
 							ID     string `json:"id"`
+							Values struct {
+								Nodes []struct {
+									Date  string `json:"date"`
+									Field *struct {
+										Name string `json:"name"`
+									} `json:"field"`
+								} `json:"nodes"`
+							} `json:"fieldValues"`
 							Status *struct {
 								Name string `json:"name"`
 							} `json:"fieldValueByName"`
@@ -186,6 +209,9 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 			p.StatusIDs[name] = o.ID
 		}
 	}
+	if len(pr.Views.Nodes) >= maxViews {
+		p.Note = fmt.Sprintf("only the first %d views are read", maxViews)
+	}
 	for _, v := range pr.Views.Nodes {
 		pv := ProjectView{Name: oneLine(CleanText(v.Name)), Layout: v.Layout}
 		if v.Filter != nil {
@@ -194,6 +220,13 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		if len(v.Sort.Nodes) > 0 && v.Sort.Nodes[0].Field != nil {
 			pv.SortField, pv.SortDesc = CleanText(v.Sort.Nodes[0].Field.Name), v.Sort.Nodes[0].Direction == "DESC"
 		}
+		if v.Config != nil {
+			for _, f := range v.Config.Visible.Nodes {
+				if f.DataType == "DATE" && f.Name != "" {
+					pv.DateFields = append(pv.DateFields, oneLine(CleanText(f.Name)))
+				}
+			}
+		}
 		p.Views = append(p.Views, pv)
 	}
 	for _, n := range pr.Items.Nodes {
@@ -201,6 +234,14 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 			continue
 		}
 		it := ProjectItem{ID: n.ID}
+		for _, v := range n.Values.Nodes {
+			if v.Field != nil && len(v.Date) >= 10 {
+				if it.Dates == nil {
+					it.Dates = map[string]string{}
+				}
+				it.Dates[oneLine(CleanText(v.Field.Name))] = CleanText(v.Date[:10])
+			}
+		}
 		if n.Status != nil {
 			it.Status = oneLine(CleanText(n.Status.Name))
 		}
@@ -234,7 +275,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 
 func missingScope(msg string) bool {
 	s := strings.ToLower(msg)
-	return strings.Contains(s, "required scopes") || strings.Contains(s, "read:project")
+	return strings.Contains(s, "read:project") || (strings.Contains(s, "required scopes") && strings.Contains(s, "project"))
 }
 
 // projectRun is the seam for tests.
@@ -262,11 +303,12 @@ func retryOnce(fn func() error) error {
 	return err
 }
 
-// FetchProject reads a Project's first 200 items (two pages); Project.Total says how many there are.
+// FetchProject reads a Project's items, up to maxProjectPages pages of 100; Project.Total says how many there are.
+// When a later page cannot be read the cards read so far are kept and Project.Note says so.
 func FetchProject(host, owner string, number int) (Project, error) {
 	var all Project
 	after := ""
-	for page := 0; page < 2; page++ {
+	for page := 0; page < maxProjectPages; page++ {
 		var (
 			p      Project
 			more   bool
@@ -284,7 +326,12 @@ func FetchProject(host, owner string, number int) (Project, error) {
 			return err
 		})
 		if err != nil {
-			return Project{}, err
+			if page == 0 {
+				return Project{}, err
+			}
+			note := fmt.Sprintf("page %d of the cards could not be read (%s); showing the first %d", page+1, oneLine(CleanText(err.Error())), len(all.Items))
+			all.Note = joinNote(all.Note, note)
+			return all, nil
 		}
 		if page == 0 {
 			all = p
@@ -297,6 +344,13 @@ func FetchProject(host, owner string, number int) (Project, error) {
 		after = cursor
 	}
 	return all, nil
+}
+
+func joinNote(a, b string) string {
+	if a == "" {
+		return b
+	}
+	return a + "; " + b
 }
 
 // ProjectRef is a Project found by ListProjects.

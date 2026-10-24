@@ -113,3 +113,29 @@ func TestUnknownIsAndNoValuesAreReported(t *testing.T) {
 		t.Errorf("%v", f.Unsupported)
 	}
 }
+
+func TestSortByAssigneesAndLabelsPutsEmptyLastEitherWay(t *testing.T) {
+	items := []ghcli.ProjectItem{
+		{Title: "none"},
+		{Title: "bob", Assignees: []string{"Bob"}, Labels: []string{"a"}},
+		{Title: "ann", Assignees: []string{"ann", "zed"}, Labels: []string{"b"}},
+	}
+	for _, desc := range []bool{false, true} {
+		idx := []int{0, 1, 2}
+		if !Sort(idx, items, nil, "Assignees", desc) {
+			t.Fatal("assignees not supported")
+		}
+		want := []int{2, 1, 0}
+		if desc {
+			want = []int{1, 2, 0}
+		}
+		if idx[0] != want[0] || idx[1] != want[1] || idx[2] != 0 {
+			t.Errorf("desc=%v order %v", desc, idx)
+		}
+	}
+	idx := []int{0, 1, 2}
+	Sort(idx, items, nil, "labels", false)
+	if idx[0] != 1 || idx[2] != 0 {
+		t.Errorf("labels order %v", idx)
+	}
+}

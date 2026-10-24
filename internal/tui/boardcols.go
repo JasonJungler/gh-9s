@@ -14,12 +14,13 @@ import (
 const (
 	colMinWidth   = 24 // narrowest a column is drawn
 	colsMinScreen = 60 // narrower terminals keep the list
+	colsMinBody   = 8  // fewer lines than this cut the cards: the list is shown instead
 	cardRows      = 5  // four lines and a blank one
 )
 
 // colsActive says whether the board is drawn as columns right now.
 func (st boardState) colsActive(m model) bool {
-	return st.cols && m.width >= colsMinScreen && st.loaded
+	return st.cols && m.width >= colsMinScreen && m.bodyHeight() >= colsMinBody && st.loaded
 }
 
 // boardCol is one column of the columns layout: a Status of the chosen view, with the cards that pass the filter.
@@ -211,7 +212,7 @@ func boardColumnsBody(m model, st boardState) string {
 		}
 		b.WriteString(strings.TrimRight(strings.Join(cells, " "), " ") + "\n")
 	}
-	_, note := st.viewItems()
+	note := st.fullNote()
 	switch {
 	case m.err != nil:
 		b.WriteString(styErr.Render(" "+trunc(ghcli.CleanText(m.err.Error()), max(m.width-2, 10))) + "\n")
