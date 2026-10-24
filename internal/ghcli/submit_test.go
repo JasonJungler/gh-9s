@@ -96,10 +96,20 @@ func TestSubmitReviewArgs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("args = %q; want %q", got, want)
 	}
+	if got := SubmitReviewArgs(RepoRef{}, "1"); got != nil {
+		t.Errorf("no repo, no request: %q", got)
+	}
 	got = SubmitReviewArgs(RepoRef{Host: "ghe.corp", Owner: "acme", Name: "api"}, "7")
 	want = []string{"api", "--hostname", "ghe.corp", "--method", "POST", "repos/acme/api/pulls/7/reviews", "--input", "-"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("enterprise args = %q; want %q", got, want)
+	}
+}
+
+func TestSubmitReviewNeedsToKnowTheRepo(t *testing.T) {
+	err := SubmitReview(RepoRef{}, "7", "abc1234", ReviewApprove, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "repo") {
+		t.Errorf("err = %v; a review is never sent to whatever repo gh guesses", err)
 	}
 }
 

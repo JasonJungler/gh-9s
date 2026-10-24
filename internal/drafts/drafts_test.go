@@ -129,3 +129,56 @@ func TestKey(t *testing.T) {
 		t.Errorf("an empty host means github.com: %q", got)
 	}
 }
+
+func TestTwoInstancesDoNotEraseEachOther(t *testing.T) {
+	path := tmp(t)
+	a, _ := Load(path)
+	b, _ := Load(path)
+	if err := a.Put("github.com/acme/api#1", "abc1234", one[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Put("github.com/acme/api#2", "abc1234", one[1:]); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := Load(path)
+	if _, g := c.Get("github.com/acme/api#1"); g == nil {
+		t.Error("the second instance erased the first one's drafts")
+	}
+	if _, g := a.Get("github.com/acme/api#2"); g == nil {
+		t.Error("an instance should see what another one saved")
+	}
+}
+
+func TestKeyIsCaseInsensitiveAndAllowsAPort(t *testing.T) {
+	if got := Key("GitHub.com", "Acme", "API", "1"); got != "github.com/acme/api#1" {
+		t.Errorf("Key = %q", got)
+	}
+	s, _ := Load(tmp(t))
+	if err := s.Put(Key("ghe.corp:8443", "acme", "api", "5"), "abc1234", one[:1]); err != nil {
+		t.Errorf("a host with a port is a host: %v", err)
+	}
+}
+
+func TestADraftRemembersTheCommitItWasWrittenFor(t *testing.T) {
+	path := tmp(t)
+	s, _ := Load(path)
+	d := Draft{Path: "a.go", Line: 3, Side: "RIGHT", Body: "x", Head: "abc1234"}
+	if err := s.Put("github.com/a/b#1", "abc1234", []Draft{d}); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := Load(path)
+	if _, got := s2.Get("github.com/a/b#1"); len(got) != 1 || got[0].Head != "abc1234" {
+		t.Errorf("got %+v", got)
+	}
+	bad := d
+	bad.Head = "not a sha!"
+	if err := s.Put("github.com/a/b#1", "abc1234", []Draft{bad}); err == nil {
+		t.Error("a bad commit in a draft is refused")
+	}
+}
+
+func TestLoadWithNoPlaceToKeepFilesFails(t *testing.T) {
+	if _, err := Load(""); err == nil {
+		t.Error("an empty path means there is no place to keep drafts")
+	}
+}

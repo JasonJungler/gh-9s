@@ -78,25 +78,28 @@ func ReviewPayload(head string, kind ReviewKind, body string, comments []InlineC
 
 // SubmitReviewArgs is the `gh api` call that posts a review; the JSON body comes on stdin.
 func SubmitReviewArgs(r RepoRef, number string) []string {
+	if r.Owner == "" || r.Name == "" {
+		return nil // never let gh guess where a review goes
+	}
 	args := []string{"api"}
 	if r.Host != "" && r.Host != "github.com" {
 		args = append(args, "--hostname", r.Host)
 	}
-	repo := "{owner}/{repo}" // gh fills this in from the current directory
-	if r.Owner != "" {
-		repo = r.Owner + "/" + r.Name
-	}
-	return append(args, "--method", "POST", "repos/"+repo+"/pulls/"+number+"/reviews", "--input", "-")
+	return append(args, "--method", "POST", "repos/"+r.Owner+"/"+r.Name+"/pulls/"+number+"/reviews", "--input", "-")
 }
 
 // SubmitReview posts one review with its inline comments, pinned to commit head. GitHub's own
 // reason is kept in the error (for example when the user already has a pending review).
 func SubmitReview(r RepoRef, number, head string, kind ReviewKind, body string, comments []InlineComment) error {
+	args := SubmitReviewArgs(r, number)
+	if args == nil {
+		return errors.New("don't know which repo this review is for")
+	}
 	b, err := ReviewPayload(head, kind, body, comments)
 	if err != nil {
 		return err
 	}
-	out, err := RunInput(b, SubmitReviewArgs(r, number)...)
+	out, err := RunInput(b, args...)
 	if err != nil {
 		return errors.New(ReviewErrorText(err.Error(), out))
 	}

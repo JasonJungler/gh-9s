@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	keyRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*#[0-9]{1,9}$`)
+	keyRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(:[0-9]{1,5})?/[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*#[0-9]{1,9}$`)
 	headRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 )
 
@@ -36,6 +36,7 @@ type Draft struct {
 	StartLine int    `json:"start_line,omitempty"`
 	Side      string `json:"side"`
 	Body      string `json:"body"`
+	Head      string `json:"head,omitempty"` // the PR commit the comment was written against
 }
 
 type entry struct {
@@ -54,7 +55,7 @@ type Store struct {
 func DefaultPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		dir = "."
+		return "" // nowhere private to keep them: Load refuses, and drafts stay in memory
 	}
 	return filepath.Join(dir, "gh-9s", "drafts.json")
 }
@@ -64,7 +65,7 @@ func Key(host, owner, name, number string) string {
 	if host == "" {
 		host = "github.com"
 	}
-	return host + "/" + owner + "/" + name + "#" + number
+	return strings.ToLower(host+"/"+owner+"/"+name) + "#" + number
 }
 
 func validDraft(d Draft) error {
@@ -81,6 +82,8 @@ func validDraft(d Draft) error {
 		return errors.New("bad comment text")
 	case safe.Text(d.Body) != d.Body:
 		return errors.New("the comment holds control characters")
+	case d.Head != "" && !headRe.MatchString(d.Head):
+		return errors.New("bad commit")
 	}
 	return nil
 }
@@ -105,26 +108,38 @@ func validEntry(key string, e entry) error {
 // Load reads the store. A missing or empty file is an empty store; an unparseable or invalid file
 // is an error and the file is left untouched.
 func Load(path string) (*Store, error) {
-	s := &Store{path: path, items: map[string]entry{}}
+	if path == "" {
+		return nil, errors.New("no place to keep the drafts file")
+	}
+	items, err := readItems(path)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{path: path, items: items}, nil
+}
+
+// readItems reads and checks the file; a missing or empty one is an empty map.
+func readItems(path string) (map[string]entry, error) {
+	items := map[string]entry{}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) || (err == nil && strings.TrimSpace(string(b)) == "") {
-		return s, nil
+		return items, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(b, &s.items); err != nil {
+	if err := json.Unmarshal(b, &items); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if len(s.items) > maxPRs {
+	if len(items) > maxPRs {
 		return nil, fmt.Errorf("%s: too many pull requests", path)
 	}
-	for k, e := range s.items {
+	for k, e := range items {
 		if err := validEntry(k, e); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 	}
-	return s, nil
+	return items, nil
 }
 
 // Get returns the commit the drafts were written against and the drafts of a PR.
@@ -134,6 +149,9 @@ func (s *Store) Get(key string) (head string, ds []Draft) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if items, err := readItems(s.path); err == nil { // another gh-9s may have saved since
+		s.items = items
+	}
 	e := s.items[key]
 	return e.Head, append([]Draft(nil), e.Drafts...)
 }
@@ -149,8 +167,13 @@ func (s *Store) Put(key, head string, ds []Draft) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next := make(map[string]entry, len(s.items)+1)
-	for k, v := range s.items {
+	// start from what is on disk now, so another gh-9s's drafts are not erased by this one's copy
+	current, err := readItems(s.path)
+	if err != nil {
+		return err
+	}
+	next := make(map[string]entry, len(current)+1)
+	for k, v := range current {
 		next[k] = v
 	}
 	if len(ds) == 0 {
