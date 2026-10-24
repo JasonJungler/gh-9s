@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/settings"
 )
 
 type mergeCall struct {
@@ -59,7 +60,7 @@ var allMethods = []ghcli.MergeMethod{ghcli.MergeCommit, ghcli.MergeSquash, ghcli
 func mergeStart(t *testing.T, f *mergeFakes) model {
 	t.Helper()
 	m := openDetail(t, func() model { m := prListModel(); m.target, m.prTarget = acme, acme; return m }())
-	m.prefsFile = filepath.Join(t.TempDir(), "prefs.json")
+	m.settings, _ = settings.Load(filepath.Join(t.TempDir(), "settings.json"), nil, "")
 	_ = f
 	return m
 }
@@ -168,8 +169,8 @@ func TestDeleteBranchChoiceIsRemembered(t *testing.T) {
 	if len(f.calls) != 1 || !f.calls[0].del {
 		t.Fatalf("calls = %+v; want the branch deleted", f.calls)
 	}
-	if b, _ := os.ReadFile(m.prefsFile); !strings.Contains(string(b), "true") {
-		t.Errorf("prefs file = %q; the choice should be saved", b)
+	if b, _ := os.ReadFile(settingsFileOf(m)); !strings.Contains(string(b), `"delete_branch_after_merge": true`) {
+		t.Errorf("settings file = %q; the choice should be saved", b)
 	}
 	m = keyAll(m, "m", "down", "enter")
 	if !strings.Contains(m.View(), "[x] Delete branch") {

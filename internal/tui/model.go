@@ -10,6 +10,7 @@ import (
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
 	"github.com/MurabitoB/gh-9s/internal/recent"
+	"github.com/MurabitoB/gh-9s/internal/settings"
 	"github.com/MurabitoB/gh-9s/internal/workflow"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -88,7 +89,7 @@ type model struct {
 	runMeta      ghcli.RunMeta             // the watched run's status and conclusion as last seen
 	runStatus    string                    // last seen status of the watched run, for the finished notification
 	pendingMerge *mergeAction              // the merge being collected through dialogs
-	prefsFile    string                    // where small remembered choices live ("" = do not persist)
+	settings     *settings.Store           // the configuration; nil means in-memory defaults (see cfg)
 	drafts       *drafts.Store             // inline review comments not sent yet, kept on disk
 	rerunWait    int                       // polls left to wait for a re-run's new attempt to show up
 	logJump      bool                      // the next log to load opens at its first failure
@@ -167,7 +168,11 @@ func Run() error {
 	} else {
 		m.favs = fs
 	}
-	m.prefsFile = prefsPath()
+	var banner string
+	m.settings, banner = loadSettings()
+	if banner != "" {
+		m.banner = strings.TrimSpace(m.banner + " " + banner)
+	}
 	if ds, err := drafts.Load(drafts.DefaultPath()); err != nil {
 		m.banner += " drafts are not saved: " + err.Error()
 	} else {

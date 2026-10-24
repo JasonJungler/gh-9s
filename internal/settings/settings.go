@@ -373,3 +373,12 @@ func (s *Store) save() error {
 	}
 	return os.Rename(f.Name(), s.path)
 }
+
+var memory = func() *Store { s, _ := Load("", nil, ""); return s }()
+
+// Memory is a store that keeps nothing on disk: defaults, with changes held for the run only. It is
+// what code uses when no settings were loaded (tests, a failed start).
+func Memory() *Store { return memory }
+
+// Path is the settings file ("" when there is none).
+func (s *Store) Path() string { return s.path }

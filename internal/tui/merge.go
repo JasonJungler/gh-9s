@@ -116,7 +116,7 @@ func init() {
 		d := newConfirmDialog("pr.merge.confirm", "Merge "+p.label+"?",
 			fmt.Sprintf("%s into %s. Head branch: %s.", methodNames[p.method], orDash(p.base), p.branch))
 		d.toggleLabel, d.toggleKey = "Delete branch "+p.branch+" after merge", "d"
-		d.toggleOn = loadPrefs(m.prefsFile).DeleteBranchAfterMerge
+		d.toggleOn = m.cfg().Bool("delete_branch_after_merge")
 		return m.withDialog(d), nil
 	}
 	dialogHandlers["pr.merge.confirm"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
@@ -125,12 +125,17 @@ func init() {
 		if !r.ok || p == nil {
 			return m, nil
 		}
-		if m.prefsFile != "" {
-			_ = prefs{DeleteBranchAfterMerge: r.toggled}.save(m.prefsFile) // best effort
+		on := "off"
+		if r.toggled {
+			on = "on"
+		}
+		note := ""
+		if _, err := m.cfg().Set("delete_branch_after_merge", on); err != nil { // the merge goes ahead either way
+			note = " — couldn't remember the branch choice: " + err.Error()
 		}
 		return m, func() tea.Msg {
 			err := mergePR(p.target, p.number, p.method, r.toggled, p.head)
-			return prActionDoneMsg{text: fmt.Sprintf("merged %s (%s)", p.label, p.method), err: err}
+			return prActionDoneMsg{text: fmt.Sprintf("merged %s (%s)", p.label, p.method) + note, err: err}
 		}
 	}
 }
