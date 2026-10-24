@@ -1,0 +1,159 @@
+// Package workflow parses GitHub Actions workflow files: dispatch inputs and job dependencies.
+package workflow
+
+import (
+	"gopkg.in/yaml.v3"
+)
+
+// DispatchInput is one declared workflow_dispatch input.
+type DispatchInput struct {
+	Name, Description, Type, Default string
+	Required                         bool
+	Options                          []string
+}
+
+// JobSpec is one job as declared in the workflow file.
+type JobSpec struct {
+	ID, Name string
+	Needs    []string
+}
+
+// mapGet returns the value node for key in a mapping node, or nil.
+func mapGet(n *yaml.Node, key string) *yaml.Node {
+	n = deref(n)
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return deref(n.Content[i+1])
+		}
+	}
+	// `<<: *anchor` merge keys (a single mapping or a list of them)
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value != "<<" {
+			continue
+		}
+		v := deref(n.Content[i+1])
+		cands := []*yaml.Node{v}
+		if v != nil && v.Kind == yaml.SequenceNode {
+			cands = v.Content
+		}
+		for _, c := range cands {
+			if r := mapGet(c, key); r != nil {
+				return r
+			}
+		}
+	}
+	return nil
+}
+
+// deref follows YAML aliases (`*anchor`) to the node they refer to.
+func deref(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode {
+		n = n.Alias
+	}
+	return n
+}
+
+func parseRoot(src []byte) (*yaml.Node, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(src, &doc); err != nil {
+		return nil, err
+	}
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		return deref(doc.Content[0]), nil
+	}
+	return nil, nil
+}
+
+func scalars(n *yaml.Node) []string {
+	n = deref(n)
+	switch {
+	case n == nil:
+		return nil
+	case n.Kind == yaml.ScalarNode:
+		return []string{n.Value}
+	case n.Kind == yaml.SequenceNode:
+		var out []string
+		for _, c := range n.Content {
+			out = append(out, deref(c).Value)
+		}
+		return out
+	}
+	return nil
+}
+
+// ParseDispatchInputs reads on.workflow_dispatch.inputs in file order.
+// dispatchable reports whether the workflow can be triggered by hand.
+func ParseDispatchInputs(src []byte) (inputs []DispatchInput, dispatchable bool, err error) {
+	root, err := parseRoot(src)
+	if err != nil {
+		return nil, false, err
+	}
+	on := mapGet(root, "on")
+	if on == nil {
+		// yaml.v3 keeps "on" as a string key, but tolerate YAML 1.1 style booleans.
+		on = mapGet(root, "true")
+	}
+	switch {
+	case on == nil:
+		return nil, false, nil
+	case on.Kind == yaml.MappingNode:
+		wd := mapGet(on, "workflow_dispatch")
+		if wd == nil {
+			return nil, false, nil
+		}
+		ins := mapGet(wd, "inputs")
+		if ins != nil && ins.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(ins.Content); i += 2 {
+				spec := ins.Content[i+1]
+				in := DispatchInput{Name: ins.Content[i].Value, Type: "string"}
+				if v := mapGet(spec, "description"); v != nil {
+					in.Description = v.Value
+				}
+				if v := mapGet(spec, "type"); v != nil && v.Value != "" {
+					in.Type = v.Value
+				}
+				if v := mapGet(spec, "default"); v != nil {
+					in.Default = v.Value
+				}
+				if v := mapGet(spec, "required"); v != nil {
+					in.Required = v.Value == "true"
+				}
+				in.Options = scalars(mapGet(spec, "options"))
+				inputs = append(inputs, in)
+			}
+		}
+		return inputs, true, nil
+	}
+	for _, ev := range scalars(on) {
+		if ev == "workflow_dispatch" {
+			return nil, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// ParseJobSpecs lists jobs in file order with their needs.
+func ParseJobSpecs(src []byte) ([]JobSpec, error) {
+	root, err := parseRoot(src)
+	if err != nil {
+		return nil, err
+	}
+	jobs := mapGet(root, "jobs")
+	if jobs == nil || jobs.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	var out []JobSpec
+	for i := 0; i+1 < len(jobs.Content); i += 2 {
+		id := jobs.Content[i].Value
+		j := jobs.Content[i+1]
+		s := JobSpec{ID: id, Name: id, Needs: scalars(mapGet(j, "needs"))}
+		if v := mapGet(j, "name"); v != nil && v.Value != "" {
+			s.Name = v.Value
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}

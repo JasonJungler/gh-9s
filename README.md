@@ -53,6 +53,22 @@ Everywhere: `j/k` move, `g/G` top/bottom, `/` filter, `:` command bar, `esc` bac
 
 A favorite is a workflow in a specific host/repo (`github.com/acme/api · deploy.yml`), stored in your personal config file (`~/Library/Application Support/gh-9s/favorites.json` on macOS, `~/.config/gh-9s/favorites.json` on Linux), never inside a repo. Give one an alias with `a`, then type `:<alias>` to jump to its runs. Aliases cannot shadow built-in commands. If the file is unreadable, favorites are disabled for the session and the file is left untouched.
 
+## Project layout
+
+```
+main.go                 entry point (calls tui.Run)
+internal/
+  ui/                   shared state type, colours, status/time formatting
+  workflow/             workflow YAML: dispatch inputs, job needs (pure, no network)
+  graph/                job dependency graph, navigation, and the three renderers (+ golden files)
+  ghcli/                the only code that runs `gh`: runs, jobs, logs, branches, trigger lookup
+  favorites/            favorites + aliases store, validation of the config file
+  tui/                  Bubble Tea model, keys, views, forms, and the glue between the packages
+docs/                   design spec and implementation plan
+```
+
+Only `ghcli` talks to GitHub; `workflow`, `graph`, `favorites` and `ui` are testable without a network.
+
 ## Design
 
 See `docs/superpowers/specs/2026-10-24-gh-9s-release1-design.md` and the implementation plan in `docs/superpowers/plans/`.
