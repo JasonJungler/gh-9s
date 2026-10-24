@@ -22,6 +22,7 @@ type mergeAction struct {
 	number  string
 	label   string // "acme/api#482"
 	branch  string
+	base    string // the branch it merges into
 	head    string // the commit that was read; the merge is refused if the PR has moved on
 	method  ghcli.MergeMethod
 	verdict ghcli.MergeVerdict
@@ -76,7 +77,7 @@ func (m model) mergeInfo(msg mergeInfoMsg) model {
 		m.status = styErr.Render("✗ no merge method is allowed for " + displayRef(m.curTarget()) + " (or its settings are not visible to you)")
 		return m
 	}
-	p.verdict, p.branch, p.head = ghcli.EvaluateMerge(msg.d), msg.d.HeadRef, msg.d.HeadSHA
+	p.verdict, p.branch, p.base, p.head = ghcli.EvaluateMerge(msg.d), msg.d.HeadRef, msg.d.BaseRef, msg.d.HeadSHA
 	reasons := strings.Join(p.verdict.Reasons, "; ")
 	var prompt string
 	switch p.verdict.Level {
@@ -113,7 +114,7 @@ func init() {
 		}
 		p.method = ghcli.MergeMethod(r.values[0])
 		d := newConfirmDialog("pr.merge.confirm", "Merge "+p.label+"?",
-			fmt.Sprintf("%s into the base branch. Head branch: %s.", methodNames[p.method], p.branch))
+			fmt.Sprintf("%s into %s. Head branch: %s.", methodNames[p.method], orDash(p.base), p.branch))
 		d.toggleLabel, d.toggleKey = "Delete branch "+p.branch+" after merge", "d"
 		d.toggleOn = loadPrefs(m.prefsFile).DeleteBranchAfterMerge
 		return m.withDialog(d), nil

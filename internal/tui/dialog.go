@@ -154,7 +154,7 @@ func (m model) dialogKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			d.toggleOn = !d.toggleOn
 			return keep()
 		}
-		return finish(k.String() == "y", "", nil)
+		return finish(k.String() == "y" || k.String() == "Y", "", nil)
 	case dialogText:
 		d.err = ""
 		switch k.Type {

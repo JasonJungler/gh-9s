@@ -206,3 +206,50 @@ func TestDiffParseFeedsDisplayCounts(t *testing.T) {
 		t.Errorf("starts=%v lines=%d", s, len(lines))
 	}
 }
+
+func TestTooLargeDiffPointsToTheBrowser(t *testing.T) {
+	installDiff(t, "", errors.New("HTTP 406: Sorry, the diff exceeded the maximum number of lines (20000)"))
+	m := model{view: viewDiff, pr: "1", width: 100, height: 24}
+	next, _ := m.Update(m.fetch()())
+	v := next.(model).View()
+	if !strings.Contains(v, "too large") || !strings.Contains(v, "o ") || !strings.Contains(v, "browser") {
+		t.Errorf("a diff GitHub refuses as too large should say so and offer the browser:\n%s", v)
+	}
+}
+
+func TestOtherDiffErrorsDoNotClaimTheDiffIsTooLarge(t *testing.T) {
+	installDiff(t, "", errors.New("HTTP 502: Bad Gateway"))
+	m := model{view: viewDiff, pr: "1", width: 100, height: 24}
+	next, _ := m.Update(m.fetch()())
+	if v := next.(model).View(); strings.Contains(v, "too large") {
+		t.Errorf("a gateway error is not a size problem:\n%s", v)
+	}
+}
+
+func TestDiffLayoutIsBuiltOnceNotOnEveryKeyAndFrame(t *testing.T) {
+	m := diffModel(t, sampleDiff)
+	st := m.screenData(viewDiff).(diffState)
+	if len(st.lines) == 0 || len(st.starts) != 2 {
+		t.Fatalf("the laid-out lines should be kept in the state: lines=%d starts=%v", len(st.lines), st.starts)
+	}
+	st.lines = []dline{{"SENTINEL LINE", dCtx}} // if rendering rebuilt the layout this would not show
+	m = m.withScreenData(viewDiff, st)
+	if v := m.View(); !strings.Contains(v, "SENTINEL LINE") {
+		t.Errorf("rendering must use the kept layout:\n%s", v)
+	}
+}
+
+func TestDiffMarksALineEndingOnlyChange(t *testing.T) {
+	text := "diff --git a/w.txt b/w.txt\n--- a/w.txt\n+++ b/w.txt\n@@ -1,2 +1,2 @@\n-same\r\n+same\n-other\n+changed\n"
+	m := diffModel(t, text)
+	v := m.View()
+	if !strings.Contains(v, "- same ␍") || strings.Contains(v, "+ same ␍") {
+		t.Errorf("the removed line had a CR and the added one did not; both look alike without a marker:\n%s", v)
+	}
+	if !strings.Contains(v, "line ending") {
+		t.Errorf("the pair should be explained:\n%s", v)
+	}
+	if strings.Contains(v, "- other ␍") || strings.Contains(v, "+ changed ␍") {
+		t.Errorf("ordinary changes must not be marked:\n%s", v)
+	}
+}

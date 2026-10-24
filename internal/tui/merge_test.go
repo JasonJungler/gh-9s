@@ -240,3 +240,13 @@ func TestMethodLookupFailureIsShown(t *testing.T) {
 		t.Errorf("dialog=%v status=%q", m.dlg != nil, m.status)
 	}
 }
+
+func TestConfirmNamesTheBaseBranch(t *testing.T) {
+	d := prState("MERGEABLE", "CLEAN", "APPROVED")
+	d.BaseRef = "release/1.x"
+	f := installMerge(t, allMethods, d)
+	m := keyAll(mergeStart(t, f), "m", "down", "enter")
+	if v := m.View(); !strings.Contains(v, "into release/1.x") {
+		t.Errorf("the confirmation should name the branch it merges into:\n%s", v)
+	}
+}

@@ -21,8 +21,10 @@ var (
 // the plain text of every display line is in m.logs so the log viewer's search works unchanged.
 type diffState struct {
 	d        diff.Diff
-	listMode bool // showing the file list instead of the diff
-	sel      int  // selected file in the list
+	lines    []dline // the laid-out diff, built once when it loads
+	starts   []int   // where each file starts in lines
+	listMode bool    // showing the file list instead of the diff
+	sel      int     // selected file in the list
 }
 
 type dkind int
@@ -59,7 +61,8 @@ func init() {
 		},
 		apply: func(m model, msg screenMsg) model {
 			st := diffState{d: msg.data.(diff.Diff)}
-			lines, _ := diffDisplay(st.d)
+			lines, starts := diffDisplay(st.d)
+			st.lines, st.starts = lines, starts
 			m.logs = make([]string, len(lines))
 			for i, l := range lines {
 				m.logs[i] = l.text
@@ -96,11 +99,18 @@ func diffDisplay(d diff.Diff) (lines []dline, starts []int) {
 			name += " (binary)"
 		}
 		lines = append(lines, dline{fmt.Sprintf("── %s  %s ──", name, plusMinus(f)), dFile})
-		for _, l := range f.Lines {
+		crMark, crNote := lineEndingPairs(f.Lines)
+		for li, l := range f.Lines {
 			text := strings.ReplaceAll(l.Text, "\t", "    ")
+			if crMark[li] {
+				text += " ␍"
+			}
 			switch l.Kind {
 			case diff.Add:
 				lines = append(lines, dline{"+ " + text, dAdd})
+				if crNote[li] {
+					lines = append(lines, dline{"    ↳ only the line ending changed (CRLF ↔ LF)", dMeta})
+				}
 			case diff.Del:
 				lines = append(lines, dline{"- " + text, dDel})
 			case diff.Context:
@@ -121,7 +131,7 @@ func diffDisplay(d diff.Diff) (lines []dline, starts []int) {
 
 func diffKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	st, _ := m.screenData(viewDiff).(diffState)
-	_, starts := diffDisplay(st.d)
+	starts := st.starts
 	if st.listMode {
 		switch k.String() {
 		case "j", "down":
@@ -209,6 +219,10 @@ func diffBody(m model) string {
 	if m.err != nil {
 		b.WriteString(ui.Err.Render(" "+m.err.Error()) + "\n")
 		h--
+		if diffTooLarge(m.err) {
+			b.WriteString(ui.Dim.Render(" The diff is too large for GitHub to send. Press o to see the PR in the browser.") + "\n")
+			h--
+		}
 	}
 	n := 0
 	emit := func(s string) {
@@ -220,7 +234,6 @@ func diffBody(m model) string {
 	case m.loading && len(m.logs) == 0:
 		emit(ui.Dim.Render(" loading diff…"))
 	case st.listMode:
-		_, starts := diffDisplay(st.d)
 		emit(ui.Cols.Render(fmt.Sprintf(" files (%d)", len(st.d.Files))))
 		for i, f := range st.d.Files {
 			line := fmt.Sprintf("%s  %s", f.Path, plusMinus(f))
@@ -230,11 +243,9 @@ func diffBody(m model) string {
 				emit("   " + strings.TrimRight(trunc(line, w-3), " "))
 			}
 		}
-		_ = starts
 	default:
-		lines, _ := diffDisplay(st.d)
-		for i := m.top; i < len(lines) && n < h; i++ {
-			emit(m.styledDiffLine(i, lines[i], w))
+		for i := m.top; i < len(st.lines) && n < h; i++ {
+			emit(m.styledDiffLine(i, st.lines[i], w))
 		}
 	}
 	for ; n < h; n++ {
@@ -264,4 +275,38 @@ func (m model) styledDiffLine(i int, l dline, w int) string {
 		return ui.Dim.Render(text)
 	}
 	return text
+}
+
+// lineEndingPairs finds removed/added line pairs that differ only in a trailing carriage return,
+// which would otherwise show as two identical lines. crMark marks the line that has the CR;
+// crNote marks the added line after which an explanation is shown.
+func lineEndingPairs(ls []diff.Line) (crMark, crNote map[int]bool) {
+	crMark, crNote = map[int]bool{}, map[int]bool{}
+	for i := 0; i < len(ls); {
+		if ls[i].Kind != diff.Del {
+			i++
+			continue
+		}
+		var dels, adds []int
+		for ; i < len(ls) && ls[i].Kind == diff.Del; i++ {
+			dels = append(dels, i)
+		}
+		for ; i < len(ls) && ls[i].Kind == diff.Add; i++ {
+			adds = append(adds, i)
+		}
+		for k := 0; k < len(dels) && k < len(adds); k++ {
+			d, a := ls[dels[k]], ls[adds[k]]
+			if d.Text == a.Text && d.CR != a.CR {
+				crMark[dels[k]], crMark[adds[k]] = d.CR, a.CR
+				crNote[adds[k]] = true
+			}
+		}
+	}
+	return crMark, crNote
+}
+
+// diffTooLarge reports whether GitHub refused the diff because of its size.
+func diffTooLarge(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "406") || strings.Contains(s, "too large") || strings.Contains(s, "exceeded the maximum")
 }

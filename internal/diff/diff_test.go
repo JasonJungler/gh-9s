@@ -169,3 +169,31 @@ func TestParseStripsTerminalControlSequences(t *testing.T) {
 		t.Errorf("printable text and tabs must survive: %q / %q", f.Lines[1].Text, f.Lines[2].Text)
 	}
 }
+
+func TestParseKeepsAnEndOfLineCRAsAFlag(t *testing.T) {
+	d := Parse("diff --git a/w b/w\n--- a/w\n+++ b/w\n@@ -1,2 +1,2 @@\n-a\r\n+a\n b\r\n", 100)
+	l := d.Files[0].Lines
+	if len(l) != 4 || !l[1].CR || l[1].Text != "a" || l[2].CR || !l[3].CR {
+		t.Errorf("lines = %+v; want CR flags true, false, true on the three content lines", l)
+	}
+}
+
+func TestParseUnquotesGitPaths(t *testing.T) {
+	cases := []struct{ header, plus, want string }{
+		{`diff --git "a/f\303\251.txt" "b/f\303\251.txt"`, `+++ "b/f\303\251.txt"`, "fé.txt"},
+		{`diff --git "a/with space.txt" "b/with space.txt"`, `+++ "b/with space.txt"`, "with space.txt"},
+		{`diff --git "a/tab\there" "b/tab\there"`, `+++ "b/tab\there"`, "tab\there"},
+		{`diff --git "a/q\"uote" "b/q\"uote"`, `+++ "b/q\"uote"`, `q"uote`},
+	}
+	for _, c := range cases {
+		d := Parse(c.header+"\n--- /dev/null\n"+c.plus+"\n@@ -0,0 +1 @@\n+x\n", 100)
+		if len(d.Files) != 1 || d.Files[0].Path != c.want {
+			t.Errorf("%s -> %+v; want path %q", c.header, d.Files, c.want)
+		}
+	}
+	// the header alone (a rename with no hunks) also gets unquoted
+	d := Parse("diff --git \"a/old\\303\\251\" \"b/new\\303\\251\"\nrename from \"old\\303\\251\"\nrename to \"new\\303\\251\"\n", 100)
+	if d.Files[0].Path != "newé" || d.Files[0].OldPath != "oldé" {
+		t.Errorf("rename = %+v", d.Files[0])
+	}
+}

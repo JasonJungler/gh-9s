@@ -141,7 +141,7 @@ func TestChoiceDialogWithNothingToChooseSaysSo(t *testing.T) {
 }
 
 func TestConfirmDialogOnlyYConfirms(t *testing.T) {
-	for key, want := range map[string]bool{"y": true, "n": false, "enter": false, "esc": false, "x": false} {
+	for key, want := range map[string]bool{"y": true, "Y": true, "n": false, "enter": false, "esc": false, "x": false} {
 		m, got := dlgModel(t, newConfirmDialog("k", "Merge acme/api#7?", "squash"))
 		m = drive(m, key)
 		if m.dlg != nil || len(*got) != 1 || (*got)[0].ok != want {
