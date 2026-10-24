@@ -50,8 +50,11 @@ func Duration(start, end string) string {
 		return "-"
 	}
 	e, err := time.Parse(time.RFC3339, end)
-	if err != nil || e.IsZero() || e.Before(s) {
-		e = time.Now()
+	switch {
+	case err != nil || e.IsZero():
+		e = time.Now() // no end yet: still running
+	case e.Before(s):
+		e = s // skipped jobs report an end a second before their start; that is zero time, not "still running"
 	}
 	d := e.Sub(s).Round(time.Second)
 	if d >= time.Minute {

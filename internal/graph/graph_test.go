@@ -169,3 +169,49 @@ func TestSingleEntryMatrixKeepsItsSuffix(t *testing.T) {
 		t.Errorf("node = %+v", g.Nodes[0])
 	}
 }
+
+// When a matrix never expands (its job was skipped) GitHub lists one job whose name still
+// holds the raw expression.
+func TestUnexpandedMatrixNameIsNotShownRaw(t *testing.T) {
+	g := Build([]Job{{ID: "1", Name: "E2E / ${{ matrix.browser }}", Status: "completed", Conclusion: "skipped"}},
+		[]workflow.JobSpec{{ID: "e2e", Name: "E2E / ${{ matrix.browser }}"}})
+	if g.Flat || len(g.Nodes) != 1 || g.Nodes[0].Name != "E2E" {
+		t.Errorf("node = %+v flat=%v; want a node named E2E", g.Nodes, g.Flat)
+	}
+}
+
+// GitHub reports no end time for a job that never ran; that is not "still running".
+func TestSkippedJobIsNotRunningForever(t *testing.T) {
+	started := at(10)
+	g := Build([]Job{
+		{ID: "1", Name: "build", Status: "completed", Conclusion: "skipped", Start: started}, // no End
+		{ID: "2", Name: "docs", Status: "completed", Conclusion: "skipped"},                  // never started either
+	}, []workflow.JobSpec{{ID: "build", Name: "build"}, {ID: "docs", Name: "docs"}})
+	b := g.Nodes[0]
+	if b.End.IsZero() || !b.End.Equal(started) {
+		t.Errorf("skipped build: End = %v; want it pinned to its start so it never grows", b.End)
+	}
+	if got := nodeDur(b, at(500)); got != "0s" {
+		t.Errorf("duration = %q; want 0s however late it is", got)
+	}
+	if got := nodeDur(g.Nodes[1], at(500)); got != "" {
+		t.Errorf("never-started job duration = %q; want none", got)
+	}
+	lines, _ := Render(g, StyleLanes, 0, 80, at(500))
+	if strings.Contains(strings.Join(lines, "\n"), "▌") {
+		t.Errorf("a skipped job must not be drawn as in progress:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// Real data from a skipped job: GitHub reported completedAt one second BEFORE startedAt.
+func TestEndBeforeStartDoesNotMeanStillRunning(t *testing.T) {
+	g := Build([]Job{{ID: "1", Name: "build", Status: "completed", Conclusion: "skipped",
+		Start: at(26), End: at(25)}}, []workflow.JobSpec{{ID: "build", Name: "build"}})
+	n := g.Nodes[0]
+	if !n.End.Equal(n.Start) {
+		t.Errorf("End = %v, Start = %v; want End clamped to Start", n.End, n.Start)
+	}
+	if got := nodeDur(n, at(5000)); got != "0s" {
+		t.Errorf("duration = %q; want 0s however late it is", got)
+	}
+}

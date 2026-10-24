@@ -35,3 +35,13 @@ func TestDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestDurationEndBeforeStartIsZeroNotNow(t *testing.T) {
+	// seen on skipped jobs: completedAt is a second before startedAt
+	if got := Duration("2026-10-24T04:18:26Z", "2026-10-24T04:18:25Z"); got != "0s" {
+		t.Errorf("Duration = %q; want 0s", got)
+	}
+	if got := Duration("", ""); got != "-" {
+		t.Errorf("Duration of nothing = %q; want -", got)
+	}
+}

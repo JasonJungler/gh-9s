@@ -142,10 +142,23 @@ func newNode(id, name string, jobs []Job) Node {
 		if !j.Start.IsZero() && (n.Start.IsZero() || j.Start.Before(n.Start)) {
 			n.Start = j.Start
 		}
-		if j.End.IsZero() {
+		end := j.End
+		if !end.IsZero() && end.Before(j.Start) {
+			end = j.Start // skipped jobs report an end a second before their start
+		}
+		switch {
+		case !end.IsZero():
+			if end.After(n.End) {
+				n.End = end
+			}
+		case j.Status == "completed":
+			// No end time is reported for a job that never ran (skipped). It is not
+			// "still running": pin it to its start so its duration does not grow.
+			if j.Start.After(n.End) {
+				n.End = j.Start
+			}
+		default:
 			running = true
-		} else if j.End.After(n.End) {
-			n.End = j.End
 		}
 		if n.Step == "" {
 			n.Step = j.Step
@@ -156,8 +169,10 @@ func newNode(id, name string, jobs []Job) Node {
 	}
 	if len(jobs) == 1 {
 		n.Job = jobs[0]
-		if jobs[0].Name != "" {
-			n.Name = jobs[0].Name // keeps a matrix suffix such as "build (ubuntu)"
+		// keep a matrix suffix such as "build (ubuntu)", but not a raw "${{ matrix.x }}":
+		// a skipped matrix never expands, and GitHub then lists the unexpanded name
+		if jobs[0].Name != "" && !strings.Contains(jobs[0].Name, "${{") {
+			n.Name = jobs[0].Name
 		}
 		n.Label, n.State = jobs[0].State()
 		return n
