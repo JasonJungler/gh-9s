@@ -55,6 +55,7 @@ type model struct {
 
 	// scope for the current view
 	base         ghcli.RepoRef  // the repo chosen with :repo; zero value: the current directory's repo
+	prTarget     ghcli.RepoRef  // the repo of the PR being looked at; restored when coming back from a check's run
 	target       ghcli.RepoRef  // what the current view shows: base, or a favorite's repo while visiting one
 	wfID, wfName string         // runs filtered by workflow
 	pr           string         // the PR shown (checks, detail); "" = the current branch's PR

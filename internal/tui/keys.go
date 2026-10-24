@@ -71,6 +71,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if prev == viewFavs {
 				m.target = m.base
 			}
+			if prev == viewChecks || prev == viewPRDetail {
+				m.target = m.prTarget // a check may have taken us to a run in another repo
+			}
 			return m, m.switchTo(prev)
 		}
 	case "j", "down":
@@ -196,13 +199,11 @@ func (m model) enter() (tea.Model, tea.Cmd) {
 			return m, m.openFavorite(f, true)
 		}
 	case viewPRs:
-		m.pr = r.id
+		m.pr, m.prTarget = r.id, m.target
 		m = m.withScreenData(viewPRDetail, prDetailState{}) // a different PR starts at the top
 		return m, m.push(viewPRDetail)
 	case viewChecks:
-		if r.url != "" {
-			_ = ghcli.OpenURL(r.url)
-		}
+		return m.openCheck(r)
 	}
 	return m, nil
 }
