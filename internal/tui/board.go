@@ -10,6 +10,7 @@ import (
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/icons"
+	"github.com/MurabitoB/gh-9s/internal/pfilter"
 	"github.com/MurabitoB/gh-9s/internal/pins"
 	"github.com/MurabitoB/gh-9s/internal/ui"
 )
@@ -34,13 +35,16 @@ type boardState struct {
 	loaded   bool
 	loadedAt time.Time
 	tab      int
-	force    bool // the next fetch ignores the reuse window (R)
+	view     int    // 0 is "All items", n is the Project's view n-1
+	me       string // the logged-in user, when a view's filter asks for @me
+	force    bool   // the next fetch ignores the reuse window (R)
 }
 
 // boardPayload is one answer of fetchProject.
 type boardPayload struct {
 	key       string
 	p         ghcli.Project
+	me        string
 	unchanged bool // the data is recent: nothing was asked
 }
 
@@ -52,7 +56,7 @@ func init() {
 		apply:    boardApply,
 		key:      boardKeyHandler,
 		body:     boardBody,
-		footer:   "tab/h/l switch column  enter open  f pin/unpin Project  o browser  / filter",
+		footer:   "tab/h/l switch column  [/] switch view  enter open  f pin/unpin Project  o browser  / filter",
 	})
 }
 
@@ -78,7 +82,17 @@ func boardFetchCmd(m model) tea.Cmd {
 		if errors.Is(err, ghcli.ErrMissingScope) {
 			err = errors.New(ghcli.ScopeHint(b.Host))
 		}
-		return screenMsg{view: viewBoard, id: key, data: boardPayload{key: key, p: p}, err: err}
+		me := ""
+		for _, v := range p.Views {
+			if err == nil && me == "" && pfilter.Parse(v.Filter).NeedsMe() {
+				host := b.Host
+				if host == "" {
+					host = "github.com"
+				}
+				me, _ = inboxLogin(host) // a failure leaves me empty: the view says so
+			}
+		}
+		return screenMsg{view: viewBoard, id: key, data: boardPayload{key: key, p: p, me: me}, err: err}
 	}
 }
 
@@ -95,7 +109,10 @@ func boardApply(m model, msg screenMsg) model {
 	if r, ok := m.selected(); ok && m.view == viewBoard {
 		keep = r.id
 	}
-	st.data, st.loaded, st.loadedAt, st.force = pl.p, true, boardNow(), false
+	st.data, st.loaded, st.loadedAt, st.force, st.me = pl.p, true, boardNow(), false, pl.me
+	if st.view > len(pl.p.Views) { // the view was deleted on GitHub
+		st.view = 0
+	}
 	return m.rebuildBoard(st, keep)
 }
 
@@ -107,7 +124,7 @@ type boardTab struct {
 
 // boardTabs are All, then the Status options in the Project's order, then statuses the options do not
 // list (a renamed option), then No status when some item has none.
-func boardTabs(p ghcli.Project) []boardTab {
+func boardTabs(p ghcli.Project, idx []int) []boardTab {
 	tabs := []boardTab{{name: "All"}}
 	at := map[string]int{}
 	for _, s := range p.StatusOrder {
@@ -117,7 +134,8 @@ func boardTabs(p ghcli.Project) []boardTab {
 		}
 	}
 	none := -1
-	for i, it := range p.Items {
+	for _, i := range idx {
+		it := p.Items[i]
 		tabs[0].items = append(tabs[0].items, i)
 		if it.Status == "" {
 			if none < 0 {
@@ -203,7 +221,8 @@ func boardRows(p ghcli.Project, t boardTab) []row {
 }
 
 func (m model) rebuildBoard(st boardState, keepID string) model {
-	tabs := boardTabs(st.data)
+	idx, _ := st.viewItems()
+	tabs := boardTabs(st.data, idx)
 	st.tab = min(max(st.tab, 0), len(tabs)-1)
 	m = m.withScreenData(viewBoard, st)
 	m.tbl = table{cols: []string{"ITEM", "TITLE", "STATE", "ASSIGNEES", "LABELS", "UPDATED"}, rows: boardRows(st.data, tabs[st.tab])}
@@ -219,10 +238,13 @@ func (m model) rebuildBoard(st boardState, keepID string) model {
 
 // boardExtraRows is the tab bar above the board's table and the sentence under it.
 func (m model) boardExtraRows() int {
-	if m.view == viewBoard {
-		return 2
+	if m.view != viewBoard {
+		return 0
 	}
-	return 0
+	if m.boardSt().hasViews() {
+		return 3
+	}
+	return 2
 }
 
 func boardCount(p ghcli.Project, n int) string {
@@ -237,7 +259,8 @@ func boardBody(m model) string {
 	var b strings.Builder
 	var labels []string
 	if st.loaded {
-		for i, t := range boardTabs(st.data) {
+		idx, _ := st.viewItems()
+		for i, t := range boardTabs(st.data, idx) {
 			l := fmt.Sprintf(" %s (%s) ", t.name, boardCount(st.data, len(t.items)))
 			if i == st.tab {
 				l = ui.Sel.Render(l)
@@ -247,9 +270,15 @@ func boardBody(m model) string {
 			labels = append(labels, l)
 		}
 	}
+	if st.hasViews() {
+		b.WriteString(fitTabs(st.viewLabels(), st.view, m.width) + "\n")
+	}
 	b.WriteString(fitTabs(labels, st.tab, m.width) + "\n")
 	b.WriteString(m.tableBody())
+	_, note := st.viewItems()
 	switch {
+	case note != "":
+		b.WriteString(styErr.Render(" "+trunc(note, max(m.width-2, 10))) + "\n")
 	case !st.loaded && m.err == nil:
 		b.WriteString(styDim.Render(" loading…") + "\n")
 	case st.loaded && st.data.Total > len(st.data.Items):
@@ -279,7 +308,8 @@ func (m model) switchBoardTab(delta int) model {
 	if !st.loaded {
 		return m
 	}
-	n := len(boardTabs(st.data))
+	idx, _ := st.viewItems()
+	n := len(boardTabs(st.data, idx))
 	st.tab = (st.tab + delta + n) % n
 	m.filter = ""
 	return m.rebuildBoard(st, "")
@@ -292,6 +322,10 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return m.switchBoardTab(1), nil, true
 	case "shift+tab", "h", "left":
 		return m.switchBoardTab(-1), nil, true
+	case "]":
+		return m.switchBoardView(1), nil, true
+	case "[":
+		return m.switchBoardView(-1), nil, true
 	case "R", "ctrl+r":
 		if st.loaded && boardNow().Sub(st.loadedAt) < boardManual {
 			m.status = styDim.Render("just refreshed")
@@ -391,4 +425,71 @@ func (m model) openBoard(p pins.Project) (model, tea.Cmd) {
 func (m model) togglePinnedProjectKeys(p pins.Project) (model, tea.Cmd, bool) {
 	m, cmd := m.togglePinnedProject(p)
 	return m, cmd, true
+}
+
+func (st boardState) hasViews() bool { return st.loaded && len(st.data.Views) > 0 }
+
+func (st boardState) viewLabels() []string {
+	labels := []string{" All items "}
+	for _, v := range st.data.Views {
+		l := " " + v.Name + " "
+		if v.Layout == "ROADMAP_LAYOUT" {
+			l = " " + v.Name + " (roadmap) "
+		}
+		labels = append(labels, l)
+	}
+	for i := range labels {
+		if i == st.view {
+			labels[i] = ui.Sel.Render(labels[i])
+		} else {
+			labels[i] = styDim.Render(labels[i])
+		}
+	}
+	return labels
+}
+
+// viewItems are the items of the chosen view, in its order, and a note when the view could not be applied exactly.
+func (st boardState) viewItems() (idx []int, note string) {
+	p := st.data
+	for i := range p.Items {
+		idx = append(idx, i)
+	}
+	if st.view == 0 || st.view > len(p.Views) {
+		return idx, ""
+	}
+	v := p.Views[st.view-1]
+	if v.Layout == "ROADMAP_LAYOUT" {
+		return idx, "a roadmap view is not drawn here; showing all items"
+	}
+	f := pfilter.Parse(v.Filter)
+	var notes []string
+	if len(f.Unsupported) > 0 {
+		notes = append(notes, "filter not fully applied: "+strings.Join(f.Unsupported, " "))
+	}
+	if f.NeedsMe() && st.me == "" {
+		return idx, "this view's filter needs your login, which could not be read; showing all items"
+	}
+	var kept []int
+	for _, i := range idx {
+		if f.Match(p.Items[i], st.me) {
+			kept = append(kept, i)
+		}
+	}
+	idx = kept
+	if v.SortField != "" && !pfilter.Sort(idx, p.Items, p.StatusOrder, v.SortField, v.SortDesc) {
+		notes = append(notes, "sort by "+v.SortField+" not applied")
+	}
+	return idx, strings.Join(notes, "; ")
+}
+
+func (m model) switchBoardView(delta int) model {
+	st := m.boardSt()
+	if !st.hasViews() {
+		return m
+	}
+	n := len(st.data.Views) + 1
+	st.view = (st.view + delta + n) % n
+	st.tab = 0
+	m.filter = ""
+	return m.rebuildBoard(st, "")
 }

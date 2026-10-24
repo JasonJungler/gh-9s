@@ -469,3 +469,119 @@ func TestProjectListMissingScopeAndLateAnswer(t *testing.T) {
 		t.Error("a late list opened a dialog on another screen")
 	}
 }
+
+func viewsProject() ghcli.Project {
+	p := sampleProject()
+	p.Views = []ghcli.ProjectView{
+		{Name: "Backlog", Layout: "BOARD_LAYOUT"},
+		{Name: "My items", Layout: "TABLE_LAYOUT", Filter: "assignee:@me"},
+		{Name: "Bugs by title", Layout: "TABLE_LAYOUT", Filter: "is:pr", SortField: "Title"},
+		{Name: "Sprint", Layout: "TABLE_LAYOUT", Filter: "iteration:@current is:issue", SortField: "Priority"},
+		{Name: "Plan", Layout: "ROADMAP_LAYOUT"},
+	}
+	return p
+}
+
+func boardWithViews(t *testing.T, me string) (model, *boardFakes) {
+	t.Helper()
+	f := installBoard(t)
+	f.project = viewsProject()
+	old := inboxLogin
+	inboxLogin = func(string) (string, error) {
+		if me == "" {
+			return "", errors.New("no login")
+		}
+		return me, nil
+	}
+	t.Cleanup(func() { inboxLogin = old })
+	m := pinsModel(t)
+	m.previewOff = true
+	m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "Roadmap"})
+	return keyAll(pressTab(pressTab(openFavs(t, m), "tab"), "tab"), "enter"), f
+}
+
+func TestBoardListsViewsAndSwitchesWithBrackets(t *testing.T) {
+	m, _ := boardWithViews(t, "ann")
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"All items", "Backlog", "My items", "Plan (roadmap)", "All (5)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	m = keyAll(m, "]", "]") // My items: assignee:@me
+	out = ansi.Strip(m.View())
+	if !strings.Contains(out, "All (3)") || strings.Contains(out, "Idea") {
+		t.Errorf("My items should keep the three issue/PR cards assigned to ann:\n%s", out)
+	}
+	m = keyAll(m, "[", "[")
+	if !strings.Contains(ansi.Strip(m.View()), "All (5)") {
+		t.Error("back on All items")
+	}
+}
+
+func TestBoardViewFilterSortAndHonestNotes(t *testing.T) {
+	m, _ := boardWithViews(t, "ann")
+	m = keyAll(m, "]", "]", "]") // Bugs by title: is:pr sorted by title
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "All (2)") || strings.Index(out, "Add retry") > strings.Index(out, "Old work") {
+		t.Errorf("pr view:\n%s", out)
+	}
+	m = keyAll(m, "]") // Sprint: unsupported iteration term and sort field
+	out = ansi.Strip(m.View())
+	if !strings.Contains(out, "filter not fully applied: iteration:@current") || !strings.Contains(out, "sort by Priority not applied") {
+		t.Errorf("notes:\n%s", out)
+	}
+	if !strings.Contains(out, "All (1)") { // is:issue still applied
+		t.Errorf("supported term dropped:\n%s", out)
+	}
+	m = keyAll(m, "]") // roadmap
+	out = ansi.Strip(m.View())
+	if !strings.Contains(out, "roadmap view is not drawn") || !strings.Contains(out, "All (5)") {
+		t.Errorf("roadmap:\n%s", out)
+	}
+}
+
+func TestBoardViewNeedingMeWithoutLoginShowsAllWithANote(t *testing.T) {
+	m, _ := boardWithViews(t, "")
+	m = keyAll(m, "]", "]")
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "needs your login") || !strings.Contains(out, "All (5)") {
+		t.Errorf("%s", out)
+	}
+}
+
+func TestBoardWithoutViewsHasNoViewRowAndDeletedViewResets(t *testing.T) {
+	m, f := boardOn(t)
+	if strings.Contains(ansi.Strip(m.View()), "All items") {
+		t.Error("a Project with no views shows no view row")
+	}
+	m, f = boardWithViews(t, "ann")
+	m = keyAll(m, "]", "]", "]", "]", "]") // Plan, the last one
+	f.project = sampleProject()            // the views were deleted on GitHub
+	f.now = f.now.Add(10 * time.Second)
+	m = keyAll(m, "R")
+	if st := m.boardSt(); st.view != 0 {
+		t.Errorf("view %d after the views vanished", st.view)
+	}
+	m = keyAll(m, "]") // no-op without views
+	if !strings.Contains(ansi.Strip(m.View()), "All (5)") {
+		t.Error("view")
+	}
+}
+
+func TestBoardViewRowFitsNarrowTerminals(t *testing.T) {
+	for _, w := range []int{50, 80, 200} {
+		m, _ := boardWithViews(t, "ann")
+		m.width = w
+		m = keyAll(m, "[") // last view: Plan
+		lines := strings.Split(m.View(), "\n")
+		for i := 2; i <= 4; i++ {
+			if got := ansi.StringWidth(lines[i]); got > w {
+				t.Errorf("width %d line %d is %d wide: %q", w, i, got, ansi.Strip(lines[i]))
+			}
+		}
+		if w == 50 && !strings.Contains(ansi.Strip(lines[2]), "Plan") {
+			t.Errorf("selected view not visible: %q", ansi.Strip(lines[2]))
+		}
+	}
+}

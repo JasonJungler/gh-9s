@@ -19,6 +19,13 @@ type ProjectItem struct {
 	Assignees, Labels []string
 }
 
+// ProjectView is a saved view of a Project: its layout, filter text and first sort.
+type ProjectView struct {
+	Name, Layout, Filter string // Layout is BOARD_LAYOUT, TABLE_LAYOUT or ROADMAP_LAYOUT
+	SortField            string
+	SortDesc             bool
+}
+
 // Project is a GitHub Project (v2) as read from one board.
 type Project struct {
 	Title       string
@@ -27,6 +34,7 @@ type Project struct {
 	StatusOrder []string // the options of the Status field, in the Project's order
 	Total       int      // how many items the Project has, which can be more than Items
 	Items       []ProjectItem
+	Views       []ProjectView // the saved views, in the Project's order
 }
 
 // ErrMissingScope is returned when gh's token lacks the read:project scope.
@@ -46,7 +54,7 @@ const projectPageSize = 100
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:5){nodes{login}} labels(first:5){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed url field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title}}}}}}}}`
+const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){title closed url views(first:20){nodes{name layout filter sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title}}}}}}}}`
 
 type nameNodes struct {
 	Nodes []struct {
@@ -90,7 +98,19 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 					Title  string `json:"title"`
 					Closed bool   `json:"closed"`
 					URL    string `json:"url"`
-					Field  *struct {
+					Views  struct {
+						Nodes []struct {
+							Name, Layout string
+							Filter       *string
+							Sort         struct {
+								Nodes []struct {
+									Field     *struct{ Name string } `json:"field"`
+									Direction string                 `json:"direction"`
+								} `json:"nodes"`
+							} `json:"sortByFields"`
+						} `json:"nodes"`
+					} `json:"views"`
+					Field *struct {
 						Options []struct {
 							Name string `json:"name"`
 						} `json:"options"`
@@ -146,6 +166,16 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		for _, o := range pr.Field.Options {
 			p.StatusOrder = append(p.StatusOrder, oneLine(CleanText(o.Name)))
 		}
+	}
+	for _, v := range pr.Views.Nodes {
+		pv := ProjectView{Name: oneLine(CleanText(v.Name)), Layout: v.Layout}
+		if v.Filter != nil {
+			pv.Filter = oneLine(CleanText(*v.Filter))
+		}
+		if len(v.Sort.Nodes) > 0 && v.Sort.Nodes[0].Field != nil {
+			pv.SortField, pv.SortDesc = CleanText(v.Sort.Nodes[0].Field.Name), v.Sort.Nodes[0].Direction == "DESC"
+		}
+		p.Views = append(p.Views, pv)
 	}
 	for _, n := range pr.Items.Nodes {
 		if n == nil {

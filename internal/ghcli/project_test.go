@@ -184,3 +184,22 @@ func TestParseProjectList(t *testing.T) {
 		t.Error("the list query writes")
 	}
 }
+
+func TestParseProjectViews(t *testing.T) {
+	b := `{"data":{"repositoryOwner":{"projectV2":{"title":"P","closed":false,"views":{"nodes":[
+{"name":"Backlog","layout":"BOARD_LAYOUT","filter":null,"sortByFields":{"nodes":[{"field":{"name":"Priority"},"direction":"ASC"}]}},
+{"name":"My\u001b[1m items","layout":"TABLE_LAYOUT","filter":"assignee:@me","sortByFields":{"nodes":[{"field":{"name":"Updated at"},"direction":"DESC"}]}},
+{"name":"Roadmap","layout":"ROADMAP_LAYOUT","filter":null,"sortByFields":{"nodes":[]}}]},
+"items":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}}`
+	p, _, _, err := ParseProjectPage([]byte(b))
+	if err != nil || len(p.Views) != 3 {
+		t.Fatalf("%+v %v", p.Views, err)
+	}
+	v := p.Views
+	if v[0].SortField != "Priority" || v[0].SortDesc || v[1].Filter != "assignee:@me" || !v[1].SortDesc || strings.ContainsRune(v[1].Name, 0x1b) || v[2].Layout != "ROADMAP_LAYOUT" || v[2].SortField != "" {
+		t.Errorf("%+v", v)
+	}
+	if !strings.Contains(projectQuery, "views(first:20)") || strings.Contains(strings.ToLower(projectQuery), "mutation") {
+		t.Error("query")
+	}
+}

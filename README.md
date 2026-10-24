@@ -117,7 +117,7 @@ Every dialog names the repo and number it acts on (`acme/api#482`). Approving, r
 
 ## Project boards (read-only)
 
-Pin a GitHub Project (v2) in `:fav` → Projects (`a`, then `OWNER/NUMBER`) and press `enter` to see its board: one tab per Status column in the Project's order (`All` first, `No status` when some card has none), the first 200 cards, with `enter` opening an issue or PR in its own repo (Enterprise hosts too), `o` the browser, `/` filter, `R` refresh. The preview pane works on the cards. Nothing is ever changed from here. Projects need the `read:project` permission: `gh auth refresh -s read:project` (add `--hostname HOST` for Enterprise).
+Pin a GitHub Project (v2) in `:fav` → Projects (`a`, then `OWNER/NUMBER`) and press `enter` to see its board: one tab per Status column in the Project's order (`All` first, `No status` when some card has none), the first 200 cards, with `enter` opening an issue or PR in its own repo (Enterprise hosts too), `o` the browser, `/` filter, `R` refresh. The Project's saved views show as a second row (`]` / `[` switch): each view's filter (`assignee:@me`, `label:`, `status:`, `is:open|pr|issue|draft|merged`, `repo:`, `no:`, words, `-` to exclude) and first sort (Title, Status, Updated) are applied to the loaded cards; anything else is named in a note instead of guessed, and roadmap views are not drawn. The preview pane works on the cards. Nothing is ever changed from here. Projects need the `read:project` permission: `gh auth refresh -s read:project` (add `--hostname HOST` for Enterprise).
 
 ## Favorites
 

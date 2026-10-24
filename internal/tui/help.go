@@ -49,7 +49,7 @@ func (m model) helpGroups() []helpGroup {
 	case viewIssues:
 		gs = append(gs, helpGroup{"Issues", []helpKey{{"j k", "move"}, {"enter", "open the issue"}, {"O C A", "open / closed / all"}, {"u", "assigned to me"}, {"m", "opened by me"}, {"f", "pin / unpin this repo"}, {"o", "open in the browser"}}})
 	case viewBoard:
-		gs = append(gs, helpGroup{"Project board (read-only)", []helpKey{{"tab l →", "next column (Status)"}, {"shift+tab h ←", "previous column"}, {"j k", "move"}, {"enter", "open the issue or PR (in its own repo)"}, {"f", "pin / unpin this Project"}, {"o", "open in the browser (a draft opens the Project)"}, {"R", "refresh (at most once in a while)"}}})
+		gs = append(gs, helpGroup{"Project board (read-only)", []helpKey{{"tab l →", "next column (Status)"}, {"shift+tab h ←", "previous column"}, {"j k", "move"}, {"enter", "open the issue or PR (in its own repo)"}, {"] [", "next / previous saved view of the Project"}, {"f", "pin / unpin this Project"}, {"o", "open in the browser (a draft opens the Project)"}, {"R", "refresh (at most once in a while)"}}})
 	case viewInbox:
 		gs = append(gs, helpGroup{"Inbox", []helpKey{{"tab l →", "next tab"}, {"shift+tab h ←", "previous tab"}, {"j k", "move"}, {"enter", "open the item (in its own repo)"}, {"o", "open in the browser"}, {"R", "refresh (at most once in a while)"}}})
 	case viewPRDetail:
