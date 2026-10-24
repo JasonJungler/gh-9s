@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
@@ -316,3 +317,87 @@ func TestProjectsAreOnlyEverRead(t *testing.T) {
 
 func iconsPROpen() icons.Name   { return icons.PROpen }
 func iconsPRMerged() icons.Name { return icons.PRMerged }
+
+func TestLateOrDuplicatePinAnswerDoesNotUnpin(t *testing.T) {
+	installBoard(t)
+	m := pinsModel(t)
+	m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "Roadmap"})
+	next, _ := m.Update(projectPinMsg{owner: "acme", number: 3, p: sampleProject()})
+	if !next.(model).pins.HasProject("", "acme", 3) {
+		t.Error("a second answer unpinned the Project")
+	}
+	m.pins.ToggleRepo(pins.Repo{Repo: "acme/one"})
+	next, _ = m.Update(repoPinMsg{repo: pins.Repo{Repo: "acme/one"}})
+	if !next.(model).pins.HasRepo("", "acme/one") {
+		t.Error("a late check unpinned the repo")
+	}
+}
+
+func TestHTTPOnlyServerStillPins(t *testing.T) {
+	m := pinsModel(t)
+	p := sampleProject()
+	p.URL = "http://ghe.local/orgs/acme/projects/3"
+	next, _ := m.Update(projectPinMsg{host: "ghe.local", owner: "acme", number: 3, p: p})
+	got := next.(model).pins
+	if !got.HasProject("ghe.local", "acme", 3) || got.Projects[0].URL != "" {
+		t.Errorf("%+v", got.Projects)
+	}
+}
+
+func TestPickerUnpinRefreshesTheReposTab(t *testing.T) {
+	installPickerFakes(t, []ghcli.RepoInfo{info("acme/one")})
+	m := pickerModel(t)
+	ps, _ := pins.Load(filepath.Join(t.TempDir(), "pins.json"))
+	m.pins = ps
+	m.pins.ToggleRepo(pins.Repo{Repo: "acme/one"})
+	m.view, m.favTab = viewFavs, favTabRepos
+	m = typeText(t, openPicker(t, m), "acme")
+	m = pickKeys(t, m, "down")
+	_, c := m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	if c == nil {
+		t.Error("no refresh after unpinning from the picker")
+	}
+}
+
+func TestBoardOpensOnlyPlainHTTPSAndValidRepos(t *testing.T) {
+	f := installBoard(t)
+	f.project.URL = "javascript:alert(1)"
+	f.project.Items = []ghcli.ProjectItem{{Type: "Issue", Number: 1, Title: "x", Repo: "-evil/--repo", URL: "file:///etc/passwd", State: "OPEN"}}
+	m := pinsModel(t)
+	m.previewOff = true
+	m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "P"})
+	m = keyAll(pressTab(pressTab(openFavs(t, m), "tab"), "tab"), "enter")
+	var opened []string
+	openURL = func(u string) error { opened = append(opened, u); return nil }
+	m = keyAll(m, "o")
+	m = keyAll(m, "enter")
+	if len(opened) != 0 || m.view != viewBoard || m.target != m.base {
+		t.Errorf("opened %v view %v target %+v", opened, m.view, m.target)
+	}
+}
+
+func TestTabBarsFitNarrowTerminals(t *testing.T) {
+	f := installBoard(t)
+	f.project = ghcli.Project{Title: "P", Total: 1, Items: []ghcli.ProjectItem{projItem("Issue", "a/b", 1, "t", "状态四十", "OPEN")}}
+	for i := 0; i < 40; i++ {
+		f.project.StatusOrder = append(f.project.StatusOrder, fmt.Sprintf("状态%d", i))
+	}
+	f.project.StatusOrder = append(f.project.StatusOrder, "状态四十")
+	for _, w := range []int{60, 80, 200} {
+		m := pinsModel(t)
+		m.width, m.previewOff = w, true
+		m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "P"})
+		m = keyAll(pressTab(pressTab(openFavs(t, m), "tab"), "tab"), "enter")
+		m = keyAll(m, "G") // no-op on tabs; then walk to the last column
+		for i := 0; i < 41; i++ {
+			m = keyAll(m, "tab")
+		}
+		lines := strings.Split(m.View(), "\n")
+		if got := ansi.StringWidth(lines[2]); got > w {
+			t.Errorf("width %d: tab bar is %d wide", w, got)
+		}
+		if w <= 80 && !strings.Contains(ansi.Strip(lines[2]), "状态四十") {
+			t.Errorf("width %d: selected column scrolled out of the bar: %q", w, ansi.Strip(lines[2]))
+		}
+	}
+}

@@ -130,17 +130,25 @@ func (m model) onProjectPin(msg projectPinMsg) (model, tea.Cmd) {
 		m.status = styErr.Render("✗ " + msg.owner + "/#" + strconv.Itoa(msg.number) + ": " + text)
 		return m, nil
 	}
-	return m.togglePinnedProject(pins.Project{Host: msg.host, Owner: msg.owner, Number: msg.number, Title: msg.p.Title, URL: msg.p.URL})
+	if m.pinStore().HasProject(msg.host, msg.owner, msg.number) { // pinned meanwhile: an answer must not unpin it
+		m.status = styDim.Render(msg.owner + "/#" + strconv.Itoa(msg.number) + " is already pinned")
+		return m, nil
+	}
+	url := msg.p.URL
+	if !pins.WebURL(url) {
+		url = "" // an http-only server: pin anyway, o then says it has no address
+	}
+	return m.togglePinnedProject(pins.Project{Host: msg.host, Owner: msg.owner, Number: msg.number, Title: msg.p.Title, URL: url})
 }
 
 func (m model) togglePinnedProject(p pins.Project) (model, tea.Cmd) {
-	on, err := m.pinStore().ToggleProject(p)
+	if m.pins == nil {
+		m.pins = pins.Memory()
+	}
+	on, err := m.pins.ToggleProject(p)
 	if err != nil {
 		m.status = styErr.Render("✗ " + ghcli.CleanText(err.Error()))
 		return m, nil
-	}
-	if m.pins == nil {
-		m.pins = m.pinStore()
 	}
 	done := "removed pin " + projectKey(p)
 	if on {

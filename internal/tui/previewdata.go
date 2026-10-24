@@ -148,7 +148,7 @@ func (m model) previewTarget() (key previewKey, tg ghcli.RepoRef, updated string
 		st := m.boardSt()
 		it, found := boardItem(st.data, r.id)
 		owner, name, cut := strings.Cut(it.Repo, "/")
-		if !found || !cut || owner == "" || name == "" || (it.Type != "Issue" && it.Type != "PullRequest") {
+		if !found || !cut || !validRepoName(ghcli.RepoRef{Owner: owner, Name: name}) || (it.Type != "Issue" && it.Type != "PullRequest") {
 			return
 		}
 		host := m.board.Host

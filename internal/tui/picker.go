@@ -182,7 +182,9 @@ func (m model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if p.sel >= 0 && p.sel < len(rows) && !rows[p.sel].cwd {
 			ref := rows[p.sel].ref
 			pr := pins.Repo{Host: ref.Host, Repo: ref.Owner + "/" + ref.Name}
-			m, _ = m.togglePinnedRepo(pr)
+			var cmd tea.Cmd
+			m, cmd = m.togglePinnedRepo(pr)
+			return m, cmd
 		}
 		return m, nil
 	case tea.KeyUp, tea.KeyCtrlP:

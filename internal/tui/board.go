@@ -247,7 +247,7 @@ func boardBody(m model) string {
 			labels = append(labels, l)
 		}
 	}
-	b.WriteString(strings.Join(labels, " ") + "\n")
+	b.WriteString(fitTabs(labels, st.tab, m.width) + "\n")
 	b.WriteString(m.tableBody())
 	switch {
 	case !st.loaded && m.err == nil:
@@ -310,6 +310,9 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		if url == "" {
 			url = st.data.URL
 		}
+		if url != "" && !pins.WebURL(url) {
+			url = ""
+		}
 		if url == "" {
 			m.status = styDim.Render("no address known for this item")
 			return m, nil, true
@@ -347,7 +350,12 @@ func (m model) openBoardItem(st boardState, id string) (model, tea.Cmd, bool) {
 	if host == "github.com" {
 		host = ""
 	}
-	m.target = ghcli.RepoRef{Host: host, Owner: owner, Name: name}
+	ref := ghcli.RepoRef{Host: host, Owner: owner, Name: name}
+	if !validRepoName(ref) {
+		m.status = styErr.Render("✗ this card names a repo gh-9s will not use")
+		return m, nil, true
+	}
+	m.target = ref
 	m.prTarget = m.target
 	if it.Type == "PullRequest" {
 		m.pr = fmt.Sprint(it.Number)

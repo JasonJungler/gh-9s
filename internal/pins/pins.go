@@ -85,6 +85,9 @@ func (p Project) validate() error {
 }
 
 // webURL accepts only plain https addresses: the URL is handed to the browser.
+// WebURL reports whether s is a plain https address, safe to hand to the browser.
+func WebURL(s string) bool { return webURL(s) }
+
 func webURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && !strings.ContainsAny(s, " \t\r\n\x1b")

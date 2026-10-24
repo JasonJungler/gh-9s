@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/pins"
@@ -98,7 +99,28 @@ func (m model) favTabBar() string {
 			parts = append(parts, styDim.Render(label))
 		}
 	}
-	return strings.Join(parts, styDim.Render("|"))
+	return fitTabs(parts, m.favTab, m.width, styDim.Render("|"))
+}
+
+// fitTabs joins tab labels on one line no wider than width, dropping tabs from the left (shown as ‹)
+// until the selected one fits, and cutting what is still too long on the right.
+func fitTabs(labels []string, sel, width int, sep ...string) string {
+	s := " "
+	if len(sep) > 0 {
+		s = sep[0]
+	}
+	if width <= 0 || len(labels) == 0 {
+		return strings.Join(labels, s)
+	}
+	start := 0
+	for start < sel && ansi.StringWidth(strings.Join(labels[start:sel+1], s))+2 > width {
+		start++
+	}
+	line := strings.Join(labels[start:], s)
+	if start > 0 {
+		line = "‹ " + line
+	}
+	return ansi.Truncate(line, width, "…")
 }
 
 func (m model) favFooter() string {
@@ -189,13 +211,13 @@ func (m model) repoTabKey(k tea.KeyMsg) (model, tea.Cmd, bool) {
 
 // togglePinnedRepo flips the pin, saves, and refreshes the tab.
 func (m model) togglePinnedRepo(r pins.Repo) (model, tea.Cmd) {
-	on, err := m.pinStore().ToggleRepo(r)
+	if m.pins == nil {
+		m.pins = pins.Memory()
+	}
+	on, err := m.pins.ToggleRepo(r)
 	if err != nil {
 		m.status = styErr.Render("✗ " + ghcli.CleanText(err.Error()))
 		return m, nil
-	}
-	if m.pins == nil {
-		m.pins = m.pinStore()
 	}
 	done := "removed pin " + repoLabel(r)
 	if on {
@@ -228,6 +250,10 @@ func (m model) pinRepoChecked(repo pins.Repo) (model, tea.Cmd) {
 func (m model) onRepoPin(msg repoPinMsg) (model, tea.Cmd) {
 	if msg.err != nil {
 		m.status = styErr.Render("✗ " + repoLabel(msg.repo) + ": " + ghcli.CleanText(msg.err.Error()))
+		return m, nil
+	}
+	if m.pinStore().HasRepo(msg.repo.Host, msg.repo.Repo) { // pinned meanwhile: an answer must not unpin it
+		m.status = styDim.Render(repoLabel(msg.repo) + " is already pinned")
 		return m, nil
 	}
 	return m.togglePinnedRepo(msg.repo)
