@@ -102,7 +102,8 @@ func TestImages(t *testing.T) {
 func TestNoEscapeSequenceSurvives(t *testing.T) {
 	in := "hi \x1b[31m\x1b]52;c;AAAA\x07 x\n\n```\n\x1b]0;title\x07code\n```\n\n| \x1b[2J |\n|-|\n| y |\n\n[\x1b]52;c;QQ\x07](https://x)"
 	d := Render(in, 40)
-	if strings.ContainsRune(plain(d), 0x1b) || strings.ContainsRune(strings.Join(d.Lines, ""), 0x07) {
+	// tests run without colour, so the renderer's own styling adds no ESC: any ESC seen came from the text
+	if raw := strings.Join(d.Lines, ""); strings.ContainsRune(raw, 0x1b) || strings.ContainsRune(raw, 0x07) {
 		t.Errorf("an escape sequence from the text reached the output: %q", d.Lines)
 	}
 }
