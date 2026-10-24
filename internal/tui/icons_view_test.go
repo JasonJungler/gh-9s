@@ -172,7 +172,7 @@ func TestTintedCellsAreDrawnInTheirColourExceptOnTheSelectedRow(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
 	useNerd(t)
-	m := model{view: viewPRs, width: 120, height: 20, tbl: prRows([]prListItem{{Number: 1, Title: "a"}, {Number: 2, Title: "b", Draft: true}}, "")}
+	m := model{view: viewPRs, width: 120, height: 20, tbl: prRows([]prListItem{{Number: 1, Title: "a"}, {Number: 2, Title: "b", Draft: true}, {Number: 3, Title: "c"}}, "")}
 	body := m.tableBody()
 	start := func(c string) string { // the escape code lipgloss opens a colour with
 		return strings.Split(lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("x"), "x")[0]
@@ -181,6 +181,9 @@ func TestTintedCellsAreDrawnInTheirColourExceptOnTheSelectedRow(t *testing.T) {
 		t.Errorf("the draft's number cell should be grey:\n%q", body)
 	}
 	lines := strings.Split(body, "\n")
+	if !strings.Contains(lines[3], start("2")) { // an open PR's number is green, and nothing else on its row is
+		t.Errorf("the open PR's number cell should be green:\n%q", lines[3])
+	}
 	if strings.Contains(lines[1], start("2")) { // line 1 is the selected row: reverse video only
 		t.Errorf("the selected row keeps one style:\n%q", lines[1])
 	}
