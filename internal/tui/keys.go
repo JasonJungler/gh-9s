@@ -84,6 +84,8 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode, m.input = modeFilter, m.filter
 	case ":":
 		m.mode, m.input, m.histPos = modeCommand, "", -1
+	case "0":
+		return m.goTop(viewInbox)
 	case "1":
 		return m.goTop(viewRuns)
 	case "2":
@@ -289,6 +291,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m.goTop(viewPRs)
 	case "issues", "issue", "is":
 		return m.goTop(viewIssues)
+	case "inbox", "in":
+		return m.goTop(viewInbox)
 	case "fav", "favs", "favorites":
 		return m.goTop(viewFavs)
 	case "cpr", "checks":
@@ -561,6 +565,9 @@ func (m model) popBack() (model, tea.Cmd, bool) {
 	}
 	if prev == viewFavs {
 		m.target = m.base
+	}
+	if prev == viewInbox {
+		m.target, m.prTarget = m.base, m.base // the inbox is not about one repo
 	}
 	if prev == viewChecks || prev == viewPRDetail {
 		m.target = m.prTarget // a check may have taken us to a run in another repo

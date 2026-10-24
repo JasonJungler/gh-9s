@@ -10,7 +10,7 @@ import (
 
 // builtinCommands are the commands the command bar suggests, in the order they are offered.
 // (Short forms such as r, wf and pr keep working; they are just not suggested.)
-var builtinCommands = []string{"runs", "workflows", "pulls", "issues", "fav", "repo", "cpr", "quit"}
+var builtinCommands = []string{"runs", "workflows", "pulls", "issues", "inbox", "fav", "repo", "cpr", "quit"}
 
 const maxCompletions = 8
 

@@ -98,7 +98,7 @@ func TestCompletions(t *testing.T) {
 		{"WO", []string{"workflows"}},
 		{"r", []string{"runs", "repo"}},
 		{"pr", []string{"prod"}}, // a favorite's alias
-		{"i", []string{"issues"}},
+		{"i", []string{"issues", "inbox"}},
 		{"zz", nil},
 		{"workflows", nil}, // already complete
 		{"repo ac", []string{"repo acme/web", "repo acme/api"}}, // recent first, then the cached list

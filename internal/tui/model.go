@@ -29,6 +29,7 @@ const (
 	viewDiff
 	viewIssues
 	viewIssue
+	viewInbox
 )
 
 var viewNames = map[viewKind]string{
