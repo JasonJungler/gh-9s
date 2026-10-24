@@ -66,7 +66,7 @@ const (
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:20){nodes{login}} labels(first:20){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:100){nodes{name layout filter configuration{visibleFields(first:30){nodes{... on ProjectV2Field{name dataType}}}} sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValues(first:30){nodes{__typename ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{name}}}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
+const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:100){nodes{name layout filter fields(first:30){nodes{... on ProjectV2Field{name dataType}}} sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValues(first:30){nodes{__typename ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{name}}}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
 
 type nameNodes struct {
 	Nodes []struct {
@@ -115,14 +115,12 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 						Nodes []struct {
 							Name, Layout string
 							Filter       *string
-							Config       *struct {
-								Visible struct {
-									Nodes []struct {
-										Name     string `json:"name"`
-										DataType string `json:"dataType"`
-									} `json:"nodes"`
-								} `json:"visibleFields"`
-							} `json:"configuration"`
+							Fields       struct {
+								Nodes []struct {
+									Name     string `json:"name"`
+									DataType string `json:"dataType"`
+								} `json:"nodes"`
+							} `json:"fields"`
 							Sort struct {
 								Nodes []struct {
 									Field     *struct{ Name string } `json:"field"`
@@ -220,11 +218,9 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		if len(v.Sort.Nodes) > 0 && v.Sort.Nodes[0].Field != nil {
 			pv.SortField, pv.SortDesc = CleanText(v.Sort.Nodes[0].Field.Name), v.Sort.Nodes[0].Direction == "DESC"
 		}
-		if v.Config != nil {
-			for _, f := range v.Config.Visible.Nodes {
-				if f.DataType == "DATE" && f.Name != "" {
-					pv.DateFields = append(pv.DateFields, oneLine(CleanText(f.Name)))
-				}
+		for _, f := range v.Fields.Nodes {
+			if f.DataType == "DATE" && f.Name != "" {
+				pv.DateFields = append(pv.DateFields, oneLine(CleanText(f.Name)))
 			}
 		}
 		p.Views = append(p.Views, pv)

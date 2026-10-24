@@ -518,3 +518,29 @@ func TestComingBackAfterTheDataWentStaleKeepsTheCard(t *testing.T) {
 		t.Errorf("selected %q, want %q", got.id, r.id)
 	}
 }
+
+func TestRoadmapWithItsOwnSortFollowsThatSort(t *testing.T) {
+	m, _, _ := writeBoardWith(t, func(p *ghcli.Project) {
+		p.Views = []ghcli.ProjectView{{Name: "Plan", Layout: "ROADMAP_LAYOUT", DateFields: []string{"Target date"}, SortField: "Title"}}
+		p.Items[0].Dates = map[string]string{"Target date": "2026-11-05"} // Fix login: first by date, second by title
+		p.Items[1].Dates = map[string]string{"Target date": "2026-12-01"} // Add retry
+	})
+	m = keyAll(m, "]")
+	out := ansi.Strip(m.View())
+	if strings.Index(out, "Add retry") > strings.Index(out, "Fix login") { // Title order: Add < Fix
+		t.Fatalf("title sort not applied:\n%s", out)
+	}
+	if !strings.Contains(out, "2026-12-01") {
+		t.Errorf("date column missing:\n%s", out)
+	}
+}
+
+func TestRoadmapUnknownSortIsNamed(t *testing.T) {
+	m, _, _ := writeBoardWith(t, func(p *ghcli.Project) {
+		p.Views = []ghcli.ProjectView{{Name: "Plan", Layout: "ROADMAP_LAYOUT", DateFields: []string{"Target date"}, SortField: "Priority"}}
+	})
+	m = keyAll(m, "]")
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "sort by Priority not applied") {
+		t.Errorf("unknown sort not named:\n%s", out)
+	}
+}

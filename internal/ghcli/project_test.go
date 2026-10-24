@@ -251,7 +251,7 @@ func TestFirstPageFailureIsStillAnError(t *testing.T) {
 
 func TestDateValuesAndRoadmapDateFieldsAreRead(t *testing.T) {
 	b := `{"data":{"repositoryOwner":{"projectV2":{"id":"P","title":"P","closed":false,
-"views":{"nodes":[{"name":"Road","layout":"ROADMAP_LAYOUT","configuration":{"visibleFields":{"nodes":[{"name":"Title","dataType":"TITLE"},{"name":"Target date","dataType":"DATE"},{"name":"Start","dataType":"DATE"}]}}}]},
+"views":{"nodes":[{"name":"Road","layout":"ROADMAP_LAYOUT","fields":{"nodes":[{"name":"Title","dataType":"TITLE"},{"name":"Target date","dataType":"DATE"},{"name":"Start","dataType":"DATE"}]}}]},
 "items":{"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"id":"i","fieldValues":{"nodes":[{"__typename":"ProjectV2ItemFieldDateValue","date":"2026-11-03","field":{"name":"Target date"}},{"__typename":"ProjectV2ItemFieldTextValue"}]},"content":{"__typename":"Issue","number":1,"title":"t","state":"OPEN","url":"u","updatedAt":"t","repository":{"nameWithOwner":"a/b"}}}]}}}}}`
 	p, _, _, err := ParseProjectPage([]byte(b))
 	if err != nil || len(p.Items) != 1 || p.Items[0].Dates["Target date"] != "2026-11-03" || len(p.Items[0].Dates) != 1 {
@@ -271,5 +271,11 @@ func TestMoreViewsThanReadAreSaid(t *testing.T) {
 	p, _, _, err := ParseProjectPage([]byte(b))
 	if err != nil || !strings.Contains(p.Note, "100 views") {
 		t.Fatalf("note %q err %v", p.Note, err)
+	}
+}
+
+func TestQueryUsesViewFieldsNotConfiguration(t *testing.T) {
+	if strings.Contains(projectQuery, "configuration") || !strings.Contains(projectQuery, "fields(first:30){nodes{... on ProjectV2Field{name dataType}}}") {
+		t.Error("view fields must be read with the long-standing fields(), which older Enterprise servers have")
 	}
 }

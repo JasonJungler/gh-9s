@@ -587,6 +587,12 @@ func (st boardState) viewItems() (idx []int, note string) {
 	idx = kept
 	if v.Layout == "ROADMAP_LAYOUT" {
 		field := st.roadmapField()
+		if v.SortField != "" { // the view's own sort wins, as on GitHub
+			if pfilter.Sort(idx, p.Items, p.StatusOrder, v.SortField, v.SortDesc) {
+				return idx, strings.Join(notes, "; ")
+			}
+			notes = append(notes, "sort by "+v.SortField+" not applied")
+		}
 		if field == "" {
 			notes = append(notes, "this roadmap shows no date field; listing in the Project's order")
 		} else {
