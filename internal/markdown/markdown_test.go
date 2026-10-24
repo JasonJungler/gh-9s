@@ -169,7 +169,7 @@ func TestHostileNestingIsBoundedAndKeepsItsText(t *testing.T) {
 
 func TestRenderingTheSameTextTwiceParsesOnce(t *testing.T) {
 	parses = 0
-	src := "same text " + t.Name()
+	src := "same text " + t.Name() + time.Now().String() // unique per run: results are cached across -count runs
 	a, b := Render(src, 30), Render(src, 30)
 	if parses != 1 || plain(a) != plain(b) {
 		t.Errorf("parsed %d times", parses)
