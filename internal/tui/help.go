@@ -31,7 +31,17 @@ func (m model) helpGroups() []helpGroup {
 	case viewRuns:
 		gs = append(gs, helpGroup{"Runs", []helpKey{{"j k", "move"}, {"enter", "job graph of the run"}, {"l", "full log in the pager"}, {"L", "log of the failed jobs"},
 			{"w", "watch the run (gh run watch)"}, {"r", "re-run (asks first)"}, {"F", "re-run the failed jobs"}, {"c", "cancel"}, {"d", "delete"}, {"o", "open in the browser"}}})
-	case viewWorkflows, viewFavs:
+	case viewFavs:
+		gs = append(gs, helpGroup{"Favorites tabs", []helpKey{{"tab l", "next tab (Workflows, Repos, Projects)"}, {"shift+tab h", "previous tab"}}})
+		switch m.favTab {
+		case favTabRepos:
+			gs = append(gs, helpGroup{"Repos", []helpKey{{"j k", "move"}, {"enter", "switch to the repo (like :repo)"}, {"a", "pin a repo"}, {"f d", "unpin (asks first)"}, {"o", "open in the browser"}}})
+		case favTabProjects:
+			gs = append(gs, helpGroup{"Projects", []helpKey{{"j k", "move"}, {"enter", "open the board"}, {"a", "pin a Project"}, {"f d", "unpin (asks first)"}, {"o", "open in the browser"}}})
+		default:
+			gs = append(gs, helpGroup{"Workflows", []helpKey{{"j k", "move"}, {"enter", "its runs"}, {"t", "trigger (form)"}, {"f", "unfavorite"}, {"a", "set an alias"}, {"o", "open in the browser"}}})
+		}
+	case viewWorkflows:
 		gs = append(gs, helpGroup{"Workflows / favorites", []helpKey{{"j k", "move"}, {"enter", "its runs"}, {"t", "trigger (form)"}, {"f", "favorite / unfavorite"},
 			{"a", "set an alias"}, {"e", "enable / disable (workflows)"}, {"o", "open in the browser"}}})
 	case viewPRs:

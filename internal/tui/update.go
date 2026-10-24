@@ -150,6 +150,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.view != m.view {
 			return m, nil
 		}
+		if msg.view == viewFavs && msg.tab != m.favTab {
+			return m, nil // the tab was changed while this was loading
+		}
 		if (msg.view == viewGraph || msg.view == viewJobs || msg.view == viewLogs) && msg.runID != "" && msg.runID != m.runID {
 			return m, nil // a late answer about a run we have left
 		}
@@ -227,6 +230,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = m.recents.Save() // best effort: a failed save only loses the shortcut
 		}
 		return m, m.switchRepo(msg.ref)
+	case repoPinMsg:
+		return m.onRepoPin(msg)
 	case gotoMsg:
 		if msg.err != nil {
 			m.status = styErr.Render("✗ " + msg.err.Error())

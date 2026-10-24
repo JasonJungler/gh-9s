@@ -10,6 +10,7 @@ import (
 	"github.com/MurabitoB/gh-9s/internal/favorites"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
+	"github.com/MurabitoB/gh-9s/internal/pins"
 	"github.com/MurabitoB/gh-9s/internal/recent"
 	"github.com/MurabitoB/gh-9s/internal/settings"
 	"github.com/MurabitoB/gh-9s/internal/workflow"
@@ -116,6 +117,9 @@ type model struct {
 	curRepo      ghcli.RepoRef                 // repo of the current directory, host included
 	latest       map[string]latestEntry
 	aliasFor     favorites.Favorite
+	pins         *pins.Store // pinned repos and Projects; nil means none are kept (see pinStore)
+	favTab       int         // the tab of the favorites screen, kept for the session
+	pinDel       *pins.Repo  // the pinned repo a confirm dialog is about
 
 	prChecks     map[string]prCheck // the checks column of the PR list, by PR number, for prChecksKey
 	prChecksKey  string             // which repo and filter prChecks is of
@@ -142,6 +146,7 @@ type dataMsg struct {
 	run    ghcli.RunMeta // the run's own status/conclusion (graph and jobs views)
 	runID  string        // which run this data is of: a late answer for another run is dropped
 	specs  map[string][]workflow.JobSpec
+	tab    int // favorites: which tab this table is of; a late answer for another tab is dropped
 	err    error
 }
 type actionMsg struct {
@@ -182,6 +187,12 @@ func Run() error {
 		m.banner = "favorites disabled: " + err.Error()
 	} else {
 		m.favs = fs
+	}
+	if ps, err := pins.Load(pins.DefaultPath()); err != nil {
+		m.banner = joinBanner(m.banner, "pins are kept for this session only: "+err.Error())
+		m.pins = pins.Memory()
+	} else {
+		m.pins = ps
 	}
 	var banner string
 	m.settings, banner = loadSettings()

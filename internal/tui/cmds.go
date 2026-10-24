@@ -9,6 +9,7 @@ import (
 	"github.com/MurabitoB/gh-9s/internal/favorites"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
+	"github.com/MurabitoB/gh-9s/internal/pins"
 	"github.com/MurabitoB/gh-9s/internal/workflow"
 )
 
@@ -29,6 +30,12 @@ func (m model) fetch() tea.Cmd {
 		snap = &favorites.Store{Items: append([]favorites.Favorite(nil), m.favs.Items...)}
 	}
 	cache := m.latest
+	tab := m.favTab
+	var pinSnap *pins.Store
+	if v == viewFavs {
+		ps := m.pinStore()
+		pinSnap = &pins.Store{Repos: append([]pins.Repo(nil), ps.Repos...), Projects: append([]pins.Project(nil), ps.Projects...)}
+	}
 	specCache := m.specs
 	return func() tea.Msg {
 		var t table
@@ -73,11 +80,15 @@ func (m model) fetch() tea.Cmd {
 			g := graph.Build(gjobs, sp)
 			gr = &g
 		case viewFavs:
-			if snap != nil {
+			if tab == favTabRepos {
+				t = reposTable(pinSnap)
+			} else if tab == favTabProjects {
+				t = projectsTable(pinSnap)
+			} else if snap != nil {
 				t, latest = fetchFavorites(snap, cache, time.Now())
 			}
 		}
-		return dataMsg{view: v, runID: run, tbl: t, logs: logs, latest: latest, graph: gr, jobs: gjobs, specs: newSpecs, run: meta, err: err}
+		return dataMsg{view: v, runID: run, tbl: t, logs: logs, latest: latest, graph: gr, jobs: gjobs, specs: newSpecs, run: meta, tab: tab, err: err}
 	}
 }
 

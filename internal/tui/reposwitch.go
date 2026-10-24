@@ -60,6 +60,9 @@ func (m *model) switchRepo(ref ghcli.RepoRef) tea.Cmd {
 	m.back, m.wfID, m.wfName, m.pr = nil, "", "", ""
 	m.runID, m.graph, m.gsel, m.expanded, m.runStatus, m.runMeta = "", graph.Graph{}, 0, nil, "", ghcli.RunMeta{}
 	v := m.view
+	if v == viewFavs && m.favTab != favTabWorkflows {
+		v = viewRuns // pinned repos and Projects are not about the repo just chosen
+	}
 	switch v {
 	case viewRuns, viewWorkflows, viewPRs, viewFavs, viewIssues:
 	default:

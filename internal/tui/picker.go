@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/MurabitoB/gh-9s/internal/pins"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -177,6 +178,13 @@ func (m model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ref := row.ref
 		m.status = ui.Dim.Render("checking " + displayRef(ref) + "…")
 		return m, func() tea.Msg { return repoSwitchedMsg{ref, checkRepo(ref)} }
+	case tea.KeyCtrlF:
+		if p.sel >= 0 && p.sel < len(rows) && !rows[p.sel].cwd {
+			ref := rows[p.sel].ref
+			pr := pins.Repo{Host: ref.Host, Repo: ref.Owner + "/" + ref.Name}
+			m, _ = m.togglePinnedRepo(pr)
+		}
+		return m, nil
 	case tea.KeyUp, tea.KeyCtrlP:
 		p.sel = max(p.sel-1, 0)
 	case tea.KeyDown, tea.KeyCtrlN:
@@ -268,14 +276,18 @@ func (m model) pickerView() string {
 		start = p.sel - h + 1
 	}
 	for i := start; i < len(rows) && i < start+h; i++ {
-		line := strings.TrimRight(trunc(rows[i].label, max(m.width-4, 20)), " ")
+		label := rows[i].label
+		if !rows[i].cwd && m.repoPinned(rows[i].ref) {
+			label = "★ " + label
+		}
+		line := strings.TrimRight(trunc(label, max(m.width-4, 20)), " ")
 		if i == p.sel {
 			b.WriteString(ui.Sel.Render(" ▸ "+line) + "\n")
 		} else {
 			b.WriteString("   " + line + "\n")
 		}
 	}
-	b.WriteString("\n" + ui.Dim.Render(" ↑↓ select   enter switch   tab scope   esc cancel") + "\n")
+	b.WriteString("\n" + ui.Dim.Render(" ↑↓ select   enter switch   ctrl+f pin ★   tab scope   esc cancel") + "\n")
 	return b.String()
 }
 
@@ -285,4 +297,9 @@ func skippedNote(orgs []string) string {
 		return ""
 	}
 	return "⚠ could not be listed, so the list may be partial: " + strings.Join(orgs, ", ")
+}
+
+// repoPinned reports whether ref is one of the pinned repos.
+func (m model) repoPinned(ref ghcli.RepoRef) bool {
+	return m.pinStore().HasRepo(ref.Host, ref.Owner+"/"+ref.Name)
 }

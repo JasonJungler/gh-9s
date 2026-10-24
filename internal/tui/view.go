@@ -23,7 +23,7 @@ func (m model) maxTop() int { return max(0, len(m.logs)-m.logHeight()) }
 
 // bodyHeight is how many table rows fit; the prompt box, when open, takes three lines of the screen.
 func (m model) bodyHeight() int {
-	h := m.height - 5 - m.promptRows() - m.inboxExtraRows()
+	h := m.height - 5 - m.promptRows() - m.inboxExtraRows() - m.favExtraRows()
 	if !m.paneList && m.previewShown() {
 		h -= 2 // the list sits in a box
 	}
@@ -172,6 +172,9 @@ func (m model) View() string {
 		return b.String() + m.logBody() + m.footer()
 	}
 
+	if m.view == viewFavs {
+		b.WriteString(m.favTabBar() + "\n")
+	}
 	if m.previewShown() {
 		b.WriteString(m.withPane(model.tableBody))
 	} else {
@@ -322,7 +325,7 @@ func (m model) footer() string {
 	case viewPRs:
 		keys = "enter detail  u mine  e review-requested  a all  o open"
 	case viewFavs:
-		keys = "enter runs  f unfavorite  a alias"
+		keys = m.favFooter()
 	case viewChecks:
 		keys = "enter/o open check  esc back"
 	case viewJobs:

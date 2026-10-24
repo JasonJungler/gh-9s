@@ -30,7 +30,8 @@ Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release
 | `3` / `:pr` | open pull requests (`*` marks the current branch); `enter` opens one |
 | `4` / `:issues` | issues; `enter` opens one |
 | `P` / `:cpr` | checks of the current branch's PR |
-| `:fav` | favorite workflows from every repo, with the latest run's status |
+| `:fav` | favorites in three tabs (`tab`/`shift+tab`/`h`/`l`): **Workflows** from every repo with the latest run's status, pinned **Repos** (`enter` switches to one), pinned **Projects** |
+| `:fav repo [OWNER/NAME]` | pin the current (or the given) repo |
 | `:<alias>` | open the runs of the favorite with that alias |
 | `:repo` | open the repo picker (below) |
 | `:repo OWNER/REPO` | switch every view to another repo (`HOST/OWNER/REPO` for another host). The repo is checked first. The current-branch PR (`P`, `:cpr`) only exists in the current directory's repo. |
@@ -72,6 +73,8 @@ The `:` command bar, `/` filter, log search and alias entry open in a box under 
 **Runs** — `enter` job graph · `l` full log in pager · `L` failed log · `w` watch (`gh run watch`) · `r` rerun · `F` rerun failed · `c` cancel · `d` delete (each asks first, naming the repo and run, and says why when it does not apply; the same keys work on the job graph and the job list, and an accepted re-run goes to that run's graph and is watched again) · on the job graph `f` opens the log of the first failed job at its first error
 
 **Workflows / favorites** — `enter` runs · `t` trigger form · `f` favorite/unfavorite · `a` set alias · `e` enable/disable
+
+**Favorites tabs (`:fav`)** — `tab`/`l` next tab · `shift+tab`/`h` previous · Repos: `enter` switch to the repo · `a` pin · `f`/`d` unpin · `o` open. In the `:repo` picker pinned repos carry a ★ and `ctrl+f` pins or unpins the selected one.
 
 **Job graph** (watching a run)
 - `hjkl` or arrows move between jobs, `enter` opens the job's log, `v` switches style, `ctrl-d/u` scroll
@@ -115,6 +118,8 @@ Every dialog names the repo and number it acts on (`acme/api#482`). Approving, r
 ## Favorites
 
 A favorite is a workflow in a specific host/repo (`github.com/acme/api · deploy.yml`), stored in your personal config file (`~/Library/Application Support/gh-9s/favorites.json` on macOS, `~/.config/gh-9s/favorites.json` on Linux), never inside a repo. Give one an alias with `a`, then type `:<alias>` to jump to its runs. Aliases cannot shadow built-in commands. If the file is unreadable, favorites are disabled for the session and the file is left untouched.
+
+Pinned repos and Projects live in `pins.json` next to it (`GH9S_PINS` overrides the path); a broken `pins.json` is never overwritten, pins then last for the session only.
 
 ## Project layout
 

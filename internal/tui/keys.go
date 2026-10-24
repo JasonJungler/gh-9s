@@ -62,6 +62,11 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.previewScroll(step), nil
 	}
+	if m.view == viewFavs {
+		if next, cmd, ok := m.favTabKey(k); ok {
+			return next, cmd
+		}
+	}
 	if m.view == viewLogs {
 		if next, cmd, ok := m.logKey(k); ok {
 			return next, cmd
@@ -305,6 +310,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 	c = m.resolveCommand(c)
 	if f := strings.Fields(c); len(f) > 0 && strings.ToLower(f[0]) == "repo" {
 		return m.repoCommand(f[1:])
+	} else if len(f) > 0 && (strings.ToLower(f[0]) == "fav" || strings.ToLower(f[0]) == "favs" || strings.ToLower(f[0]) == "favorites") && len(f) > 1 {
+		return m.favCommand(f[1:])
 	} else if len(f) > 0 && strings.ToLower(f[0]) == "set" {
 		return m.setCommand(f[1:])
 	}
@@ -328,7 +335,7 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		cmd := m.push(viewSettings)
 		return m, cmd
 	case "fav", "favs", "favorites":
-		return m.goTop(viewFavs)
+		return m.favCommand(nil)
 	case "cpr", "checks":
 		return m.currentPR()
 	case "q", "quit", "exit":
