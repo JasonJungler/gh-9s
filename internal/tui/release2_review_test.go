@@ -223,10 +223,10 @@ func TestPickerReusesTheAccessListWithinTheTTL(t *testing.T) {
 func TestAFailedRepoListIsNotCached(t *testing.T) {
 	f := installPickerFakes(t, nil)
 	calls := 0
-	listRepos = func(host string) ([]ghcli.RepoInfo, error) {
+	listRepos = func(host string) ([]ghcli.RepoInfo, []string, error) {
 		calls++
 		f.listHosts = append(f.listHosts, host)
-		return nil, errNoPermission
+		return nil, nil, errNoPermission
 	}
 	m := pickerModel(t)
 	m = openPicker(t, m)

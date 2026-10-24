@@ -63,15 +63,16 @@ const repoFields = "nameWithOwner,description,primaryLanguage,stargazerCount,upd
 
 // ListAccessibleRepos lists the repos the logged-in user can reach through their own account
 // and the organisations they belong to (up to 200 each), most recently updated first. An
-// organisation that cannot be listed is skipped; the call fails only if the user's own list does.
-func ListAccessibleRepos(host string) ([]RepoInfo, error) {
+// organisation that cannot be listed is skipped and reported in skipped, so the caller can say
+// the list may be partial; the call fails only if the user's own list does.
+func ListAccessibleRepos(host string) (repos []RepoInfo, skipped []string, err error) {
 	out, err := RunHost(host, "repo", "list", "--limit", "200", "--json", repoFields)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	all, err := ParseRepoInfos(out, host)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if orgs, err := RunHost(host, "api", "user/orgs", "--jq", ".[].login"); err == nil {
 		for _, org := range strings.Fields(string(orgs)) {
@@ -80,10 +81,13 @@ func ListAccessibleRepos(host string) ([]RepoInfo, error) {
 			}
 			o, err := RunHost(host, "repo", "list", org, "--limit", "200", "--json", repoFields)
 			if err != nil {
+				skipped = append(skipped, org)
 				continue
 			}
 			if more, err := ParseRepoInfos(o, host); err == nil {
 				all = append(all, more...)
+			} else {
+				skipped = append(skipped, org)
 			}
 		}
 	}
@@ -96,7 +100,7 @@ func ListAccessibleRepos(host string) ([]RepoInfo, error) {
 		}
 	}
 	sort.SliceStable(uniq, func(i, j int) bool { return uniq[i].UpdatedAt > uniq[j].UpdatedAt })
-	return uniq, nil
+	return uniq, skipped, nil
 }
 
 func safeLogin(s string) bool {

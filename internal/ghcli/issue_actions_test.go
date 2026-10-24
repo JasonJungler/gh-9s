@@ -33,7 +33,7 @@ func TestEditIssueArgsEmptyListsAddNothing(t *testing.T) {
 }
 
 func TestEditIssueArgsKeepHostileNamesInOneArgument(t *testing.T) {
-	for _, name := range []string{"--web", "-x", "a b; rm -rf ~", "$(id)", "line\nbreak"} {
+	for _, name := range []string{"--web", "-x", "a b; rm -rf ~", "$(id)"} {
 		got := EditIssueArgs(acmeAPI, "1", []string{name}, nil, nil, nil)
 		found := false
 		for _, a := range got {
@@ -47,19 +47,28 @@ func TestEditIssueArgsKeepHostileNamesInOneArgument(t *testing.T) {
 	}
 }
 
+// gh reads --add-label / --remove-label as comma-separated lists (CSV), so a name with a comma or
+// a quote would be split or rejected unless it is quoted CSV-style.
+func TestEditIssueArgsQuoteLabelsThatGhWouldSplit(t *testing.T) {
+	got := EditIssueArgs(acmeAPI, "1", []string{"a,b", `say "hi"`, "multi\nline", "plain"}, []string{"x,y"}, nil, nil)
+	want := []string{"issue", "edit", "1",
+		`--add-label="a,b"`, `--add-label="say ""hi"""`, "--add-label=\"multi\nline\"", "--add-label=plain",
+		`--remove-label="x,y"`, "-R", "acme/api"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got\n %q\nwant\n %q", got, want)
+	}
+}
+
 func TestParseLabelNamesAndLogins(t *testing.T) {
 	labels, err := ParseLabelNames([]byte(`[{"name":"bug"},{"name":"needs triage 🚧"},{"name":""}]`))
 	if err != nil || !reflect.DeepEqual(labels, []string{"bug", "needs triage 🚧"}) {
 		t.Errorf("labels = %q err %v; want the two names, the empty one dropped", labels, err)
 	}
-	logins, err := ParseLogins([]byte(`[{"login":"erin"},{"login":"frank"}]`))
-	if err != nil || !reflect.DeepEqual(logins, []string{"erin", "frank"}) {
-		t.Errorf("logins = %q err %v", logins, err)
+	logins := ParseLoginLines([]byte("erin\nfrank\n\n  gina  \n"))
+	if !reflect.DeepEqual(logins, []string{"erin", "frank", "gina"}) {
+		t.Errorf("logins = %q; want blank lines dropped and names trimmed", logins)
 	}
 	if got, err := ParseLabelNames([]byte(`[]`)); err != nil || len(got) != 0 {
 		t.Errorf("empty list: %v %v", got, err)
-	}
-	if _, err := ParseLogins([]byte("garbage")); err == nil {
-		t.Error("garbage should be an error")
 	}
 }

@@ -31,17 +31,18 @@ var clock = time.Now
 
 type repoCacheEntry struct {
 	list []ghcli.RepoInfo
+	note string
 	at   time.Time
 }
 
 // withRepoCache returns a copy of the cache with host's entry replaced (the map is shared with
 // copies of the model, so it is never written in place).
-func withRepoCache(c map[string]repoCacheEntry, host string, list []ghcli.RepoInfo) map[string]repoCacheEntry {
+func withRepoCache(c map[string]repoCacheEntry, host string, list []ghcli.RepoInfo, note string) map[string]repoCacheEntry {
 	out := make(map[string]repoCacheEntry, len(c)+1)
 	for k, v := range c {
 		out[k] = v
 	}
-	out[host] = repoCacheEntry{list, clock()}
+	out[host] = repoCacheEntry{list, note, clock()}
 	return out
 }
 
@@ -66,12 +67,14 @@ type picker struct {
 	err     string
 	cache   []ghcli.RepoInfo // repos I have access to, loaded once when the picker opens
 	results []ghcli.RepoInfo // results of the newest global search
+	note    string           // e.g. which organisations could not be listed
 }
 
 type pickerLoadedMsg struct {
-	host  string
-	cache []ghcli.RepoInfo
-	err   error
+	host    string
+	cache   []ghcli.RepoInfo
+	skipped []string
+	err     error
 }
 
 type pickerDebounceMsg struct{ seq int }
@@ -129,13 +132,13 @@ func (m model) recentList() []ghcli.RepoRef {
 func (m *model) openPicker() tea.Cmd {
 	host := m.curTarget().Host
 	if e, ok := m.repoCache[host]; ok && clock().Sub(e.at) < repoCacheTTL {
-		m.picker = &picker{cache: e.list} // fetched recently: no new round of API calls
+		m.picker = &picker{cache: e.list, note: e.note} // fetched recently: no new round of API calls
 		return nil
 	}
 	m.picker = &picker{loading: true}
 	return func() tea.Msg {
-		l, err := listRepos(host)
-		return pickerLoadedMsg{host, l, err}
+		l, skipped, err := listRepos(host)
+		return pickerLoadedMsg{host, l, skipped, err}
 	}
 }
 
@@ -146,8 +149,9 @@ func (p *picker) queryChanged() tea.Cmd {
 	if !p.global {
 		return nil
 	}
+	p.results = nil // what is shown must be an answer to the query as typed now
 	if utf8.RuneCountInString(strings.TrimSpace(p.query)) < minGlobalQuery {
-		p.results, p.err, p.loading = nil, "", false
+		p.err, p.loading = "", false
 		return nil
 	}
 	return debounce(p.seq)
@@ -210,8 +214,8 @@ func (m model) pickerMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			p.err = msg.err.Error()
 		} else {
-			p.cache = msg.cache
-			m.repoCache = withRepoCache(m.repoCache, msg.host, msg.cache)
+			p.cache, p.note = msg.cache, skippedNote(msg.skipped)
+			m.repoCache = withRepoCache(m.repoCache, msg.host, msg.cache, p.note)
 		}
 	case pickerDebounceMsg:
 		if msg.seq != p.seq {
@@ -252,6 +256,8 @@ func (m model) pickerView() string {
 		b.WriteString(ui.Err.Render(" "+p.err) + "\n")
 	case p.loading:
 		b.WriteString(ui.Dim.Render(" loading…") + "\n")
+	case p.note != "":
+		b.WriteString(ui.Dim.Render(" "+p.note) + "\n")
 	default:
 		b.WriteString("\n")
 	}
@@ -271,4 +277,12 @@ func (m model) pickerView() string {
 	}
 	b.WriteString("\n" + ui.Dim.Render(" ↑↓ select   enter switch   tab scope   esc cancel") + "\n")
 	return b.String()
+}
+
+// skippedNote words the warning for organisations whose repos could not be listed.
+func skippedNote(orgs []string) string {
+	if len(orgs) == 0 {
+		return ""
+	}
+	return "⚠ could not be listed, so the list may be partial: " + strings.Join(orgs, ", ")
 }

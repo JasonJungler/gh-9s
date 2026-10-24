@@ -12,6 +12,7 @@ import (
 )
 
 type pickerFakes struct {
+	skipped      []string // organisations the fake could not list
 	listHosts    []string
 	searchHosts  []string
 	searchCalls  []string
@@ -29,9 +30,9 @@ func installPickerFakes(t *testing.T, access []ghcli.RepoInfo) *pickerFakes {
 	t.Helper()
 	f := &pickerFakes{searchResult: map[string][]ghcli.RepoInfo{}}
 	oldList, oldSearch, oldDebounce := listRepos, searchRepos, debounce
-	listRepos = func(host string) ([]ghcli.RepoInfo, error) {
+	listRepos = func(host string) ([]ghcli.RepoInfo, []string, error) {
 		f.listHosts = append(f.listHosts, host)
-		return access, nil
+		return access, f.skipped, nil
 	}
 	searchRepos = func(host, q string, limit int) ([]ghcli.RepoInfo, error) {
 		f.searchHosts = append(f.searchHosts, host)
@@ -265,5 +266,36 @@ func TestPickerShowsHostOnlyForNonDefaultHosts(t *testing.T) {
 	}
 	if got := displayRef(ghcli.RepoRef{Host: "ghe.corp.com", Owner: "a", Name: "b"}); got != "ghe.corp.com/a/b" {
 		t.Errorf("enterprise host: %q", got)
+	}
+}
+
+func TestPickerTellsWhenSomeOrganisationsCouldNotBeListed(t *testing.T) {
+	f := installPickerFakes(t, []ghcli.RepoInfo{info("acme/web")})
+	f.skipped = []string{"big-org", "locked-org"}
+	m := openPicker(t, pickerModel(t))
+	v := m.View()
+	if !strings.Contains(v, "big-org") || !strings.Contains(v, "locked-org") || !strings.Contains(v, "could not be listed") {
+		t.Errorf("the picker should say the list may be partial:\n%s", v)
+	}
+	// and still says so when the list comes from the cache
+	m = pickKeys(t, m, "esc")
+	m = openPicker(t, m)
+	if v := m.View(); !strings.Contains(v, "big-org") {
+		t.Errorf("a cached list must keep its warning:\n%s", v)
+	}
+}
+
+func TestGlobalSearchClearsOldResultsWhenTheQueryChanges(t *testing.T) {
+	f := installPickerFakes(t, nil)
+	f.searchResult["api"] = []ghcli.RepoInfo{info("cli/api-new")}
+	m := openPicker(t, pickerModel(t))
+	m = pickKeys(t, m, "tab")
+	m = typeText(t, m, "api")
+	if rows := m.picker.rows(m.curRepo, nil); len(rows) != 2 {
+		t.Fatalf("setup: rows = %+v", rows)
+	}
+	m = pickKeys(t, m, "x") // the query is now "apix": the old results are not answers to it
+	for _, r := range m.picker.rows(m.curRepo, nil)[1:] {
+		t.Errorf("stale row %q is still shown for the new query", r.label)
 	}
 }

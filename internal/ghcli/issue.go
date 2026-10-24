@@ -1,6 +1,9 @@
 package ghcli
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // IssueFilter narrows the issue list. State is "open", "closed" or "all" ("" means open).
 type IssueFilter struct {
@@ -104,16 +107,22 @@ func ReopenIssueArgs(r RepoRef, number string) []string {
 
 // EditIssueArgs is the `gh issue edit` command for label and assignee changes. Every name is
 // its own --flag=value argument, so a name with spaces, an emoji, or a leading "-" stays one value.
+// gh reads the label flags as comma-separated lists, so label names are quoted CSV-style when they
+// hold a comma, a quote or a line break (user logins cannot).
 func EditIssueArgs(r RepoRef, number string, addLabels, removeLabels, addAssignees, removeAssignees []string) []string {
 	a := []string{"issue", "edit", number}
 	for _, group := range []struct {
 		flag  string
 		names []string
+		csv   bool
 	}{
-		{"--add-label=", addLabels}, {"--remove-label=", removeLabels},
-		{"--add-assignee=", addAssignees}, {"--remove-assignee=", removeAssignees},
+		{"--add-label=", addLabels, true}, {"--remove-label=", removeLabels, true},
+		{"--add-assignee=", addAssignees, false}, {"--remove-assignee=", removeAssignees, false},
 	} {
 		for _, n := range group.names {
+			if group.csv {
+				n = csvQuote(n)
+			}
 			a = append(a, group.flag+n)
 		}
 	}
@@ -137,38 +146,35 @@ func ParseLabelNames(b []byte) ([]string, error) {
 	return out, nil
 }
 
-// ParseLogins reads a list of users ([{"login": ...}]).
-func ParseLogins(b []byte) ([]string, error) {
-	var raw []rawLogin
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return nil, err
-	}
+// ParseLoginLines reads one login per line, as printed by `gh api --jq '.[].login'`.
+func ParseLoginLines(b []byte) []string {
 	var out []string
-	for _, u := range raw {
-		if u.Login != "" {
-			out = append(out, u.Login)
+	for _, l := range strings.Split(string(b), "\n") {
+		if l = CleanText(strings.TrimSpace(l)); l != "" {
+			out = append(out, l)
 		}
 	}
-	return out, nil
+	return out
 }
 
-// ListLabels lists the repo's labels (up to 200).
+// ListLabels lists the repo's labels (up to 1000).
 func ListLabels(r RepoRef) ([]string, error) {
-	out, err := Run(Scoped(r, "label", "list", "--limit", "200", "--json", "name")...)
+	out, err := Run(Scoped(r, "label", "list", "--limit", "1000", "--json", "name")...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseLabelNames(out)
 }
 
-// ListAssignees lists the users who can be assigned in the repo (up to 100).
+// ListAssignees lists every user who can be assigned in the repo, page after page.
 func ListAssignees(r RepoRef) ([]string, error) {
 	endpoint, flags := r.APIEndpoint("/assignees?per_page=100")
-	out, err := Run(append(append([]string{"api"}, flags...), endpoint)...)
+	args := append(append([]string{"api", "--paginate"}, flags...), endpoint, "--jq", ".[].login")
+	out, err := Run(args...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseLogins(out)
+	return ParseLoginLines(out), nil
 }
 
 // CloseIssue closes the issue.
@@ -187,4 +193,12 @@ func ReopenIssue(r RepoRef, number string) error {
 func EditIssue(r RepoRef, number string, addLabels, removeLabels, addAssignees, removeAssignees []string) error {
 	_, err := Run(EditIssueArgs(r, number, addLabels, removeLabels, addAssignees, removeAssignees)...)
 	return err
+}
+
+// csvQuote quotes a value the way gh's comma-separated flags read it, when it needs it.
+func csvQuote(name string) string {
+	if !strings.ContainsAny(name, ",\"\n\r") {
+		return name
+	}
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
