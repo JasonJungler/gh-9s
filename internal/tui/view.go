@@ -115,7 +115,7 @@ func (m model) View() string {
 		title += "  loading…"
 	}
 	b.WriteString(styHeader.Render(strings.TrimSpace(title)) + "\n")
-	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <:fav>favorites <P>current-PR <:>cmd </>filter") + "\n")
+	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <:fav>favorites <:repo> switch repo <P>current-PR <:>cmd </>filter") + "\n")
 
 	if m.form != nil {
 		return b.String() + "\n" + m.form.view(m.width)

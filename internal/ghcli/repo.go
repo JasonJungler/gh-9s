@@ -83,3 +83,9 @@ func (r RepoRef) APIEndpoint(rest string) (endpoint string, flags []string) {
 	}
 	return "repos/" + repo + rest, flags
 }
+
+// CheckRepo reports whether r exists and is readable with the current gh login.
+func CheckRepo(r RepoRef) error {
+	_, err := Run("repo", "view", r.String(), "--json", "nameWithOwner")
+	return err
+}

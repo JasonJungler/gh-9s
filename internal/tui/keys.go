@@ -56,7 +56,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.wfID, m.wfName = "", ""
 			}
 			if prev == viewFavs {
-				m.target = ghcli.RepoRef{}
+				m.target = m.base
 			}
 			return m, m.switchTo(prev)
 		}
@@ -83,10 +83,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "3":
 		return m.goTop(viewPRs)
 	case "P":
-		return m, func() tea.Msg {
-			pr, err := currentPR()
-			return gotoMsg{viewChecks, pr, err}
-		}
+		return m.currentPR()
 	case "R", "ctrl+r":
 		m.loading = true
 		return m, m.fetch()
@@ -161,7 +158,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) goTop(v viewKind) (tea.Model, tea.Cmd) {
-	m.back, m.wfID, m.wfName, m.pr, m.target = nil, "", "", "", ghcli.RepoRef{}
+	m.back, m.wfID, m.wfName, m.pr, m.target = nil, "", "", "", m.base
 	return m, m.switchTo(v)
 }
 
@@ -262,6 +259,9 @@ func (m model) handleInput(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) command(c string) (tea.Model, tea.Cmd) {
+	if f := strings.Fields(c); len(f) > 0 && strings.ToLower(f[0]) == "repo" {
+		return m.repoCommand(f[1:])
+	}
 	switch strings.ToLower(c) {
 	case "runs", "run", "r":
 		return m.goTop(viewRuns)
@@ -272,10 +272,7 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 	case "fav", "favs", "favorites":
 		return m.goTop(viewFavs)
 	case "cpr", "checks":
-		return m, func() tea.Msg {
-			pr, err := currentPR()
-			return gotoMsg{viewChecks, pr, err}
-		}
+		return m.currentPR()
 	case "q", "quit", "exit":
 		return m, tea.Quit
 	case "":

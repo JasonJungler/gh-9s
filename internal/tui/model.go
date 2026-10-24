@@ -52,7 +52,8 @@ type model struct {
 	status        string
 
 	// scope for the current view
-	target       ghcli.RepoRef // zero value: repo of the current directory
+	base         ghcli.RepoRef // the repo chosen with :repo; zero value: the current directory's repo
+	target       ghcli.RepoRef // what the current view shows: base, or a favorite's repo while visiting one
 	wfID, wfName string        // runs filtered by workflow
 	pr           string        // checks for a PR ("" = current branch)
 

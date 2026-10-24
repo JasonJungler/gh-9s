@@ -27,6 +27,7 @@ Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release
 | `P` / `:cpr` | checks of the current branch's PR |
 | `:fav` | favorite workflows from every repo, with the latest run's status |
 | `:<alias>` | open the runs of the favorite with that alias |
+| `:repo OWNER/REPO` | switch every view to another repo (`HOST/OWNER/REPO` for another host). The repo is checked first; `:repo` alone returns to the current directory's repo. The current-branch PR (`P`, `:cpr`) only exists in the current directory's repo. |
 
 ## Keys
 

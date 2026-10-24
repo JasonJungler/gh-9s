@@ -129,12 +129,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = styOK.Render("✓ " + msg.msg)
 		}
 		return m, m.fetch()
+	case repoSwitchedMsg:
+		if msg.err != nil {
+			m.status = styErr.Render("✗ " + msg.ref.String() + ": " + msg.err.Error())
+			return m, nil
+		}
+		return m, m.switchRepo(msg.ref)
 	case gotoMsg:
 		if msg.err != nil {
 			m.status = styErr.Render("✗ " + msg.err.Error())
 			return m, nil
 		}
-		m.pr, m.target = msg.pr, ghcli.RepoRef{}
+		m.pr = msg.pr
 		return m, m.push(msg.view)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
