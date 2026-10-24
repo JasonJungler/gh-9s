@@ -76,7 +76,7 @@ func (m model) withPane(body func(model) string) string {
 	lw, rw := m.paneWidths()
 	inner := m
 	inner.width, inner.height, inner.paneList = lw-2, m.height-2, true
-	list := strings.TrimRight(body(inner), "\n")
+	list := strings.TrimSuffix(body(inner), "\n")
 	h := strings.Count(list, "\n") + 3 // the list's lines plus the two border rows
 	return joinPanes(list, m.previewContent(rw-2, h-2), lw, rw, h) + "\n"
 }

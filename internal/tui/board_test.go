@@ -631,3 +631,16 @@ func TestLoginIsAskedOnceAndAFailureKeepsTheOldOne(t *testing.T) {
 		t.Errorf("a failed lookup wiped the login: %q", m.boardSt().me)
 	}
 }
+
+func TestPreviewPaneFillsTheScreenWhateverTheItemCount(t *testing.T) {
+	m, _ := boardOn(t)
+	m.previewOff, m.width, m.height = false, 160, 40
+	m = pump(m, m.fetch())
+	if got := strings.Count(m.View(), "\n"); got != 39 {
+		t.Errorf("board with a pane is %d lines tall on a 40-line terminal; the pane must not shrink to the item count", got)
+	}
+	m.tbl.rows = m.tbl.rows[:1] // one item only
+	if got := strings.Count(m.View(), "\n"); got != 39 {
+		t.Errorf("with one item the view is %d lines", got)
+	}
+}
