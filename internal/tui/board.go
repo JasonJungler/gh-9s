@@ -36,10 +36,14 @@ type boardState struct {
 	loaded   bool
 	loadedAt time.Time
 	tab      int
-	viewName string // the chosen view by name; its position can change
-	view     int    // 0 is "All items", n is the Project's view n-1
-	me       string // the logged-in user, when a view's filter asks for @me
-	force    bool   // the next fetch ignores the reuse window (R)
+	viewName string      // the chosen view by name; its position can change
+	cols     bool        // the columns layout
+	col, win int         // the selected column and the first one drawn
+	curs     map[int]int // the selected card of each column
+	tops     map[int]int // the first card drawn in each column
+	view     int         // 0 is "All items", n is the Project's view n-1
+	me       string      // the logged-in user, when a view's filter asks for @me
+	force    bool        // the next fetch ignores the reuse window (R)
 }
 
 // boardPayload is one answer of fetchProject.
@@ -58,7 +62,7 @@ func init() {
 		apply:    boardApply,
 		key:      boardKeyHandler,
 		body:     boardBody,
-		footer:   "tab/h/l switch column  [/] switch view  enter open  f pin/unpin Project  o browser  / filter",
+		footer:   "tab/h/l switch column  [/] switch view  enter open  b columns  f pin/unpin Project  o browser  / filter",
 	})
 }
 
@@ -247,10 +251,15 @@ func (m model) boardExtraRows() int {
 	if m.view != viewBoard {
 		return 0
 	}
-	if m.boardSt().hasViews() {
-		return 3
+	st := m.boardSt()
+	n := 2
+	if st.hasViews() {
+		n++
 	}
-	return 2
+	if st.colsActive(m) {
+		n++ // the header and its rule instead of one tab bar
+	}
+	return n
 }
 
 func boardCount(p ghcli.Project, n int) string {
@@ -262,6 +271,9 @@ func boardCount(p ghcli.Project, n int) string {
 
 func boardBody(m model) string {
 	st := m.boardSt()
+	if st.colsActive(m) {
+		return boardColumnsBody(m, st)
+	}
 	var b strings.Builder
 	var labels []string
 	if st.loaded {
@@ -323,7 +335,14 @@ func (m model) switchBoardTab(delta int) model {
 
 func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	st := m.boardSt()
+	if st.colsActive(m) {
+		if next, cmd, ok := boardColsKey(m, st, k); ok {
+			return next, cmd, true
+		}
+	}
 	switch k.String() {
+	case "b":
+		return m.toggleBoardColumns(), nil, true
 	case "tab", "l", "right":
 		return m.switchBoardTab(1), nil, true
 	case "shift+tab", "h", "left":
@@ -354,7 +373,7 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		}
 		return m.togglePinnedProjectKeys(p)
 	case "o":
-		r, ok := m.selected()
+		r, ok := m.boardSelectedRow()
 		if !ok {
 			return m, nil, true
 		}
@@ -375,7 +394,7 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case "enter":
-		r, ok := m.selected()
+		r, ok := m.boardSelectedRow()
 		if !ok {
 			return m, nil, true
 		}

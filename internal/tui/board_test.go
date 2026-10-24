@@ -663,3 +663,132 @@ func TestPreviewPaneShowsTheTextOfADraftCard(t *testing.T) {
 		t.Error("a non-draft row was treated as a draft")
 	}
 }
+
+func columnsBoard(t *testing.T, width, height int) model {
+	t.Helper()
+	m, _ := boardOn(t)
+	m.width, m.height = width, height
+	return keyAll(m, "b")
+}
+
+func TestBoardColumnsShowEveryStatusSideBySide(t *testing.T) {
+	m := columnsBoard(t, 120, 30)
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"Todo (1)", "In Progress (1)", "Done (1)", "No status (2)", "acme/app #1", "Fix login", "ann · bug", "(draft)", "(no access)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("columns lack %q:\n%s", want, out)
+		}
+	}
+	// the headers sit on one line: that is what side by side means
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Todo (1)") && !(strings.Contains(l, "In Progress (1)") && strings.Contains(l, "Done (1)")) {
+			t.Errorf("headers are not on one line: %q", l)
+		}
+	}
+	all := strings.Split(m.View(), "\n")
+	for i, l := range all[:len(all)-1] { // the last line is the key footer
+		if ansi.StringWidth(l) > 120 && i != 1 {
+			t.Errorf("line %d is %d wide", i, ansi.StringWidth(l))
+		}
+	}
+}
+
+func TestBoardColumnsMovement(t *testing.T) {
+	m := columnsBoard(t, 120, 30)
+	m = keyAll(m, "l") // In Progress
+	if r, ok := m.boardSelectedRow(); !ok || r.id != "acme/app#2" {
+		t.Fatalf("after l: %+v %v", r, ok)
+	}
+	m = keyAll(m, "l", "l") // Done, then No status
+	if r, _ := m.boardSelectedRow(); r.id != "i3" {
+		t.Errorf("no-status column starts on its first card: %q", r.id)
+	}
+	m = keyAll(m, "j")
+	if r, _ := m.boardSelectedRow(); r.id != "i4" {
+		t.Errorf("j: %q", r.id)
+	}
+	m = keyAll(m, "j", "k", "k", "k")
+	if r, _ := m.boardSelectedRow(); r.id != "i3" {
+		t.Errorf("k stops at the first card: %q", r.id)
+	}
+	m = keyAll(m, "l") // wraps to Todo
+	if r, _ := m.boardSelectedRow(); r.id != "acme/app#1" {
+		t.Errorf("wrap: %q", r.id)
+	}
+	m = keyAll(m, "enter")
+	if m.view != viewIssue || m.issue != "1" {
+		t.Errorf("enter: view %v issue %q", m.view, m.issue)
+	}
+}
+
+func TestBoardColumnsToggleKeepsTheCard(t *testing.T) {
+	m, _ := boardOn(t)
+	m.width, m.height = 120, 30
+	m = keyAll(m, "tab", "tab") // list: In Progress tab
+	m = keyAll(m, "b")
+	if r, _ := m.boardSelectedRow(); r.id != "acme/app#2" {
+		t.Fatalf("columns select %q", r.id)
+	}
+	m = keyAll(m, "l", "b") // Done, back to the list
+	if r, ok := m.selected(); !ok || r.id != "acme/app#3" || m.boardSt().tab != 3 {
+		t.Errorf("list selects %+v tab %d", r, m.boardSt().tab)
+	}
+}
+
+func TestBoardColumnsNeedWidthAndWindowAround(t *testing.T) {
+	m := columnsBoard(t, 50, 30)
+	if m.boardSt().cols || !strings.Contains(m.status, "at least 60") {
+		t.Errorf("narrow terminal: cols %v status %q", m.boardSt().cols, m.status)
+	}
+	m = columnsBoard(t, 70, 30) // two columns fit: 4 exist
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "›") || strings.Contains(out, "Done (1)") {
+		t.Errorf("window:\n%s", out)
+	}
+	m = keyAll(m, "l", "l", "l")
+	out = ansi.Strip(m.View())
+	if !strings.Contains(out, "‹") || !strings.Contains(out, "No status (2)") || strings.Contains(out, "Todo (1)") {
+		t.Errorf("window after moving right:\n%s", out)
+	}
+	for i, l := range strings.Split(m.View(), "\n") {
+		if ansi.StringWidth(l) > 70 && i != 1 && i != len(strings.Split(m.View(), "\n"))-1 {
+			t.Errorf("line %d is %d wide", i, ansi.StringWidth(l))
+		}
+	}
+}
+
+func TestBoardColumnsScrollAndFilterAndEmpty(t *testing.T) {
+	f := installBoard(t)
+	f.project = ghcli.Project{Title: "P", StatusOrder: []string{"Todo", "Done"}, Total: 30}
+	for i := 1; i <= 30; i++ {
+		f.project.Items = append(f.project.Items, projItem("Issue", "acme/app", i, fmt.Sprintf("card number %d", i), "Todo", "OPEN"))
+	}
+	m := pinsModel(t)
+	m.previewOff, m.width, m.height = true, 100, 24
+	m.pins.ToggleProject(pins.Project{Owner: "acme", Number: 3, Title: "P"})
+	m = keyAll(pressTab(pressTab(openFavs(t, m), "tab"), "tab"), "enter")
+	m = keyAll(m, "b")
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "Done (0)") || !strings.Contains(out, "(empty)") {
+		t.Errorf("empty column:\n%s", out)
+	}
+	for i := 0; i < 25; i++ {
+		m = keyAll(m, "j")
+	}
+	out = ansi.Strip(m.View())
+	if !strings.Contains(out, "card number 26") || strings.Contains(out, "card number 1 ") {
+		t.Errorf("the column did not scroll to the selected card:\n%s", out)
+	}
+	if got := strings.Count(m.View(), "\n"); got > 23 {
+		t.Errorf("view is %d lines on a 24-line terminal", got+1)
+	}
+	m = keyAll(m, "l", "j", "j") // the empty column: nothing to move to
+	if _, ok := m.boardSelectedRow(); ok {
+		t.Error("an empty column has no selected card")
+	}
+	m = keyAll(m, "enter", "o") // and must not crash or open anything
+	m = keyAll(m, "h", "g")
+	if r, _ := m.boardSelectedRow(); r.id != "acme/app#1" {
+		t.Errorf("g: %q", r.id)
+	}
+}

@@ -24,7 +24,7 @@ func (m model) previewShown() bool {
 	default:
 		return false
 	}
-	if m.view == viewBoard && !m.boardSt().loaded {
+	if m.view == viewBoard && (!m.boardSt().loaded || m.boardSt().cols) {
 		return false // nothing to list yet, or an error to read in full
 	}
 	if m.previewOff || !m.cfg().Bool("preview") || m.width < m.cfg().Int("preview_min_columns") {
