@@ -37,7 +37,7 @@ func (m model) helpGroups() []helpGroup {
 		case favTabRepos:
 			gs = append(gs, helpGroup{"Repos", []helpKey{{"j k", "move"}, {"enter", "switch to the repo (like :repo)"}, {"a", "pin a repo"}, {"f d", "unpin (asks first)"}, {"o", "open in the browser"}}})
 		case favTabProjects:
-			gs = append(gs, helpGroup{"Projects", []helpKey{{"j k", "move"}, {"enter", "open the board"}, {"a", "pin a Project"}, {"f d", "unpin (asks first)"}, {"o", "open in the browser"}}})
+			gs = append(gs, helpGroup{"Projects", []helpKey{{"j k", "move"}, {"enter", "open the board"}, {"a", "pin a Project (pick from the list, or type OWNER/NUMBER)"}, {"f d", "unpin (asks first)"}, {"o", "open in the browser"}}})
 		default:
 			gs = append(gs, helpGroup{"Workflows", []helpKey{{"j k", "move"}, {"enter", "its runs"}, {"t", "trigger (form)"}, {"f", "unfavorite"}, {"a", "set an alias"}, {"o", "open in the browser"}}})
 		}

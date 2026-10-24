@@ -249,3 +249,92 @@ func FetchProject(host, owner string, number int) (Project, error) {
 	}
 	return all, nil
 }
+
+// ProjectRef is a Project found by ListProjects.
+type ProjectRef struct {
+	Host, Owner string
+	Number      int
+	Title, URL  string
+	Closed      bool
+}
+
+const listProjectsQuery = `{viewer{login projectsV2(first:50){nodes{number title closed url}} organizations(first:50){nodes{login projectsV2(first:50){nodes{number title closed url}}}}}}`
+
+type projectNodes struct {
+	Nodes []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Closed bool   `json:"closed"`
+		URL    string `json:"url"`
+	} `json:"nodes"`
+}
+
+// ParseProjectList reads the answer to listProjectsQuery: the viewer's own Projects, then each organisation's.
+func ParseProjectList(host string, b []byte) ([]ProjectRef, error) {
+	var resp struct {
+		Data *struct {
+			Viewer struct {
+				Login    string       `json:"login"`
+				Projects projectNodes `json:"projectsV2"`
+				Orgs     struct {
+					Nodes []struct {
+						Login    string       `json:"login"`
+						Projects projectNodes `json:"projectsV2"`
+					} `json:"nodes"`
+				} `json:"organizations"`
+			} `json:"viewer"`
+		} `json:"data"`
+		Errors gqlErrors `json:"errors"`
+	}
+	if err := json.Unmarshal(b, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Data == nil {
+		if len(resp.Errors) > 0 {
+			msg := CleanText(resp.Errors[0].Message)
+			if missingScope(msg) {
+				return nil, fmt.Errorf("%w: %s", ErrMissingScope, msg)
+			}
+			return nil, errors.New(msg)
+		}
+		return nil, errors.New("no data in the response")
+	}
+	if host == "github.com" {
+		host = ""
+	}
+	var out []ProjectRef
+	add := func(owner string, n projectNodes) {
+		for _, p := range n.Nodes {
+			if p.Number > 0 && owner != "" {
+				out = append(out, ProjectRef{Host: host, Owner: CleanText(owner), Number: p.Number,
+					Title: oneLine(CleanText(p.Title)), URL: CleanText(p.URL), Closed: p.Closed})
+			}
+		}
+	}
+	add(resp.Data.Viewer.Login, resp.Data.Viewer.Projects)
+	for _, o := range resp.Data.Viewer.Orgs.Nodes {
+		add(o.Login, o.Projects)
+	}
+	return out, nil
+}
+
+// ListProjects lists the Projects the user can see on one host (their own and their organisations').
+func ListProjects(host string) ([]ProjectRef, error) {
+	args := append(graphqlArgs(host), "-f", "query="+listProjectsQuery)
+	var out []byte
+	err := retryOnce(func() error {
+		var e error
+		out, e = projectRun(inboxTimeout, args...)
+		if e != nil && len(out) == 0 {
+			if missingScope(e.Error()) {
+				return fmt.Errorf("%w: %s", ErrMissingScope, CleanText(e.Error()))
+			}
+			return e
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ParseProjectList(host, out)
+}

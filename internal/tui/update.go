@@ -232,6 +232,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.switchRepo(msg.ref)
 	case repoPinMsg:
 		return m.onRepoPin(msg)
+	case projectListMsg:
+		return m.onProjectList(msg)
 	case projectPinMsg:
 		return m.onProjectPin(msg)
 	case gotoMsg:

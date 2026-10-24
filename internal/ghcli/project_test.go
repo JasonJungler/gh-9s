@@ -165,3 +165,22 @@ func TestScopeHintAndReadOnly(t *testing.T) {
 		t.Error("the query writes")
 	}
 }
+
+func TestParseProjectList(t *testing.T) {
+	b := `{"data":{"viewer":{"login":"me","projectsV2":{"nodes":[{"number":1,"title":"Mine\u001b[1m","closed":false,"url":"https://github.com/users/me/projects/1"}]},
+"organizations":{"nodes":[{"login":"acme","projectsV2":{"nodes":[{"number":4,"title":"Roadmap","closed":true,"url":"u"},{"number":0,"title":"bad"}]}},{"login":"empty","projectsV2":{"nodes":[]}}]}}}}`
+	got, err := ParseProjectList("github.com", []byte(b))
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got[0].Owner != "me" || got[0].Host != "" || strings.ContainsRune(got[0].Title, 0x1b) || got[1].Owner != "acme" || !got[1].Closed {
+		t.Errorf("%+v", got)
+	}
+	_, err = ParseProjectList("", []byte(`{"data":null,"errors":[{"message":"missing required scopes [read:project]"}]}`))
+	if !errors.Is(err, ErrMissingScope) {
+		t.Errorf("%v", err)
+	}
+	if strings.Contains(strings.ToLower(listProjectsQuery), "mutation") {
+		t.Error("the list query writes")
+	}
+}

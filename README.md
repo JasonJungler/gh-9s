@@ -74,7 +74,7 @@ The `:` command bar, `/` filter, log search and alias entry open in a box under 
 
 **Workflows / favorites** — `enter` runs · `t` trigger form · `f` favorite/unfavorite · `a` set alias · `e` enable/disable
 
-**Favorites tabs (`:fav`)** — `tab`/`l` next tab · `shift+tab`/`h` previous · Repos: `enter` switch to the repo · `a` pin · `f`/`d` unpin · `o` open. Projects: `enter` open the board · `a` pin (`[HOST/]OWNER/NUMBER`) · `f`/`d` unpin · `o` open. In the `:repo` picker pinned repos carry a ★ and `ctrl+f` pins or unpins the selected one. `f` pins or unpins wherever the thing is on screen: the repo from the runs, pulls and issues lists, the Project from its board (`a` is only for typing a name to pin).
+**Favorites tabs (`:fav`)** — `tab`/`l` next tab · `shift+tab`/`h` previous · Repos: `enter` switch to the repo · `a` pin · `f`/`d` unpin · `o` open. Projects: `enter` open the board · `a` pin (pick from the list of your and your organisations' Projects, or type `[HOST/]OWNER/NUMBER`) · `f`/`d` unpin · `o` open. In the `:repo` picker pinned repos carry a ★ and `ctrl+f` pins or unpins the selected one. `f` pins or unpins wherever the thing is on screen: the repo from the runs, pulls and issues lists, the Project from its board (`a` is only for typing a name to pin).
 
 **Job graph** (watching a run)
 - `hjkl` or arrows move between jobs, `enter` opens the job's log, `v` switches style, `ctrl-d/u` scroll

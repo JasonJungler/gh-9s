@@ -31,6 +31,31 @@ func init() {
 			return projectPinMsg{host: host, owner: owner, number: n, p: p, err: err}
 		}
 	}
+	dialogHandlers["pin.projectpick"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
+		refs := m.projectChoices
+		m.projectChoices = nil
+		if !r.ok || len(r.values) != 1 {
+			return m, nil
+		}
+		if r.values[0] == "manual" {
+			m.dlg = &dialog{id: "pin.project", title: "Pin a Project", prompt: "[HOST/]OWNER/NUMBER", kind: dialogText}
+			return m, nil
+		}
+		for _, p := range refs {
+			if projectRefValue(p) == r.values[0] {
+				if m.pinStore().HasProject(p.Host, p.Owner, p.Number) {
+					m.status = styDim.Render(projectKey(pins.Project{Host: p.Host, Owner: p.Owner, Number: p.Number}) + " is already pinned")
+					return m, nil
+				}
+				url := p.URL
+				if !pins.WebURL(url) {
+					url = ""
+				}
+				return m.togglePinnedProject(pins.Project{Host: p.Host, Owner: p.Owner, Number: p.Number, Title: p.Title, URL: url})
+			}
+		}
+		return m, nil
+	}
 	dialogHandlers["pin.unproject"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		p := m.pinDelProject
 		m.pinDelProject = nil
@@ -82,8 +107,8 @@ func (m model) projectTabKey(k tea.KeyMsg) (model, tea.Cmd, bool) {
 		next, cmd := m.openBoard(p)
 		return next, cmd, true
 	case "a":
-		m.dlg = &dialog{id: "pin.project", title: "Pin a Project", prompt: "[HOST/]OWNER/NUMBER", kind: dialogText}
-		return m, nil, true
+		m.status = styDim.Render("listing your Projects…")
+		return m, listProjectsCmd(), true
 	case "f", "d":
 		p, ok := m.selectedProject()
 		if !ok {
@@ -157,6 +182,73 @@ func (m model) togglePinnedProject(p pins.Project) (model, tea.Cmd) {
 	m = m.savePins(done)
 	if m.view == viewFavs {
 		return m, m.fetch()
+	}
+	return m, nil
+}
+
+// listProjects is the outside call that lists the Projects of one host; tests replace it.
+var listProjects = ghcli.ListProjects
+
+// projectListMsg is the Projects found on the logged-in hosts, and what could not be listed.
+type projectListMsg struct {
+	refs  []ghcli.ProjectRef
+	notes []string
+	scope string // a host whose token lacks read:project
+}
+
+func projectRefValue(p ghcli.ProjectRef) string {
+	return p.Host + "|" + p.Owner + "|" + strconv.Itoa(p.Number)
+}
+
+func listProjectsCmd() tea.Cmd {
+	return func() tea.Msg {
+		hosts, err := inboxHosts()
+		msg := projectListMsg{}
+		if err != nil || len(hosts) == 0 {
+			hosts = []string{"github.com"}
+		}
+		for _, h := range hosts {
+			refs, err := listProjects(h)
+			switch {
+			case errors.Is(err, ghcli.ErrMissingScope):
+				msg.scope = h
+			case err != nil:
+				msg.notes = append(msg.notes, h+": "+ghcli.CleanText(err.Error()))
+			default:
+				msg.refs = append(msg.refs, refs...)
+			}
+		}
+		return msg
+	}
+}
+
+func (m model) onProjectList(msg projectListMsg) (model, tea.Cmd) {
+	if m.view != viewFavs || m.favTab != favTabProjects || m.dlg != nil {
+		return m, nil // the screen was left while the list was loading
+	}
+	if msg.scope != "" && len(msg.refs) == 0 {
+		m.status = styErr.Render(ghcli.ScopeHint(msg.scope))
+		return m, nil
+	}
+	choices := []choice{{label: "Type OWNER/NUMBER yourself…", value: "manual"}}
+	for _, p := range msg.refs {
+		label := ghcli.CleanText(p.Title) + "   " + projectKey(pins.Project{Host: p.Host, Owner: p.Owner, Number: p.Number})
+		if p.Closed {
+			label += " (closed)"
+		}
+		c := choice{label: label, value: projectRefValue(p)}
+		if m.pinStore().HasProject(p.Host, p.Owner, p.Number) {
+			c.disabled, c.note = true, "already pinned"
+		}
+		choices = append(choices, c)
+	}
+	m.projectChoices = msg.refs
+	d := newChoiceDialog("pin.projectpick", "Pin a Project (type to filter)", choices, false, nil)
+	m.dlg = &d
+	if len(msg.notes) > 0 {
+		m.status = styErr.Render(strings.Join(msg.notes, "; "))
+	} else if msg.scope != "" {
+		m.status = styErr.Render(ghcli.ScopeHint(msg.scope))
 	}
 	return m, nil
 }

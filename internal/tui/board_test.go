@@ -22,6 +22,8 @@ type boardFakes struct {
 	err     error
 	calls   []string
 	now     time.Time
+	listed  map[string][]ghcli.ProjectRef
+	listErr error
 }
 
 func projItem(typ, repo string, n int, title, status, state string) ghcli.ProjectItem {
@@ -43,14 +45,18 @@ func sampleProject() ghcli.Project {
 func installBoard(t *testing.T) *boardFakes {
 	t.Helper()
 	f := &boardFakes{project: sampleProject(), now: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
-	oldFetch, oldNow, oldOpen := fetchProject, boardNow, openURL
+	oldFetch, oldNow, oldOpen, oldList, oldHosts := fetchProject, boardNow, openURL, listProjects, inboxHosts
+	listProjects = func(host string) ([]ghcli.ProjectRef, error) { return f.listed[host], f.listErr }
+	inboxHosts = func() ([]string, error) { return []string{"github.com"}, nil }
 	fetchProject = func(host, owner string, n int) (ghcli.Project, error) {
 		f.calls = append(f.calls, fmt.Sprintf("%s|%s|%d", host, owner, n))
 		return f.project, f.err
 	}
 	boardNow = func() time.Time { return f.now }
 	openURL = func(string) error { return nil }
-	t.Cleanup(func() { fetchProject, boardNow, openURL = oldFetch, oldNow, oldOpen })
+	t.Cleanup(func() {
+		fetchProject, boardNow, openURL, listProjects, inboxHosts = oldFetch, oldNow, oldOpen, oldList, oldHosts
+	})
 	return f
 }
 
@@ -83,7 +89,7 @@ func TestProjectsTabListsPins(t *testing.T) {
 func TestPinAProjectReadsItOnceAndStoresTitle(t *testing.T) {
 	f := installBoard(t)
 	m := pressTab(pressTab(openFavs(t, pinsModel(t)), "tab"), "tab")
-	m = keyAll(typeAll(keyAll(m, "a"), "acme/3"), "enter")
+	m = keyAll(typeAll(keyAll(m, "a", "enter"), "acme/3"), "enter")
 	if len(f.calls) != 1 || f.calls[0] != "|acme|3" {
 		t.Fatalf("calls %v", f.calls)
 	}
@@ -94,7 +100,7 @@ func TestPinAProjectReadsItOnceAndStoresTitle(t *testing.T) {
 		t.Error("not saved")
 	}
 	// a bad name never reaches GitHub
-	m = keyAll(typeAll(keyAll(m, "a"), "acme/zero"), "enter")
+	m = keyAll(typeAll(keyAll(m, "a", "enter"), "acme/zero"), "enter")
 	if len(f.calls) != 1 || !strings.Contains(m.status, "invalid") {
 		t.Errorf("calls %v status %q", f.calls, m.status)
 	}
@@ -104,12 +110,12 @@ func TestPinUnknownProjectAndMissingScope(t *testing.T) {
 	f := installBoard(t)
 	m := pressTab(pressTab(openFavs(t, pinsModel(t)), "tab"), "tab")
 	f.err = errors.New("project not found or no access")
-	m = keyAll(typeAll(keyAll(m, "a"), "acme/8"), "enter")
+	m = keyAll(typeAll(keyAll(m, "a", "enter"), "acme/8"), "enter")
 	if len(m.pins.Projects) != 0 || !strings.Contains(m.status, "not found") {
 		t.Errorf("unknown: %+v %q", m.pins.Projects, m.status)
 	}
 	f.err = fmt.Errorf("%w: x", ghcli.ErrMissingScope)
-	m = keyAll(typeAll(keyAll(m, "a"), "ghe.corp.com/corp/2"), "enter")
+	m = keyAll(typeAll(keyAll(m, "a", "enter"), "ghe.corp.com/corp/2"), "enter")
 	if len(m.pins.Projects) != 0 || !strings.Contains(m.status, "gh auth refresh -s read:project --hostname ghe.corp.com") {
 		t.Errorf("scope: %q", m.status)
 	}
@@ -424,5 +430,42 @@ func TestFPinsAndUnpinsWhereTheThingIsShown(t *testing.T) {
 	m = keyAll(m, "f")
 	if len(m.pins.Projects) != 1 || m.pins.Projects[0].Title != "Roadmap" {
 		t.Errorf("f did not pin again: %+v", m.pins.Projects)
+	}
+}
+
+func TestPinAProjectFromTheList(t *testing.T) {
+	f := installBoard(t)
+	f.listed = map[string][]ghcli.ProjectRef{"github.com": {
+		{Owner: "me", Number: 1, Title: "Personal", URL: "https://github.com/users/me/projects/1"},
+		{Owner: "ai-ocp", Number: 1, Title: "one-click-podcast", URL: "https://github.com/orgs/ai-ocp/projects/1"},
+	}}
+	m := pressTab(pressTab(openFavs(t, pinsModel(t)), "tab"), "tab")
+	m = keyAll(m, "a")
+	if m.dlg == nil || !strings.Contains(m.View(), "one-click-podcast") || !strings.Contains(m.View(), "Type OWNER/NUMBER") {
+		t.Fatalf("no list:\n%s", m.View())
+	}
+	m = keyAll(typeAll(m, "podcast"), "enter")
+	if len(m.pins.Projects) != 1 || m.pins.Projects[0].Owner != "ai-ocp" || m.pins.Projects[0].Title != "one-click-podcast" || len(f.calls) != 0 {
+		t.Fatalf("pins %+v reads %v", m.pins.Projects, f.calls)
+	}
+	m = keyAll(m, "a")
+	if !strings.Contains(m.View(), "already pinned") {
+		t.Errorf("a pinned Project should be marked:\n%s", m.View())
+	}
+}
+
+func TestProjectListMissingScopeAndLateAnswer(t *testing.T) {
+	f := installBoard(t)
+	f.listErr = fmt.Errorf("%w: x", ghcli.ErrMissingScope)
+	m := pressTab(pressTab(openFavs(t, pinsModel(t)), "tab"), "tab")
+	m = keyAll(m, "a")
+	if m.dlg != nil || !strings.Contains(m.status, "gh auth refresh -s read:project") {
+		t.Errorf("dlg %v status %q", m.dlg, m.status)
+	}
+	// the list arrives after the user left the Projects tab
+	m = pressTab(m, "tab")
+	next, _ := m.Update(projectListMsg{refs: []ghcli.ProjectRef{{Owner: "a", Number: 1, Title: "t"}}})
+	if next.(model).dlg != nil {
+		t.Error("a late list opened a dialog on another screen")
 	}
 }
