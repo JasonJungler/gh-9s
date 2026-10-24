@@ -56,6 +56,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form = &f
 		}
 		return m, nil
+	case pickerLoadedMsg, pickerDebounceMsg, pickerResultMsg:
+		return m.pickerMsg(msg)
 	case screenMsg:
 		if msg.view != m.view {
 			return m, nil // a late result for a view we have left
@@ -142,6 +144,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.status = styErr.Render("✗ " + msg.ref.String() + ": " + msg.err.Error())
 			return m, nil
+		}
+		if msg.ref != (ghcli.RepoRef{}) && m.recents != nil {
+			m.recents.Add(msg.ref)
+			_ = m.recents.Save() // best effort: a failed save only loses the shortcut
 		}
 		return m, m.switchRepo(msg.ref)
 	case gotoMsg:

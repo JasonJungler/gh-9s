@@ -82,10 +82,15 @@ func TestRepoSwitchIsStickyAcrossTopLevelViews(t *testing.T) {
 	}
 }
 
-func TestRepoCommandWithoutArgumentReturnsToTheCurrentDirectory(t *testing.T) {
+func TestRepoCommandWithoutArgumentOpensThePickerWhoseFirstRowIsHome(t *testing.T) {
 	installRepoChecker(t, nil)
+	installPickerFakes(t, nil)
 	m := typeCommand(t, workflowsModel(t), "repo acme/other")
 	m = typeCommand(t, m, "repo")
+	if m.picker == nil {
+		t.Fatal(":repo with no argument should open the picker")
+	}
+	m = pickKeys(t, m, "enter") // the first row is the current directory
 	if m.base != (ghcli.RepoRef{}) || m.target != (ghcli.RepoRef{}) {
 		t.Errorf("base=%+v target=%+v; want the current directory's repo", m.base, m.target)
 	}

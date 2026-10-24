@@ -24,6 +24,10 @@ func k(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyRight}
 	case "space":
 		return tea.KeyMsg{Type: tea.KeySpace}
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
 	case "backspace":
 		return tea.KeyMsg{Type: tea.KeyBackspace}
 	}

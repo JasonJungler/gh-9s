@@ -8,6 +8,7 @@ import (
 	"github.com/MurabitoB/gh-9s/internal/favorites"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
+	"github.com/MurabitoB/gh-9s/internal/recent"
 	"github.com/MurabitoB/gh-9s/internal/workflow"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -70,6 +71,8 @@ type model struct {
 	note      string           // explanation tied to the current view (cleared when the view changes)
 	banner    string           // sticky startup problem, always shown
 	runStatus string           // last seen status of the watched run, for the finished notification
+	picker    *picker          // the repo picker overlay, when open
+	recents   *recent.Store    // repos chosen before; nil if the file could not be read
 	sdata     map[viewKind]any // per-screen data, see screen.go
 	graph     graph.Graph
 	gstyle    graph.Style
@@ -135,6 +138,9 @@ func Run() error {
 		m.banner = "favorites disabled: " + err.Error()
 	} else {
 		m.favs = fs
+	}
+	if rs, err := recent.Load(recent.DefaultPath()); err == nil {
+		m.recents = rs
 	}
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err

@@ -15,6 +15,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.picker != nil {
+		return m.pickerKey(k)
+	}
 	if m.form != nil {
 		return m.formKey(k)
 	}

@@ -22,11 +22,11 @@ type repoSwitchedMsg struct {
 	err error
 }
 
-// repoCommand handles ":repo [HOST/]OWNER/REPO" and ":repo" (back to the current directory's repo).
+// repoCommand handles ":repo [HOST/]OWNER/REPO"; ":repo" alone opens the picker.
 func (m model) repoCommand(args []string) (tea.Model, tea.Cmd) {
 	switch len(args) {
 	case 0:
-		return m, func() tea.Msg { return repoSwitchedMsg{} } // nothing to verify: the current directory
+		return m, m.openPicker()
 	case 1:
 		ref, err := ghcli.ParseRepoRef(args[0])
 		if err != nil || !validRepoName(ref) {
