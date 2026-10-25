@@ -137,15 +137,18 @@ func wikiTable(tg ghcli.RepoRef, l ghcli.WikiList) table {
 	return t
 }
 
+const wikiLeaveHint = "Press 1-5 or 0 for another view, q to quit."
+
 func wikiListBody(m model) string {
 	if st, ok := m.screenData(viewWiki).(wikiListState); ok && !m.loading && m.err == nil && m.curTarget().Name != "" {
+		const leave = "\n " + wikiLeaveHint + "\n" // this list is a top-level screen: esc has nowhere to go back to
 		switch {
 		case st.l.State == ghcli.WikiOff:
-			return " The wiki is turned off for " + displayRef(m.curTarget()) + "\n"
+			return " The wiki is turned off for " + displayRef(m.curTarget()) + "\n" + leave
 		case st.l.State == ghcli.WikiNoPages:
-			return " " + displayRef(m.curTarget()) + " has no wiki pages yet.\n GitHub creates a wiki with its first page, which has to be made in the browser (o).\n"
+			return " " + displayRef(m.curTarget()) + " has no wiki pages yet.\n GitHub creates a wiki with its first page, which has to be made in the browser (o).\n" + leave
 		case len(st.l.Pages) == 0:
-			return " The wiki has no pages (n creates one)\n"
+			return " The wiki has no pages (n creates one)\n" + leave
 		}
 	}
 	return m.tableBody()

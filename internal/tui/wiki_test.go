@@ -731,3 +731,17 @@ func TestPageHeaderIsCleanedToo(t *testing.T) {
 		t.Errorf("an escape in a file name reached the terminal: %q", raw)
 	}
 }
+
+func TestEmptyWikiScreensSayHowToLeave(t *testing.T) {
+	f := installWiki(t)
+	for _, l := range []ghcli.WikiList{{State: ghcli.WikiOff}, {State: ghcli.WikiNoPages}, {State: ghcli.WikiReady}} {
+		f.list = l
+		if s := screenText(wikiListModel(t)); !strings.Contains(s, "Press 1-5 or 0 for another view, q to quit.") {
+			t.Errorf("state %v does not say how to leave:\n%s", l.State, s)
+		}
+	}
+	f.list = ghcli.WikiList{State: ghcli.WikiReady, Pages: wikiPages(), Total: 3}
+	if s := screenText(wikiListModel(t)); strings.Contains(s, "Press 1-5") {
+		t.Error("the hint belongs to the empty screens only")
+	}
+}
