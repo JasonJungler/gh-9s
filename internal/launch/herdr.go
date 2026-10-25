@@ -152,11 +152,16 @@ func (h *herdrSpace) open(r Request) (string, error) {
 	return pane, nil
 }
 
-// check refuses, before a pane is opened, a paste-only text that paste would refuse, so nothing is left
-// open for a launch that cannot succeed.
+// check refuses, before a pane is opened, a text that paste would refuse, so nothing is left open for a
+// launch that cannot succeed: a paste-only text with a control character, and (submit) a prompt that starts
+// with "-". `herdr agent prompt <pane> <text>` is given the text as a bare argument (its help shows no "--"),
+// so herdr could read such a prompt as an option. Paste-only text starts with ESC and is not affected.
 func (h *herdrSpace) check(r Request) error {
 	if r.PasteOnly && !pasteSafe(r.Context) {
 		return errPasteUnsafe
+	}
+	if !r.PasteOnly && strings.HasPrefix(r.Context, "-") {
+		return promptDashError("herdr")
 	}
 	return nil
 }

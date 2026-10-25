@@ -513,6 +513,9 @@ func TestOrcaRejectsOptionLookingAndControlArguments(t *testing.T) {
 				if !errors.As(err, &se) || se.Step != StepCreate {
 					t.Errorf("err = %v, want a create step error", err)
 				}
+				if tc.name == "context starts with dash" && !strings.Contains(err.Error(), "the prompt starts with") {
+					t.Errorf("err = %v, want a message that names the prompt", err)
+				}
 				if len(rec.calls) != 0 {
 					t.Errorf("orca was called: %+v", rec.calls[0].line())
 				}

@@ -66,6 +66,12 @@ func rejectArg(s string) string {
 	return ""
 }
 
+// promptDashError is why a prompt that starts with "-" is refused where it is passed as a bare program
+// argument: tool could read it as an option.
+func promptDashError(tool string) error {
+	return fmt.Errorf("the prompt starts with \"-\", which %s would read as an option; start it with a word", tool)
+}
+
 // check validates everything that goes into orca's argv before any call.
 func (o orcaBackend) check(r Request) error {
 	for _, f := range []struct{ what, v string }{{"workspace name", r.Name}, {"base", r.Base}} {
@@ -83,7 +89,7 @@ func (o orcaBackend) check(r Request) error {
 		return fmt.Errorf("%s has no orca agent id", r.Agent.Label)
 	}
 	if strings.HasPrefix(r.Context, "-") {
-		return errors.New("the context starts with \"-\", which orca could read as an option")
+		return promptDashError("orca")
 	}
 	return nil
 }

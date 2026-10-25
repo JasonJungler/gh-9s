@@ -406,3 +406,30 @@ func TestHerdrSequencePasteOnlyRefusesUnsafeTextBeforeOpening(t *testing.T) {
 		t.Errorf("submit mode: err = %v, want it unchanged", err)
 	}
 }
+
+// `herdr agent prompt <pane> <text>` has no "--", so a prompt that starts with "-" could be read as an option
+// after the pane and the agent are already running. It is refused before anything is opened. Paste-only is
+// not affected: that text starts with ESC.
+func TestHerdrSubmitRefusesAPromptThatStartsWithADashBeforeOpening(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	for _, text := range []string{"- fix X", "--help", "-"} {
+		rec := &recorder{reply: herdrReply}
+		r := Request{Agent: claude, Place: PlacePane, Split: SplitHorizontal, Dir: "/work", Context: text}
+		err := runSequence(newHerdr(rec.run, herdrEnv), r, time.Second)
+		var se *StepError
+		if !errors.As(err, &se) || !strings.Contains(err.Error(), "the prompt starts with") {
+			t.Errorf("%q: err = %v, want a refusal that names the prompt", text, err)
+		}
+		if len(rec.calls) != 0 {
+			t.Errorf("%q: ran %+v, want nothing opened", text, rec.calls)
+		}
+	}
+	rec := &recorder{reply: herdrReply}
+	r := Request{Agent: claude, Place: PlacePane, Split: SplitHorizontal, Dir: "/work", Context: "- fix X", PasteOnly: true}
+	if err := runSequence(newHerdr(rec.run, herdrEnv), r, time.Second); err != nil {
+		t.Fatalf("paste only: err = %v, want it sent (the text is wrapped in ESC markers)", err)
+	}
+	if last := rec.calls[len(rec.calls)-1]; last.args[1] != "send-text" {
+		t.Errorf("last call = %q", last.line())
+	}
+}
