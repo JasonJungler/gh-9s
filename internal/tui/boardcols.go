@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -121,7 +122,7 @@ func padCell(s string, w int) string {
 }
 
 // cardLines draws one card in w columns: the item, the title on up to two lines, and who and what.
-func cardLines(p ghcli.Project, i, w int, selected, marked bool) []string {
+func cardLines(p ghcli.Project, i, w int, selected, marked bool, fx *float64) []string {
 	it := p.Items[i]
 	r := boardRows(p, boardTab{items: []int{i}})[0]
 	tl := wrapTitle(it.Title, w)
@@ -139,7 +140,12 @@ func cardLines(p ghcli.Project, i, w int, selected, marked bool) []string {
 		r.cells[0] = "● " + r.cells[0]
 	}
 	lines := []string{padCell(r.cells[0], w), padCell(tl[0], w), padCell(tl[1], w), padCell(meta, w)}
-	if selected {
+	switch {
+	case fx != nil: // the Fluent-motion experiment: every card is a tinted block, the selection level fades
+		for k := range lines {
+			lines[k] = fluentCard(lines[k], *fx)
+		}
+	case selected:
 		for k := range lines {
 			lines[k] = ui.Sel.Render(lines[k])
 		}
@@ -190,7 +196,14 @@ func boardColumnsBody(m model, st boardState) string {
 		}
 		top := min(st.tops[c], max(len(col.cards)-m.colVisibleCards(), 0))
 		for ci := top; ci < len(col.cards) && len(lines) < h; ci++ {
-			lines = append(lines, cardLines(st.data, col.cards[ci], w, c == st.col && ci == st.curs[c], st.marks[st.data.Items[col.cards[ci]].ID])...)
+			id := st.data.Items[col.cards[ci]].ID
+			sel := c == st.col && ci == st.curs[c]
+			var fx *float64
+			if motionOn() {
+				lv := m.fx.level(id, sel, time.Now())
+				fx = &lv
+			}
+			lines = append(lines, cardLines(st.data, col.cards[ci], w, sel, st.marks[id], fx)...)
 			lines = append(lines, strings.Repeat(" ", w))
 		}
 		body = append(body, lines)
@@ -286,19 +299,22 @@ func boardTabsFor(st boardState) []boardTab {
 // boardColsKey handles the movement keys of the columns layout.
 func boardColsKey(m model, st boardState, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	cols := m.boardColumns(st)
+	before := selCardID(st, cols)
 	moveCol := func(d int) (model, tea.Cmd, bool) {
 		if len(cols) > 0 {
 			st.col = (st.col + d + len(cols)) % len(cols)
 		}
 		m = m.withScreenData(viewBoard, m.colFit(st, cols))
-		return m, nil, true
+		m, cmd := m.fadeFrom(before, selCardID(st, cols))
+		return m, cmd, true
 	}
 	moveCard := func(d int) (model, tea.Cmd, bool) {
 		if len(cols) > 0 && st.col < len(cols) {
 			st.curs = setIdx(st.curs, st.col, min(max(st.curs[st.col]+d, 0), max(len(cols[st.col].cards)-1, 0)))
 		}
 		m = m.withScreenData(viewBoard, m.colFit(st, cols))
-		return m, nil, true
+		m, cmd := m.fadeFrom(before, selCardID(st, cols))
+		return m, cmd, true
 	}
 	switch k.String() {
 	case "l", "right", "tab":

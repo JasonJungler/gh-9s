@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
@@ -135,6 +136,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading, m.err = false, msg.err
 		if s := screens[msg.view]; msg.err == nil && s.apply != nil {
 			m = s.apply(m, msg)
+		}
+		return m, nil
+	case fxTickMsg:
+		if m.fx.active(time.Now()) {
+			return m, fxTick()
 		}
 		return m, nil
 	case tickMsg:

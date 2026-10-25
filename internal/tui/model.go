@@ -57,6 +57,7 @@ const (
 )
 
 type model struct {
+	fx            cardFx // the Project board's card fade (boardfx.go)
 	repo, branch  string
 	view          viewKind
 	back          []viewKind
