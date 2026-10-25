@@ -249,3 +249,66 @@ def project_page(s):
         "field": {"id": "FLD_status", "options": [{"id": i, "name": n} for i, n in OPTS]},
         "fields": {"nodes": []},
         "items": {"totalCount": len(nodes), "pageInfo": {"hasNextPage": False, "endCursor": ""}, "nodes": nodes}}}}}
+
+
+# ---- one run's jobs, workflow file and log ------------------------------------------------------------------------
+
+CI_YML = """name: CI
+on: [push, pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: golangci-lint run
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: go build ./...
+  test:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: go test ./...
+  package:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - run: make package
+"""
+
+
+def _job(i, name, status, concl, start, end, steps):
+    t = lambda s: (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(minutes=45) + _dt.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"databaseId": 7000 + i, "name": name, "status": status, "conclusion": concl, "startedAt": t(start), "completedAt": t(end),
+            "url": URL + "/actions/runs/9007/job/%d" % (7000 + i),
+            "steps": [{"name": n, "status": "completed", "conclusion": c} for n, c in steps]}
+
+
+def run_view(run_id):
+    ok = "success"
+    return {"status": "completed", "conclusion": "failure", "headSha": "9b83f10c2a", "workflowDatabaseId": 1, "jobs": [
+        _job(1, "lint", "completed", ok, 0, 41, [("Set up job", ok), ("Run golangci-lint", ok)]),
+        _job(2, "build", "completed", ok, 0, 58, [("Set up job", ok), ("Run go build", ok)]),
+        _job(3, "test", "completed", "failure", 60, 131, [("Set up job", ok), ("Run go test", "failure")]),
+        _job(4, "package", "completed", "skipped", 131, 131, [("Set up job", "skipped")]),
+    ]}
+
+
+def job_log():
+    ts = "2026-10-25T09:%02d:%02d.000Z"
+    lines = [
+        "=== RUN   TestSendRetriesUntilTheServerAnswers",
+        "--- PASS: TestSendRetriesUntilTheServerAnswers (3.02s)",
+        "=== RUN   TestSendGivesUpAfterFiveAttempts",
+        "    worker_test.go:42: calls = 4, want 5",
+        "--- FAIL: TestSendGivesUpAfterFiveAttempts (4.10s)",
+        "=== RUN   TestBackoffGrows",
+        "--- PASS: TestBackoffGrows (0.00s)",
+        "FAIL",
+        "FAIL\tacme/app/internal/sync\t7.151s",
+        "Error: Process completed with exit code 1.",
+    ]
+    return "".join("test\tRun go test\t" + ts % (14, i * 3) + " " + l + "\n" for i, l in enumerate(lines))

@@ -9,6 +9,8 @@ A [k9s](https://k9scli.io)-style terminal UI for GitHub, as a `gh` extension.
 
 ![gh-9s: issues, an issue, pull requests](docs/demo/overview.gif)
 
+![Actions: workflows, a failed run as a job graph, its log, re-run the failed jobs](docs/demo/actions.gif)
+
 ## Install / develop
 
 ```sh

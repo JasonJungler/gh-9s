@@ -98,6 +98,16 @@ if cmd == ["run", "list"]:
         name = {"ci.yml": "CI", "release.yml": "Release", "docs.yml": "Docs", "1": "CI", "2": "Release", "3": "Docs"}.get(w, w)
         out([r for r in fx.RUNS if r["workflowName"] == name][: int(flag("-L", "50"))])
     out(fx.RUNS)
+if cmd == ["run", "view"]:
+    if "--log" in args or "--log-failed" in args:
+        out(fx.job_log())
+    if "status,conclusion" in (flag("--json") or "").replace(" ", "") and "jobs" not in (flag("--json") or ""):
+        out({"status": "completed", "conclusion": "failure"})
+    out(fx.run_view(args[2]))
+if cmd[0] == "run" and cmd[1] in ("rerun", "cancel", "delete", "watch"):
+    out("")
+if cmd[:1] == ["api"] and "contents/.github/workflows/ci.yml" in " ".join(args):
+    out(fx.CI_YML)
 if cmd == ["workflow", "list"]:
     out(fx.WORKFLOWS)
 if cmd == ["pr", "list"]:
