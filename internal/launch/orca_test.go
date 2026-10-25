@@ -710,3 +710,153 @@ func TestOrcaOperationIDWithAnotherCodeIsNotALostReply(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Paste-only (launch_submit off) always takes the long path, whatever the size: create without an agent,
+// launch the agent, wait for it to be idle, then send the text WITHOUT --enter so it stays in the input.
+//
+// Not verified live: the no-Enter send has never run against a real Orca (only unit-tested through the
+// fake RunFunc here), and it is unknown whether `orca terminal send --text` delivers multi-line text as
+// a bracketed paste. If it does not, a newline in the text may submit it.
+func TestOrcaPasteOnlyUsesLongPathWithoutEnter(t *testing.T) {
+	r := orcaReq()
+	r.Model = "opus"
+	r.PasteOnly = true
+	if len(r.Context) > orcaPromptMax {
+		t.Fatal("the context must be small: paste-only takes the long path at any size")
+	}
+	rec := &recorder{reply: fallbackReply(orcaSendOkOut)}
+	res, err := (orcaBackend{run: rec.run}).launch(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.calls) != 4 {
+		t.Fatalf("calls = %d, want 4 (create, launch, wait, send): %+v", len(rec.calls), rec.calls)
+	}
+	if !equalArgs(rec.calls[0].args, []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main", "--issue", "42", "--json"}) {
+		t.Errorf("create = %q (no --agent, no --prompt)", rec.calls[0].args)
+	}
+	if !equalArgs(rec.calls[1].args, []string{"agent", "launch", "--agent", "claude", "--worktree", "id:" + orcaWorktreeID, "--model", "opus", "--json"}) {
+		t.Errorf("launch = %q", rec.calls[1].args)
+	}
+	if !equalArgs(rec.calls[2].args, []string{"terminal", "wait", "--terminal", orcaTerm2, "--for", "tui-idle", "--timeout-ms", "30000", "--json"}) {
+		t.Errorf("wait = %q", rec.calls[2].args)
+	}
+	send := []string{"terminal", "send", "--terminal", orcaTerm2, "--text", r.Context, "--json"}
+	if !equalArgs(rec.calls[3].args, send) {
+		t.Errorf("send = %q, want %q", rec.calls[3].args, send)
+	}
+	for _, c := range rec.calls {
+		for _, a := range c.args {
+			if a == "--enter" || a == "--prompt" {
+				t.Errorf("%q passes %s", c.line(), a)
+			}
+		}
+	}
+	if res.Branch != "MurabitoB/issue-42" || res.Where != "issue-42" || res.Note != "" {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+// Without Enter, Orca's warning that no turn start was seen is expected, so it is not passed on as the
+// usual "could not confirm the agent started" note.
+func TestOrcaPasteOnlyDoesNotReportMissingTurnStart(t *testing.T) {
+	r := orcaReq()
+	r.PasteOnly = true
+	rec := &recorder{reply: fallbackReply(orcaSendWarnOut)}
+	res, err := (orcaBackend{run: rec.run}).launch(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Note, "started") {
+		t.Errorf("Note = %q, it claims the agent should have started", res.Note)
+	}
+	if res.Note == "" {
+		t.Error("orca's warning was dropped silently")
+	}
+}
+
+func TestOrcaPasteOnlyStepFailures(t *testing.T) {
+	r := orcaReq()
+	r.PasteOnly = true
+	upto := func(n int, bad func(c call) ([]byte, error)) func(c call) ([]byte, error) {
+		i := 0
+		return func(c call) ([]byte, error) {
+			i++
+			if i > n {
+				return bad(c)
+			}
+			return fallbackReply(orcaSendOkOut)(c)
+		}
+	}
+	fail := func(c call) ([]byte, error) { return []byte(orcaFailOut), errors.New("exit status 1") }
+	cases := []struct {
+		name  string
+		reply func(c call) ([]byte, error)
+		step  string
+		calls int
+	}{
+		{"create fails", upto(0, fail), StepCreate, 1},
+		{"agent launch fails", upto(1, fail), StepStart, 2},
+		{"wait times out", upto(2, func(c call) ([]byte, error) {
+			return []byte(orcaWaitTimeoutOut), errors.New("exit status 1")
+		}), StepReady, 3},
+		{"send fails", upto(3, func(c call) ([]byte, error) { return nil, errors.New("terminal gone") }), StepPaste, 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recorder{reply: tc.reply}
+			_, err := (orcaBackend{run: rec.run}).launch(r)
+			var se *StepError
+			if !errors.As(err, &se) || se.Step != tc.step {
+				t.Fatalf("err = %v, want a %q step error", err, tc.step)
+			}
+			if len(rec.calls) != tc.calls {
+				t.Errorf("calls = %d, want %d", len(rec.calls), tc.calls)
+			}
+		})
+	}
+}
+
+// A lost reply from the agent launch is a plain StepError, as in the large-context fallback.
+func TestOrcaPasteOnlyLostLaunchReplyIsNotRetryable(t *testing.T) {
+	r := orcaReq()
+	r.PasteOnly = true
+	rec := &recorder{reply: func(c call) ([]byte, error) {
+		if c.args[0] == "worktree" {
+			return []byte(orcaCreateBareOut), nil
+		}
+		return []byte(orcaLostOut), errors.New("exit status 1")
+	}}
+	_, err := (orcaBackend{run: rec.run}).launch(r)
+	var se *StepError
+	var lost *LostReplyError
+	if !errors.As(err, &se) || se.Step != StepStart || errors.As(err, &lost) || strings.Contains(err.Error(), "--retry-launch") {
+		t.Fatalf("err = %v, want a plain start step error with no retry", err)
+	}
+}
+
+func TestOrcaPasteOnlyRefusesRetryID(t *testing.T) {
+	r := orcaReq()
+	r.PasteOnly = true
+	r.RetryID = orcaOp
+	rec := &recorder{}
+	_, err := (orcaBackend{run: rec.run}).launch(r)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepCreate || len(rec.calls) != 0 {
+		t.Fatalf("err = %v, calls = %+v", err, rec.calls)
+	}
+	if strings.Contains(err.Error(), "too long") {
+		t.Errorf("err = %q blames the size, but the context is small", err)
+	}
+}
+
+// Submitting (PasteOnly false) is unchanged: a small context is one call with --prompt.
+func TestOrcaSubmitKeepsTheOneCallPath(t *testing.T) {
+	rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
+	if _, err := (orcaBackend{run: rec.run}).launch(orcaReq()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.calls) != 1 || !strings.Contains(strings.Join(rec.calls[0].args, " "), "--prompt") {
+		t.Errorf("calls = %+v", rec.calls)
+	}
+}

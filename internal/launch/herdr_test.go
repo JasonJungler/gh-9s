@@ -270,7 +270,7 @@ func TestHerdrReadyIsANoOp(t *testing.T) {
 func TestHerdrPasteUsesAgentPrompt(t *testing.T) {
 	rec := &recorder{}
 	text := "請解決這個 issue\n\n# Title (#1)\n'quoted' $(x) `y`; \"z\"\n"
-	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", text); err != nil {
+	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", text, true); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"agent", "prompt", "w1:p2", text}
@@ -282,7 +282,7 @@ func TestHerdrPasteUsesAgentPrompt(t *testing.T) {
 	}
 
 	rec = &recorder{reply: func(call) ([]byte, error) { return nil, errors.New("agent_blocked") }}
-	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", "x"); err == nil || err.Error() != "agent_blocked" {
+	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", "x", true); err == nil || err.Error() != "agent_blocked" {
 		t.Errorf("err = %v, want herdr's error", err)
 	}
 }
@@ -316,5 +316,70 @@ func TestHerdrEveryLaterCommandNamesThePane(t *testing.T) {
 				t.Errorf("%q does not name pane %s", c.line(), pane)
 			}
 		}
+	}
+}
+
+// Measured live with herdr 0.8.2 in a pane that echoed raw input (stty raw; cat > file): `herdr pane
+// send-text` writes the text byte for byte, adds no Enter, does not wrap it in a bracketed paste even
+// when the program asked for bracketed paste, and passes ESC through untouched. A newline inside it
+// arrives as a bare LF, which an agent could take for Enter. So paste-only wraps the text itself.
+func TestHerdrPasteOnlyWrapsInBracketedPasteAndNeverSubmits(t *testing.T) {
+	rec := &recorder{}
+	text := "請解決這個 issue\n\n# Title (#1)\n'quoted' $(x) `y`; \"z\"\n"
+	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", text, false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"pane", "send-text", "w1:p2", "\x1b[200~" + text + "\x1b[201~"}
+	if len(rec.calls) != 1 || rec.calls[0].name != "herdr" || !equalArgs(rec.calls[0].args, want) {
+		t.Fatalf("calls = %+v, want one herdr %q", rec.calls, want)
+	}
+	if rec.calls[0].stdin != "" {
+		t.Errorf("stdin = %q, want none", rec.calls[0].stdin)
+	}
+	if strings.Contains(rec.calls[0].line(), "prompt") || strings.Contains(rec.calls[0].line(), "run") {
+		t.Errorf("paste-only must not use a submitting herdr command: %q", rec.calls[0].line())
+	}
+
+	rec = &recorder{reply: func(call) ([]byte, error) { return nil, errors.New("pane_not_found") }}
+	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", "x", false); err == nil || err.Error() != "pane_not_found" {
+		t.Errorf("err = %v, want herdr's error", err)
+	}
+}
+
+// BuildContext strips ESC, so the text cannot end the paste early; the herdr space checks it again and
+// sends nothing if an ESC or other control character is left.
+func TestHerdrPasteOnlyRefusesAnEscapeInTheText(t *testing.T) {
+	for _, text := range []string{"a\x1b[201~echo hi\r", "a\x1bb", "a\rb", "a\x7fb", "a\x00b", "a\u009bb"} {
+		rec := &recorder{}
+		err := newHerdr(rec.run, herdrEnv).paste("w1:p2", text, false)
+		if err == nil || !strings.Contains(err.Error(), "control character") {
+			t.Errorf("%q: err = %v, want a control character refusal", text, err)
+		}
+		if len(rec.calls) != 0 {
+			t.Errorf("%q: ran %+v, want nothing sent", text, rec.calls)
+		}
+	}
+}
+
+func TestHerdrPasteOnlyKeepsNewlineAndTab(t *testing.T) {
+	rec := &recorder{}
+	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", "a\n\tb", false); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.calls) != 1 {
+		t.Fatalf("calls = %+v", rec.calls)
+	}
+}
+
+func TestHerdrSequencePasteOnlyEndsWithSendText(t *testing.T) {
+	rec := &recorder{reply: herdrReply}
+	claude, _ := LookupAgent("claude")
+	r := Request{Agent: claude, Place: PlacePane, Split: SplitHorizontal, Dir: "/work", Context: "text", PasteOnly: true}
+	if err := runSequence(newHerdr(rec.run, herdrEnv), r, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	last := rec.calls[len(rec.calls)-1]
+	if !equalArgs(last.args, []string{"pane", "send-text", "w1:p2", "\x1b[200~text\x1b[201~"}) {
+		t.Errorf("last call = %q", last.line())
 	}
 }

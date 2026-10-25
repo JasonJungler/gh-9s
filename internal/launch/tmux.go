@@ -225,8 +225,10 @@ func (t *tmuxSpace) ready(pane string, r Request, timeout time.Duration) error {
 }
 
 // paste sends text to the pane as a bracketed paste through a named tmux
-// buffer, then presses Enter. The text never goes through the shell.
-func (t *tmuxSpace) paste(pane, text string) error {
+// buffer, then presses Enter when submit is set. Without submit the text stays in the agent's input box,
+// still as one bracketed paste so a multi-line text is not submitted by its newlines. The text never goes
+// through the shell.
+func (t *tmuxSpace) paste(pane, text string, submit bool) error {
 	buf := "gh9s-" + strings.TrimPrefix(pane, "%")
 	if _, err := t.tmux([]byte(text), "load-buffer", "-b", buf, "-"); err != nil {
 		return err
@@ -234,6 +236,9 @@ func (t *tmuxSpace) paste(pane, text string) error {
 	if _, err := t.tmux(nil, "paste-buffer", "-p", "-d", "-b", buf, "-t", pane); err != nil {
 		t.tmux(nil, "delete-buffer", "-b", buf) // best effort: do not leave the text in tmux
 		return err
+	}
+	if !submit {
+		return nil
 	}
 	_, err := t.tmux(nil, "send-keys", "-t", pane, "Enter")
 	return err

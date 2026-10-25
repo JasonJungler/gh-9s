@@ -239,7 +239,7 @@ func TestTmuxEveryLaterCommandNamesThePane(t *testing.T) {
 	if err := sp.ready(pane, r, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.paste(pane, "text"); err != nil {
+	if err := sp.paste(pane, "text", true); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.calls) == 0 {
@@ -608,7 +608,7 @@ func TestTmuxReadyTimesOut(t *testing.T) {
 func TestTmuxPasteUsesBuffer(t *testing.T) {
 	rec := &recorder{}
 	text := "line one\n'quoted' $(x) `y`; 中文\n"
-	if err := newTmux(rec.run, noEnv).paste("%7", text); err != nil {
+	if err := newTmux(rec.run, noEnv).paste("%7", text, true); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.calls) != 3 {
@@ -640,7 +640,7 @@ func TestTmuxPasteBufferFailureDeletesBuffer(t *testing.T) {
 		}
 		return nil, nil
 	}}
-	err := newTmux(rec.run, noEnv).paste("%7", "text")
+	err := newTmux(rec.run, noEnv).paste("%7", "text", true)
 	if err == nil || err.Error() != "pane gone" {
 		t.Fatalf("err = %v, want the paste-buffer error", err)
 	}
@@ -650,5 +650,30 @@ func TestTmuxPasteBufferFailureDeletesBuffer(t *testing.T) {
 	name := rec.calls[0].args[2]
 	if !equalArgs(rec.calls[2].args, []string{"delete-buffer", "-b", name}) {
 		t.Errorf("third call = %q", rec.calls[2].line())
+	}
+}
+
+// With submit false the text still goes in as one bracketed paste (paste-buffer -p), so multi-line text
+// stays in the agent's input box, but no Enter is pressed.
+func TestTmuxPasteOnlyPressesNoEnter(t *testing.T) {
+	rec := &recorder{}
+	text := "line one\nline two\n"
+	if err := newTmux(rec.run, noEnv).paste("%7", text, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.calls) != 2 {
+		t.Fatalf("calls = %+v, want load-buffer and paste-buffer only", rec.calls)
+	}
+	name := rec.calls[0].args[2]
+	if rec.calls[0].args[0] != "load-buffer" || rec.calls[0].stdin != text {
+		t.Errorf("load = %q stdin %q", rec.calls[0].line(), rec.calls[0].stdin)
+	}
+	if !equalArgs(rec.calls[1].args, []string{"paste-buffer", "-p", "-d", "-b", name, "-t", "%7"}) {
+		t.Errorf("paste = %q", rec.calls[1].line())
+	}
+	for _, c := range rec.calls {
+		if c.args[0] == "send-keys" {
+			t.Errorf("pasted without submitting, yet ran %q", c.line())
+		}
 	}
 }

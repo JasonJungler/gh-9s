@@ -13,6 +13,7 @@ type fakeSpace struct {
 	calls  []string
 	failAt string
 	pasted string
+	submit bool
 }
 
 func (f *fakeSpace) step(name string) error {
@@ -30,8 +31,8 @@ func (f *fakeSpace) start(pane string, r Request) error {
 func (f *fakeSpace) ready(pane string, r Request, timeout time.Duration) error {
 	return f.step("ready")
 }
-func (f *fakeSpace) paste(pane, text string) error {
-	f.pasted = text
+func (f *fakeSpace) paste(pane, text string, submit bool) error {
+	f.pasted, f.submit = text, submit
 	return f.step("paste")
 }
 
@@ -89,5 +90,20 @@ func TestStepErrorUnwrap(t *testing.T) {
 	inner := errors.New("boom")
 	if err := error(&StepError{Step: StepFetch, Err: inner}); !errors.Is(err, inner) {
 		t.Error("StepError does not unwrap to its cause")
+	}
+}
+
+func TestSequenceSubmitsUnlessPasteOnly(t *testing.T) {
+	for _, tc := range []struct {
+		pasteOnly bool
+		submit    bool
+	}{{false, true}, {true, false}} {
+		f := &fakeSpace{}
+		if err := runSequence(f, Request{Context: "hello", PasteOnly: tc.pasteOnly}, time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if f.submit != tc.submit {
+			t.Errorf("PasteOnly=%v: submit = %v, want %v", tc.pasteOnly, f.submit, tc.submit)
+		}
 	}
 }

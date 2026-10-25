@@ -399,3 +399,53 @@ func TestLauncherLocalRefAndItsNoteSurviveFetchAndRetry(t *testing.T) {
 		t.Errorf("err = %v, calls = %d; want a fetch step error and no orca call", err, len(rec.calls))
 	}
 }
+
+func TestLauncherPasteOnlyReachesEveryTarget(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	t.Run("tmux presses no Enter after the paste", func(t *testing.T) {
+		captures := 0
+		rec := &recorder{reply: func(c call) ([]byte, error) {
+			switch c.args[0] {
+			case "split-window":
+				return []byte("%7\n"), nil
+			case "capture-pane":
+				captures++
+				if captures <= 2 { // start's two settle checks
+					return []byte("$ "), nil
+				}
+				return []byte("$ \nClaude Code v1"), nil
+			case "display-message":
+				return []byte("claude\n"), nil
+			}
+			return nil, nil
+		}}
+		r := Request{Target: TargetTmux, Agent: claude, Dir: "/work", Context: "text", PasteOnly: true}
+		if _, err := (Launcher{Run: rec.run, Getenv: noEnv}).Do(r); err != nil {
+			t.Fatal(err)
+		}
+		last := rec.calls[len(rec.calls)-1]
+		if last.args[0] != "paste-buffer" {
+			t.Errorf("last call = %q, want paste-buffer", last.line())
+		}
+	})
+	t.Run("herdr keeps the byte ceiling", func(t *testing.T) {
+		rec := &recorder{reply: herdrReply}
+		r := Request{Target: TargetHerdr, Agent: claude, Dir: "/work", Context: strings.Repeat("a", argvCeiling(goos)+1), PasteOnly: true}
+		_, err := (Launcher{Run: rec.run, Getenv: herdrEnv}).Do(r)
+		var se *StepError
+		if !errors.As(err, &se) || se.Step != StepCreate || len(rec.calls) != 0 {
+			t.Errorf("err = %v, calls = %+v", err, rec.calls)
+		}
+	})
+	t.Run("orca keeps the byte ceiling", func(t *testing.T) {
+		rec := &recorder{}
+		r := orcaReq()
+		r.PasteOnly = true
+		r.Context = strings.Repeat("a", argvCeiling(goos)+1)
+		_, err := (Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(_, b string) (string, string, error) { return b, "", nil }}).Do(r)
+		var se *StepError
+		if !errors.As(err, &se) || se.Step != StepCreate || len(rec.calls) != 0 {
+			t.Errorf("err = %v, calls = %+v", err, rec.calls)
+		}
+	})
+}

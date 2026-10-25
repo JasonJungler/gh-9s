@@ -94,7 +94,7 @@ func (o orcaBackend) launch(r Request) (Result, error) {
 	if err := o.check(r); err != nil {
 		return Result{}, &StepError{StepCreate, err}
 	}
-	if len(r.Context) > orcaPromptMax {
+	if len(r.Context) > orcaPromptMax || r.PasteOnly {
 		return o.launchLarge(r)
 	}
 	return o.launchOneCall(r)
@@ -152,13 +152,25 @@ func plainFailure(out []byte, err error) error {
 	return err
 }
 
-// launchLarge is the fallback for a context too long for --prompt: create the
-// workspace, launch the agent in it, wait until the agent is idle, then send
-// the text to its terminal. A retry id is never offered here: the workspace
-// exists after the first step, and asking again would make a second one.
+// launchLarge is the longer path: create the workspace, launch the agent in
+// it, wait until the agent is idle, then send the text to its terminal. It is
+// used for a context too long for --prompt, and always when r.PasteOnly: the
+// one-call path always submits, so only here can the text be left unsent by
+// Enter. A retry id is never offered here: the workspace exists after the
+// first step, and asking again would make a second one.
+//
+// With PasteOnly the send has no --enter, so the text waits in the agent's
+// input box. That call has not been run against a real Orca (the unit tests use
+// a fake), and it is unknown whether `orca terminal send --text` delivers
+// multi-line text as a bracketed paste; if it does not, a newline in the text
+// may submit it.
 func (o orcaBackend) launchLarge(r Request) (Result, error) {
 	if r.RetryID != "" {
-		return Result{}, &StepError{StepCreate, errors.New("a retry id only applies to a launch that sends the prompt in one call, and this context is too long for that")}
+		why := "this context is too long for that"
+		if r.PasteOnly {
+			why = "paste only always uses the longer path"
+		}
+		return Result{}, &StepError{StepCreate, errors.New("a retry id only applies to a launch that sends the prompt in one call, and " + why)}
 	}
 	args := append(orcaCreateArgs(r), "--json")
 	out, err := o.run(r.Dir, nil, "orca", args...)
@@ -198,11 +210,15 @@ func (o orcaBackend) launchLarge(r Request) (Result, error) {
 		return Result{}, &StepError{StepReady, fmt.Errorf("%s but the agent did not become ready, so the context was not sent: %w", made, err)}
 	}
 
-	out, err = o.run(r.Dir, nil, "orca", "terminal", "send", "--terminal", handle, "--text", r.Context, "--enter", "--json")
+	send := []string{"terminal", "send", "--terminal", handle, "--text", r.Context}
+	if !r.PasteOnly {
+		send = append(send, "--enter")
+	}
+	out, err = o.run(r.Dir, nil, "orca", append(send, "--json")...)
 	if err != nil {
 		return Result{}, &StepError{StepPaste, fmt.Errorf("the agent is running in %s but the context was not sent: %w", wt.where(), plainFailure(out, err))}
 	}
-	warn, err := parseOrcaSend(out)
+	warn, err := parseOrcaSend(out, r.PasteOnly)
 	if err != nil {
 		return Result{}, &StepError{StepPaste, fmt.Errorf("the agent is running in %s: %w", wt.where(), err)}
 	}
@@ -427,8 +443,10 @@ func parseOrcaAgentLaunch(out []byte) (string, error) {
 //	  may have been swallowed. Confirm delivery by reissuing ..."]}}
 //
 // The agent did answer that prompt, so the warning is not a failure; it is
-// passed on as a note.
-func parseOrcaSend(out []byte) (string, error) {
+// passed on as a note. Without Enter (pasteOnly) no turn is meant to start, so
+// that warning is expected; any warning is then passed on as a plainer note,
+// since what Orca says for a send without Enter has not been observed.
+func parseOrcaSend(out []byte, pasteOnly bool) (string, error) {
 	var env orcaEnvelope
 	if err := json.Unmarshal(out, &env); err != nil || !env.OK {
 		return "", fmt.Errorf("orca printed %s instead of a send receipt", orcaQuote(out))
@@ -441,6 +459,9 @@ func parseOrcaSend(out []byte) (string, error) {
 	}
 	if err := json.Unmarshal(env.Result, &res); err != nil || !res.Send.Accepted {
 		return "", fmt.Errorf("orca did not accept the context (%s)", orcaQuote(out))
+	}
+	if len(res.Warnings) > 0 && pasteOnly {
+		return "orca warned about the text, check the agent's input", nil
 	}
 	if len(res.Warnings) > 0 {
 		return "orca could not confirm the agent started on the context, check its terminal", nil

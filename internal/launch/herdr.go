@@ -174,9 +174,44 @@ func (h *herdrSpace) ready(pane string, r Request, timeout time.Duration) error 
 	return nil
 }
 
-// paste submits text to the agent in pane. herdr sends it as a paste followed
-// by Enter; it is one argument, so no shell sees it.
-func (h *herdrSpace) paste(pane, text string) error {
-	_, err := h.herdr("agent", "prompt", pane, text)
+// Bracketed paste markers: a terminal program that turned on bracketed paste reads what lies between them
+// as pasted text, so a newline in it is a newline in the text and not the Enter key.
+const (
+	bracketedPasteStart = "\x1b[200~"
+	bracketedPasteEnd   = "\x1b[201~"
+)
+
+// pasteSafe reports whether text can sit inside a bracketed paste: no control character other than newline
+// and tab, so it can neither end the paste (ESC[201~) nor press a key. BuildContext already removes these;
+// this is the check at the point of sending.
+func pasteSafe(text string) bool {
+	for _, r := range text {
+		if (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f) {
+			return false
+		}
+	}
+	return true
+}
+
+// paste gives text to the agent in pane. With submit, `herdr agent prompt` sends it as a paste followed by
+// Enter. herdr has no way to prompt without Enter, so otherwise `herdr pane send-text` is used.
+//
+// Observed with herdr 0.8.2 in a pane whose program echoed its raw input (stty raw -echo; cat > file),
+// including after the program turned on bracketed paste (ESC[?2004h): send-text writes the text byte for
+// byte, adds no newline or Enter, does not make it a bracketed paste, and passes ESC through. A newline in
+// it therefore arrives as a bare LF, which an agent TUI may take for Enter. So the text is wrapped in the
+// bracketed paste markers here, after it has been checked to hold no control character that could end the
+// paste early. (`herdr pane run` would wrap it, but presses Enter.) The wrapped text is one argument, which
+// also starts with ESC and so can never read as an option. An agent that did not turn on bracketed paste
+// would show the markers as characters; Claude Code and Devin do turn it on.
+func (h *herdrSpace) paste(pane, text string, submit bool) error {
+	if submit {
+		_, err := h.herdr("agent", "prompt", pane, text)
+		return err
+	}
+	if !pasteSafe(text) {
+		return errors.New("the text contains a control character, so it cannot be placed as a paste")
+	}
+	_, err := h.herdr("pane", "send-text", pane, bracketedPasteStart+text+bracketedPasteEnd)
 	return err
 }

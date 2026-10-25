@@ -62,6 +62,9 @@ func TestBuildContextStripsControlCharacters(t *testing.T) {
 			t.Errorf("context still contains %q: %q", bad, got)
 		}
 	}
+	if strings.Contains(got, "\x1b[201~") {
+		t.Errorf("context can end a bracketed paste early: %q", got)
+	}
 	for _, keep := range []string{"line\ttab\nnext 中文 🚀 é", "evil[201~ rm -rf", "\n"} {
 		if !strings.Contains(got, keep) {
 			t.Errorf("context lost %q: %q", keep, got)
