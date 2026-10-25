@@ -71,7 +71,7 @@ If you switched repos with `:repo`, so that the repo on screen is not the repo o
 
 Orca gets a new workspace (a worktree) rather than a pane in your current directory.
 
-1. gh-9s runs `git fetch` for the remote of the base, so the workspace starts from what the remote has now. A bare base such as `main` means the same branch on `origin`: gh-9s fetches `origin` and gives Orca `origin/main`, so the workspace starts from what the remote has and not from a local `main` that may be behind. A base that already names a remote, such as `upstream/main`, is used as it is. If the repo has no remote, there is nothing to fetch and the launch continues from the local branch under its bare name, with the note `no remote, using the local branch`. If the fetch fails, the launch stops. It never falls back to an old ref without telling you.
+1. gh-9s runs `git fetch` for the remote of the base, so the workspace starts from what the remote has now. A bare base such as `main` means the same branch on `origin`: gh-9s fetches `origin` and gives Orca `origin/main`, so the workspace starts from what the remote has and not from a local `main` that may be behind. If `origin` has no branch of that name but the name is a local branch, a tag or a commit id, that ref is used as it is and the launch shows the note `origin has no <base>; using the local ref <base>`. If the name is none of these, the launch stops at `fetch` and says the base was not found. A base that already names a remote, such as `upstream/main`, or that starts with `refs/`, is used as it is. If the repo has no remote, there is nothing to fetch and the launch continues from the local branch under its bare name, with the note `no remote, using the local branch`. If the fetch fails, the launch stops. It never falls back to an old ref without telling you.
 2. gh-9s asks Orca to create the workspace, link it to the issue and start the agent with the issue as its prompt. Orca does the starting and waiting itself.
 
 The base defaults to the base ref Orca has for the repo, or else `origin/<the default branch>` (`origin/main` if git cannot tell). In a repo with no remote there is no `origin/...`, so it is the branch that is checked out, and the dialog shows `no remote, using the local branch`. The base is looked up when the dialog opens. If you press `enter` before it arrives, nothing is launched: the dialog says `still finding the base branch…` and you press `enter` again once the base shows.
@@ -86,7 +86,7 @@ Orca and herdr receive the issue as a program argument, and the operating system
 | macOS | 524,288 |
 | Other | 30,000 |
 
-The limit counts bytes, not characters: Chinese, Japanese and emoji take 3 or 4 bytes each, so 40,000 Chinese characters are already about 120,000 bytes. When the issue is near the limit (90% or more) or over it, the confirmation line says so and, for Orca and herdr, shows the byte count and the limit.
+The limit counts bytes, not characters: Chinese, Japanese and emoji take 3 or 4 bytes each, so 40,000 Chinese characters are already about 120,000 bytes. When the issue is near the limit (90% or more) or over it, the confirmation line says so. Only Orca and herdr show the byte count and the limit there; tmux has no such limit and shows nothing about bytes.
 
 On macOS, an Orca issue of more than 131,071 bytes cannot go in one `create` call. gh-9s then creates the workspace, starts the agent, waits for it to be idle and sends the text to its terminal, which gives the same result. On Linux the two limits are the same, so that path is never needed.
 
@@ -131,7 +131,7 @@ Neither Claude Code nor Orca nor herdr can list an agent's models, so for Claude
 
 `default`, `best`, `fable`, `opus`, `sonnet`, `haiku`, `opusplan`, `sonnet[1m]`, `opus[1m]`
 
-You can type any other model name in the Model row, such as a full model name. gh-9s does not check that the model exists. **A mistyped name only fails inside the agent's pane**, on its first request. In tmux, where the name is typed into your shell, only letters, digits and `. _ : / @ + [ ] -` are accepted. Anything else fails at `start agent` before anything is typed.
+You can type any other model name in the Model row, such as a full model name. gh-9s does not check that the model exists. **A mistyped name only fails inside the agent's pane**, on its first request. In tmux, where the name is typed into your shell, the name must start with a letter or digit and may then have only letters, digits and `. _ : / @ + [ ] -`. Anything else fails at `start agent` before a pane or window is opened, so nothing is left behind.
 
 ### Devin
 
@@ -154,7 +154,7 @@ The dialog stays open and names the step that failed:
 
 Whatever was already created is left open for you to take over. Nothing is cleaned up and nothing is retried silently. `enter` in the failed dialog tries again from the start, which can make a second pane or workspace, so check what is already open first.
 
-The one exception is an Orca launch whose reply was lost. The agent may already be running, so the dialog says so and `enter` asks Orca about that same launch again instead of starting a new one. The retry does not run `git fetch` again. If the retry itself fails, the dialog keeps offering the same retry, so you never start a duplicate by pressing `enter` again. Editing a field cancels the retry.
+The one exception is an Orca launch whose reply was lost. The agent may already be running, so the dialog says so and `enter` asks Orca about that same launch again instead of starting a new one. The retry does not run `git fetch` again. If the retry itself fails, the dialog keeps offering the same retry, so you never start a duplicate by pressing `enter` again. Editing a field or pressing `esc` discards the retry.
 
 ## Settings
 
