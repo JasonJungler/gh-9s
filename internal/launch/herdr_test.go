@@ -349,7 +349,7 @@ func TestHerdrPasteOnlyWrapsInBracketedPasteAndNeverSubmits(t *testing.T) {
 // BuildContext strips ESC, so the text cannot end the paste early; the herdr space checks it again and
 // sends nothing if an ESC or other control character is left.
 func TestHerdrPasteOnlyRefusesAnEscapeInTheText(t *testing.T) {
-	for _, text := range []string{"a\x1b[201~echo hi\r", "a\x1bb", "a\rb", "a\x7fb", "a\x00b", "a\u009bb"} {
+	for _, text := range []string{"a\x1b[201~echo hi\r", "a\x1bb", "a\rb", "a\x7fb", "a\x00b", "a\u009bb", "a\x9b201~b", "a\xffb", "a\xc0\x80b"} {
 		rec := &recorder{}
 		err := newHerdr(rec.run, herdrEnv).paste("w1:p2", text, false)
 		if err == nil || !strings.Contains(err.Error(), "control character") {
@@ -381,5 +381,28 @@ func TestHerdrSequencePasteOnlyEndsWithSendText(t *testing.T) {
 	last := rec.calls[len(rec.calls)-1]
 	if !equalArgs(last.args, []string{"pane", "send-text", "w1:p2", "\x1b[200~text\x1b[201~"}) {
 		t.Errorf("last call = %q", last.line())
+	}
+}
+
+// An unsafe text is refused before a pane is opened, so nothing is left behind for a launch that cannot
+// succeed. Submit mode is not checked (herdr agent prompt handles the text itself).
+func TestHerdrSequencePasteOnlyRefusesUnsafeTextBeforeOpening(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	for _, text := range []string{"a\x1bb", "a\x9b201~b", "a\xffb"} {
+		rec := &recorder{reply: herdrReply}
+		r := Request{Agent: claude, Place: PlacePane, Split: SplitHorizontal, Dir: "/work", Context: text, PasteOnly: true}
+		err := runSequence(newHerdr(rec.run, herdrEnv), r, time.Second)
+		var se *StepError
+		if !errors.As(err, &se) || !strings.Contains(err.Error(), "control character") {
+			t.Errorf("%q: err = %v, want a refusal", text, err)
+		}
+		if len(rec.calls) != 0 {
+			t.Errorf("%q: ran %+v, want nothing opened", text, rec.calls)
+		}
+	}
+	rec := &recorder{reply: herdrReply}
+	r := Request{Agent: claude, Place: PlacePane, Split: SplitHorizontal, Dir: "/work", Context: "a\x1bb"}
+	if err := runSequence(newHerdr(rec.run, herdrEnv), r, time.Second); err != nil {
+		t.Errorf("submit mode: err = %v, want it unchanged", err)
 	}
 }

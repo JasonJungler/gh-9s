@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // herdrStartTimeout is how long `herdr agent start` waits for the agent to be
@@ -151,6 +152,15 @@ func (h *herdrSpace) open(r Request) (string, error) {
 	return pane, nil
 }
 
+// check refuses, before a pane is opened, a paste-only text that paste would refuse, so nothing is left
+// open for a launch that cannot succeed.
+func (h *herdrSpace) check(r Request) error {
+	if r.PasteOnly && !pasteSafe(r.Context) {
+		return errPasteUnsafe
+	}
+	return nil
+}
+
 // start runs the agent in pane. herdr waits until the agent is ready before
 // it returns. The model is passed as its own argument after "--", so no shell
 // ever sees it.
@@ -181,10 +191,17 @@ const (
 	bracketedPasteEnd   = "\x1b[201~"
 )
 
-// pasteSafe reports whether text can sit inside a bracketed paste: no control character other than newline
-// and tab, so it can neither end the paste (ESC[201~) nor press a key. BuildContext already removes these;
-// this is the check at the point of sending.
+// errPasteUnsafe is why a text is refused as a paste.
+var errPasteUnsafe = errors.New("the text contains a control character or invalid UTF-8, so it cannot be placed as a paste")
+
+// pasteSafe reports whether text can sit inside a bracketed paste: valid UTF-8 (a raw 0x9b byte would be a
+// C1 control character to a terminal) and no control character other than newline and tab, so it can
+// neither end the paste (ESC[201~) nor press a key. BuildContext already removes these; this is the check
+// at the point of sending.
 func pasteSafe(text string) bool {
+	if !utf8.ValidString(text) {
+		return false
+	}
 	for _, r := range text {
 		if (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f) {
 			return false
@@ -203,14 +220,15 @@ func pasteSafe(text string) bool {
 // bracketed paste markers here, after it has been checked to hold no control character that could end the
 // paste early. (`herdr pane run` would wrap it, but presses Enter.) The wrapped text is one argument, which
 // also starts with ESC and so can never read as an option. An agent that did not turn on bracketed paste
-// would show the markers as characters; Claude Code and Devin do turn it on.
+// would show the markers as characters or submit at a newline; Claude Code and Devin are expected to turn
+// it on, but that is not verified.
 func (h *herdrSpace) paste(pane, text string, submit bool) error {
 	if submit {
 		_, err := h.herdr("agent", "prompt", pane, text)
 		return err
 	}
 	if !pasteSafe(text) {
-		return errors.New("the text contains a control character, so it cannot be placed as a paste")
+		return errPasteUnsafe
 	}
 	_, err := h.herdr("pane", "send-text", pane, bracketedPasteStart+text+bracketedPasteEnd)
 	return err
