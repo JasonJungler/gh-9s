@@ -18,6 +18,7 @@ type pickerFakes struct {
 	searchCalls  []string
 	searchResult map[string][]ghcli.RepoInfo
 	searchErr    error
+	logged       []string // the hosts gh auth status lists
 }
 
 func info(name string) ghcli.RepoInfo {
@@ -29,7 +30,8 @@ func info(name string) ghcli.RepoInfo {
 func installPickerFakes(t *testing.T, access []ghcli.RepoInfo) *pickerFakes {
 	t.Helper()
 	f := &pickerFakes{searchResult: map[string][]ghcli.RepoInfo{}}
-	oldList, oldSearch, oldDebounce := listRepos, searchRepos, debounce
+	oldList, oldSearch, oldDebounce, oldHosts := listRepos, searchRepos, debounce, inboxHosts
+	inboxHosts = func() ([]string, error) { return f.logged, nil }
 	listRepos = func(host string) ([]ghcli.RepoInfo, []string, error) {
 		f.listHosts = append(f.listHosts, host)
 		return access, f.skipped, nil
@@ -40,7 +42,7 @@ func installPickerFakes(t *testing.T, access []ghcli.RepoInfo) *pickerFakes {
 		return f.searchResult[q], f.searchErr
 	}
 	debounce = func(seq int) tea.Cmd { return func() tea.Msg { return pickerDebounceMsg{seq} } }
-	t.Cleanup(func() { listRepos, searchRepos, debounce = oldList, oldSearch, oldDebounce })
+	t.Cleanup(func() { listRepos, searchRepos, debounce, inboxHosts = oldList, oldSearch, oldDebounce, oldHosts })
 	return f
 }
 
@@ -60,7 +62,11 @@ func openPicker(t *testing.T, m model) model {
 func pickKeys(t *testing.T, m model, keysToPress ...string) model {
 	t.Helper()
 	for _, key := range keysToPress {
-		next, c := m.Update(k(key))
+		msg := k(key)
+		if key == "shift+tab" {
+			msg = tea.KeyMsg{Type: tea.KeyShiftTab}
+		}
+		next, c := m.Update(msg)
 		m = next.(model)
 		for c != nil { // run only picker messages (debounce, search results); ignore fetches
 			msg := c()
@@ -68,7 +74,7 @@ func pickKeys(t *testing.T, m model, keysToPress ...string) model {
 				break
 			}
 			switch msg.(type) {
-			case pickerDebounceMsg, pickerResultMsg, pickerLoadedMsg, repoSwitchedMsg:
+			case pickerDebounceMsg, pickerResultMsg, pickerLoadedMsg, pickerHostsMsg, repoSwitchedMsg:
 				next, c = m.Update(msg)
 				m = next.(model)
 			default:
@@ -297,5 +303,56 @@ func TestGlobalSearchClearsOldResultsWhenTheQueryChanges(t *testing.T) {
 	m = pickKeys(t, m, "x") // the query is now "apix": the old results are not answers to it
 	for _, r := range m.picker.rows(m.curRepo, nil)[1:] {
 		t.Errorf("stale row %q is still shown for the new query", r.label)
+	}
+}
+
+func TestShiftTabCyclesTheLoggedInHostsAndListsEach(t *testing.T) {
+	f := installPickerFakes(t, []ghcli.RepoInfo{info("acme/api")})
+	f.logged = []string{"github.com", "ghe.example"}
+	m := openPicker(t, pickerModel(t))
+	if m.picker.host != "github.com" || len(m.picker.hosts) != 2 {
+		t.Fatalf("host=%q hosts=%v; want the repo's host and the logged-in hosts", m.picker.host, m.picker.hosts)
+	}
+	m = pickKeys(t, m, "shift+tab")
+	if m.picker.host != "ghe.example" || f.listHosts[len(f.listHosts)-1] != "ghe.example" {
+		t.Fatalf("host=%q lists=%v; want the Enterprise host listed", m.picker.host, f.listHosts)
+	}
+	if v := m.View(); !strings.Contains(v, "host: ghe.example") {
+		t.Errorf("the title should name the host:\n%s", v)
+	}
+	m = pickKeys(t, m, "shift+tab")
+	if m.picker.host != "github.com" {
+		t.Errorf("host=%q; a second shift+tab should wrap back to github.com", m.picker.host)
+	}
+}
+
+func TestPickedHostIsRememberedForTheSession(t *testing.T) {
+	f := installPickerFakes(t, []ghcli.RepoInfo{info("acme/api")})
+	f.logged = []string{"github.com", "ghe.example"}
+	m := openPicker(t, pickerModel(t))
+	m = pickKeys(t, m, "shift+tab", "esc")
+	m = openPicker(t, m)
+	if m.picker.host != "ghe.example" || f.listHosts[len(f.listHosts)-1] != "ghe.example" {
+		t.Errorf("reopened host=%q lists=%v; want the Enterprise host again", m.picker.host, f.listHosts)
+	}
+}
+
+func TestShiftTabDoesNothingWithOneHost(t *testing.T) {
+	installPickerFakes(t, nil)
+	m := openPicker(t, pickerModel(t))
+	m = pickKeys(t, m, "shift+tab")
+	if m.picker.host != "github.com" || m.pickerHostSet {
+		t.Errorf("host=%q set=%v; a single logged-in host has nothing to cycle", m.picker.host, m.pickerHostSet)
+	}
+}
+
+func TestPickerErrorNamesTheHost(t *testing.T) {
+	f := installPickerFakes(t, nil)
+	f.searchErr = errors.New("HTTP 401: Bad credentials")
+	f.logged = []string{"github.com", "ghe.example"}
+	m := openPicker(t, pickerModel(t))
+	m = pickKeys(t, m, "shift+tab", "tab", "a", "p", "i")
+	if v := m.View(); !strings.Contains(v, "ghe.example: HTTP 401") {
+		t.Errorf("the error should say which host failed:\n%s", v)
 	}
 }
