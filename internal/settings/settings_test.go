@@ -339,3 +339,39 @@ func TestKeysAreMatchedIgnoringCase(t *testing.T) {
 		t.Errorf("an unknown key is quoted once: %v", err)
 	}
 }
+
+func TestLaunchSettingsDefaults(t *testing.T) {
+	want := []struct {
+		key, def string
+		options  []string
+	}{
+		{"launch_target", "auto", []string{"auto", "orca", "herdr", "tmux"}},
+		{"launch_agent", "claude", []string{"claude", "devin"}},
+		{"launch_tmux_place", "pane", []string{"pane", "window"}},
+		{"launch_split", "horizontal", []string{"horizontal", "vertical"}},
+	}
+	for _, w := range want {
+		d, ok := Lookup(w.key)
+		if !ok {
+			t.Errorf("%s is not in the registry", w.key)
+			continue
+		}
+		if d.Kind != Enum {
+			t.Errorf("%s kind = %v, want Enum", w.key, d.Kind)
+		}
+		if d.Default != w.def {
+			t.Errorf("%s default = %v, want %s", w.key, d.Default, w.def)
+		}
+		if strings.Join(d.Options, ",") != strings.Join(w.options, ",") {
+			t.Errorf("%s options = %v, want %v", w.key, d.Options, w.options)
+		}
+		if got := Memory().String(w.key); got != w.def {
+			t.Errorf("Memory().String(%s) = %q, want %q", w.key, got, w.def)
+		}
+	}
+	for _, key := range []string{"launch_tmux_place", "launch_split"} {
+		if d, _ := Lookup(key); !strings.Contains(d.Desc, "herdr") {
+			t.Errorf("%s Desc %q should say herdr uses it too", key, d.Desc)
+		}
+	}
+}
