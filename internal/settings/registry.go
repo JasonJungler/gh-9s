@@ -39,6 +39,16 @@ var Registry = []Def{
 		Kind: Bool, Default: true},
 	{Key: "delete_branch_after_merge", Label: "Delete branch after merge", Desc: "the answer to \"delete the branch?\" in the merge dialog starts as this",
 		Kind: Bool, Default: false},
+	{Key: "launch_target", Label: "Launch target", Desc: "where to start a coding agent for an issue; auto: the one gh-9s is running inside (orca, herdr or tmux)",
+		Kind: Enum, Default: "auto", Options: []string{"auto", "orca", "herdr", "tmux"}},
+	{Key: "launch_agent", Label: "Launch agent", Desc: "the coding agent to start for an issue",
+		Kind: Enum, Default: "claude", Options: []string{"claude", "devin"}},
+	{Key: "launch_tmux_place", Label: "Launch place", Desc: "open the agent in a pane or a window; herdr uses this too (its window is a tab)",
+		Kind: Enum, Default: "pane", Options: []string{"pane", "window"}},
+	{Key: "launch_split", Label: "Launch split", Desc: "which way a new pane splits; herdr uses this too",
+		Kind: Enum, Default: "horizontal", Options: []string{"horizontal", "vertical"}},
+	{Key: "launch_submit", Label: "Launch submit", Desc: "on: send the issue to the agent at once; off: only put it in the agent's input box, you press Enter",
+		Kind: Bool, Default: true},
 }
 
 // Lookup finds a setting by key.

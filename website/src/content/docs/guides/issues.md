@@ -10,6 +10,7 @@ The issue view (`4` or `:issues`) lists issues in the current repository. Press 
 | Key | Action |
 |---|---|
 | `enter` | Open the issue |
+| `a` | Send the issue to a coding agent (asks first) |
 | `O` / `C` / `A` | Show open / closed / all issues |
 | `u` | Show only issues assigned to you |
 | `m` | Show only issues you opened |
@@ -24,6 +25,7 @@ Press `enter` on an issue to read its description and discussion. On a terminal 
 
 | Key | Action |
 |---|---|
+| `a` | Send the issue to a coding agent (asks first) |
 | `C` | Write a comment |
 | `x` | Close the issue (asks first) |
 | `X` | Reopen the issue |
@@ -32,5 +34,7 @@ Press `enter` on an issue to read its description and discussion. On a terminal 
 | `tab` | Select an image |
 | `enter` | Show the selected image full screen |
 | `o` | Open in the browser |
+
+`a` starts a coding agent on the issue in Orca, herdr or tmux. See [Send an issue to an agent](/gh-9s/guides/send-to-agent/).
 
 Long comments can be written in your `$EDITOR` with `ctrl+e`. See [Images and Markdown](/gh-9s/guides/images-and-markdown/) for how text and images are rendered.

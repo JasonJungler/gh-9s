@@ -150,6 +150,7 @@ In the file tree:
 | Key | Action |
 |---|---|
 | `enter` | Open the issue |
+| `a` | Send to a coding agent (asks first) |
 | `O` / `C` / `A` | Open / closed / all |
 | `u` | Assigned to me |
 | `m` | Opened by me |
@@ -161,6 +162,7 @@ In the file tree:
 
 | Key | Action |
 |---|---|
+| `a` | Send to a coding agent (asks first) |
 | `C` | Comment |
 | `x` | Close (asks first) |
 | `X` | Reopen |

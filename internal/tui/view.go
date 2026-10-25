@@ -171,6 +171,9 @@ func (m model) View() string {
 	if m.form != nil {
 		return b.String() + m.boxed(m.form.view(m.width))
 	}
+	if m.launchDlg != nil {
+		return b.String() + m.boxed(m.launchDlg.view(m.boxWidth()-2)) // inside the box's padding
+	}
 	if s, ok := screens[m.view]; ok && s.body != nil {
 		if m.previewShown() {
 			return b.String() + m.withPane(s.body) + m.footer()

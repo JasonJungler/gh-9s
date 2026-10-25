@@ -37,6 +37,7 @@ export default defineConfig({
 						{ label: 'Pull requests', slug: 'guides/pull-requests' },
 						{ label: 'Reviewing a PR', slug: 'guides/reviewing-prs' },
 						{ label: 'Issues', slug: 'guides/issues' },
+						{ label: 'Send an issue to an agent', slug: 'guides/send-to-agent' },
 						{ label: 'Discussions', slug: 'guides/discussions' },
 						{ label: 'Wiki', slug: 'guides/wiki' },
 						{ label: 'Inbox', slug: 'guides/inbox' },

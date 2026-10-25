@@ -5,6 +5,7 @@ A [k9s](https://k9scli.io)-style terminal UI for GitHub, as a `gh` extension.
 - **Actions:** trigger workflows, watch runs as a live job graph, keep favorite workflows one keypress away.
 - **Pull requests:** list and filter, see checks (and jump into the Actions run behind a check), read the diff, comment, review and merge.
 - **Issues:** list and filter, read, comment, close and reopen, manage labels and assignees.
+- **Send to an agent:** press `a` on an issue to open a workspace (Orca) or pane (herdr, tmux), start Claude Code or Devin there and give it the issue ([guide](https://murabitob.github.io/gh-9s/guides/send-to-agent/)).
 - **Discussions:** list by category, read with the replies under each comment, comment and reply.
 - **Wiki:** read pages and follow their links, edit in your `$EDITOR`, add and delete pages (a wiki is a git repo, so each change is a commit).
 - **Projects:** a board per Status column, move cards, mark several and change them at once, undo (every change asks first).

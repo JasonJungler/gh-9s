@@ -1,0 +1,715 @@
+package tui
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/MurabitoB/gh-9s/internal/ghcli"
+	"github.com/MurabitoB/gh-9s/internal/launch"
+)
+
+// launchInput is what the launch dialog starts from.
+type launchInput struct {
+	Issue      ghcli.IssueDetail
+	Target     launch.Target
+	AutoTarget bool // Target was detected, not chosen; the summary marks it with ◆
+	Agent      string
+	Model      string // empty means the agent's default
+	Models     []launch.Model
+	Base, Name string // Orca only: the ref to branch from, and the workspace name
+	Place      launch.Place
+	Split      launch.Split
+	// PasteOnly says the text is only placed in the agent's input box (the launch_submit setting is off);
+	// the user presses Enter there. The zero value submits.
+	PasteOnly bool
+	// Context is the generated prompt: what the Prompt row summarises, opens in the editor and restores. It
+	// may be empty in tests that only look at the sizes below.
+	Context    string
+	ContextLen int // size of the text that will be sent, in characters (runes)
+	// ContextBytes is the same size in bytes. Orca and herdr take the text as a program argument, which the
+	// platform limits in bytes (launch.ArgvLimit), so a text of few characters can still be too big.
+	ContextBytes int
+}
+
+// launchAct tells the caller what a key did.
+type launchAct int
+
+// What a key press asks the caller to do.
+const (
+	actNone          launchAct = iota
+	actCancel                  // close the dialog
+	actSubmit                  // start the launch
+	actAgentChanged            // the agent changed: load its models and call withModels
+	actTargetChanged           // the target changed: for Orca, load the default base if not asked yet
+	actEditPrompt              // open prompt() in the editor; answer with promptEdited
+)
+
+// launchField is one row of the expanded dialog.
+type launchField int
+
+// The rows of the expanded dialog, in focus order.
+const (
+	fWhere launchField = iota
+	fAgent
+	fModel
+	fBase
+	fName
+	fPlace
+	fSplit
+	fPrompt
+	fieldCount
+)
+
+// launchFieldName labels the rows.
+var launchFieldName = [fieldCount]string{"Where", "Agent", "Model", "Base", "Branch", "Place", "Split", "Prompt"}
+
+// launchTargets is the order the Where field cycles through.
+var launchTargets = []string{string(launch.TargetOrca), string(launch.TargetHerdr), string(launch.TargetTmux)}
+
+// launchDialog confirms sending an issue to an agent. It starts as one line
+// the user can accept with enter; e opens the form to change anything. It does
+// no I/O: the caller starts the launch and reports back with start and failed.
+type launchDialog struct {
+	in         launchInput
+	models     []launch.Model
+	typing     bool   // the model is free text, not a pick from models
+	baseEdited bool   // the user changed the base (even back to empty), so withBase leaves it alone
+	baseAsked  bool   // the default base was asked for (withBaseLoading); it is asked once per dialog
+	baseLoad   bool   // ... and has not arrived yet
+	baseNote   string // what to tell about the default base (no remote: the local branch is used)
+	expanded   bool
+	focus      launchField
+	run        bool
+	err        string // why enter was refused
+	failure    string // the last launch failure, shown until the next start
+	retryID    string // operation id of a launch whose reply was lost
+
+	// The prompt is the generated in.Context until the user edits it; the edit lives in the dialog only (one
+	// launch), never in the settings or the launch prefs. The sizes the warnings use follow it.
+	promptText       string // the edited prompt, valid when promptDone
+	promptDone       bool
+	genLen, genBytes int    // the sizes of the generated prompt, restored by a reset
+	editing          bool   // the editor is open: keys are ignored and nothing is launched
+	info             string // something to tell that is not an error ("prompt unchanged")
+}
+
+// newLaunchDialog opens the compact confirmation.
+func newLaunchDialog(in launchInput) launchDialog {
+	if in.Place == "" {
+		in.Place = launch.PlacePane
+	}
+	if in.Split == "" {
+		in.Split = launch.SplitHorizontal
+	}
+	return launchDialog{in: in, models: in.Models, genLen: in.ContextLen, genBytes: in.ContextBytes}
+}
+
+// prompt is the text a launch will send: the edited prompt, or the generated one.
+func (d launchDialog) prompt() string {
+	if d.promptDone {
+		return d.promptText
+	}
+	return d.in.Context
+}
+
+// promptEdited takes what the editor returned. The text is cleaned like generated text (launch.CleanContext);
+// an editor error, an empty result or no change keeps the previous prompt and says why. A text equal to the
+// generated prompt is not an edit: the edited mark goes away.
+func (d launchDialog) promptEdited(text string, err error) launchDialog {
+	d.editing = false
+	d.err, d.info = "", ""
+	if err != nil {
+		d.err = "the editor failed, the prompt is unchanged: " + printable(err.Error())
+		return d
+	}
+	clean := launch.CleanContext(text)
+	switch {
+	case clean == "":
+		d.err = "prompt is empty, the previous prompt is kept"
+	case clean == launch.CleanContext(d.prompt()):
+		d.info = "prompt unchanged"
+	case clean == launch.CleanContext(d.in.Context):
+		d.restorePrompt()
+		d.info = "prompt is the generated one again"
+		d.retryID = ""
+	default:
+		d.promptText, d.promptDone = clean, true
+		d.in.ContextLen, d.in.ContextBytes = utf8.RuneCountInString(clean), len(clean)
+		d.retryID = "" // an edit: a lost-reply retry no longer describes the request
+	}
+	return d
+}
+
+// restorePrompt goes back to the generated prompt and its sizes.
+func (d *launchDialog) restorePrompt() {
+	d.promptText, d.promptDone = "", false
+	d.in.ContextLen, d.in.ContextBytes = d.genLen, d.genBytes
+}
+
+// printable replaces control characters, so text from outside (an error message) cannot reach the layout.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+// promptRow is the value of the Prompt row.
+func (d launchDialog) promptRow() string {
+	if d.promptDone {
+		return fmt.Sprintf("edited · %d characters", d.in.ContextLen)
+	}
+	what := "title + body"
+	switch n := len(d.in.Issue.Comments); n {
+	case 0:
+	case 1:
+		what += " + 1 comment"
+	default:
+		what += fmt.Sprintf(" + %d comments", n)
+	}
+	return fmt.Sprintf("%s · %d characters", what, d.in.ContextLen)
+}
+
+func (d launchDialog) focused() launchField { return d.focus }
+
+func (d launchDialog) running() bool { return d.run }
+
+// start marks the launch as running; enter and esc are ignored until failed.
+func (d launchDialog) start() launchDialog {
+	d.run = true
+	d.err, d.failure, d.info = "", "", ""
+	return d
+}
+
+// failed ends a running launch and keeps the dialog open to show why. When Orca
+// lost its reply, the next request carries the operation id so the same launch
+// is asked again instead of started afresh. Only an edit drops that id: a retry
+// that fails by itself (git, orca, anything) says nothing about whether the
+// first launch happened, so the next enter must still be the same retry.
+func (d launchDialog) failed(err error) launchDialog {
+	d.run, d.err = false, ""
+	var lost *launch.LostReplyError
+	var se *launch.StepError
+	_, _ = errors.As(err, &lost), errors.As(err, &se)
+	msg := "no details"
+	switch {
+	case lost != nil:
+		d.retryID = lost.OperationID
+		msg = lost.Cause + "; the launch may already have happened"
+	case se != nil && se.Err != nil:
+		msg = se.Err.Error()
+	case se == nil && err != nil && err.Error() != "":
+		msg = err.Error()
+	}
+	d.failure = "failed: " + msg
+	if se != nil {
+		d.failure = "failed at " + se.Step + ": " + msg
+	}
+	return d
+}
+
+// withModels replaces the model list, after the agent changed or the real list arrived.
+func (d launchDialog) withModels(m []launch.Model) launchDialog {
+	d.models = m
+	return d
+}
+
+// withBaseLoading marks the default base as being looked up; withBase ends that.
+func (d launchDialog) withBaseLoading() launchDialog {
+	d.baseAsked, d.baseLoad = true, true
+	return d
+}
+
+// baseLoading reports whether the default base is still being looked up.
+func (d launchDialog) baseLoading() bool { return d.baseLoad }
+
+// findingBase reports whether there is no base yet only because it is still being looked up.
+func (d launchDialog) findingBase() bool {
+	return d.orca() && d.baseLoad && strings.TrimSpace(d.in.Base) == ""
+}
+
+// withBase sets the base once it is known, unless the user already typed one
+// (an edited field counts as typed even when it was cleared again).
+func (d launchDialog) withBase(b, note string) launchDialog {
+	d.baseLoad = false
+	if !d.baseEdited {
+		d.in.Base, d.baseNote = b, note
+	}
+	return d
+}
+
+// request builds the launch request from the fields. The caller adds Context and Dir.
+func (d launchDialog) request() launch.Request {
+	a, _ := launch.LookupAgent(d.in.Agent)
+	return launch.Request{
+		Target:  d.in.Target,
+		Agent:   a,
+		Model:   strings.TrimSpace(d.in.Model),
+		Place:   d.in.Place,
+		Split:   d.in.Split,
+		Base:    strings.TrimSpace(d.in.Base),
+		Name:    strings.TrimSpace(d.in.Name),
+		Issue:   d.in.Issue.Number,
+		RetryID: d.retryID,
+
+		PasteOnly: d.in.PasteOnly,
+	}
+}
+
+func (d launchDialog) orca() bool { return d.in.Target == launch.TargetOrca }
+
+// applies reports whether the field is used for the current target and place.
+func (d launchDialog) applies(f launchField) bool {
+	switch f {
+	case fBase, fName:
+		return d.orca()
+	case fPlace:
+		return !d.orca()
+	case fSplit:
+		return !d.orca() && d.in.Place == launch.PlacePane
+	}
+	return true
+}
+
+// invalid says what stops the launch, or "".
+func (d launchDialog) invalid() string {
+	if _, ok := launch.LookupAgent(d.in.Agent); !ok {
+		return "unknown agent " + d.in.Agent
+	}
+	if d.orca() {
+		if strings.TrimSpace(d.in.Base) == "" {
+			return "base is required"
+		}
+		if strings.TrimSpace(d.in.Name) == "" {
+			return "branch is required"
+		}
+	}
+	// orca takes the prompt as an argument to --prompt, and herdr's `agent prompt` as a bare argument; either
+	// could read a leading "-" as an option. herdr paste-only sends text that starts with ESC.
+	if (d.orca() || (d.in.Target == launch.TargetHerdr && !d.in.PasteOnly)) && strings.HasPrefix(d.prompt(), "-") {
+		return "the prompt starts with \"-\", which orca/herdr would read as an option; start it with a word"
+	}
+	return ""
+}
+
+// move shifts the focus by dir, skipping rows that do not apply.
+func (d *launchDialog) move(dir int) {
+	for i := 0; i < int(fieldCount); i++ {
+		d.focus = launchField((int(d.focus) + dir + int(fieldCount)) % int(fieldCount))
+		if d.applies(d.focus) {
+			return
+		}
+	}
+}
+
+// update handles one key and says what the caller should do.
+func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
+	if d.run || d.editing {
+		return d, actNone
+	}
+	d.info = ""
+	switch k.Type {
+	case tea.KeyEsc:
+		return d, actCancel
+	case tea.KeyEnter:
+		if d.expanded && d.focus == fPrompt {
+			d.err, d.editing = "", true
+			return d, actEditPrompt
+		}
+		if d.findingBase() {
+			d.err = "still finding the base branch…"
+			return d, actNone
+		}
+		if msg := d.invalid(); msg != "" {
+			if !d.expanded {
+				msg += ", press e to edit"
+			}
+			d.err = msg
+			return d, actNone
+		}
+		d.err = ""
+		return d, actSubmit
+	}
+	if !d.expanded {
+		if k.Type == tea.KeyRunes && string(k.Runes) == "e" && !k.Alt && !k.Paste {
+			d.expanded = true
+			d.err = ""
+		}
+		return d, actNone
+	}
+	if k.Alt && (k.Type == tea.KeyRunes || k.Type == tea.KeySpace || k.Type == tea.KeyBackspace) {
+		return d, actNone // Alt chords are not text
+	}
+	switch k.Type {
+	case tea.KeyTab, tea.KeyDown:
+		d.move(1)
+	case tea.KeyShiftTab, tea.KeyUp:
+		d.move(-1)
+	case tea.KeyLeft:
+		return d.cycle(-1)
+	case tea.KeyRight:
+		return d.cycle(1)
+	case tea.KeyBackspace:
+		d.editText(func(s string) string { return dropLast(s) })
+	case tea.KeySpace:
+		d.editText(func(s string) string { return s + " " })
+	case tea.KeyRunes:
+		if d.focus == fPrompt {
+			if string(k.Runes) == "r" && !k.Paste {
+				d.resetPrompt()
+			}
+			return d, actNone
+		}
+		// A paste arrives as one message: keep what can be shown, drop newlines,
+		// tabs and escape sequences instead of letting them reach the layout.
+		r := strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, string(k.Runes))
+		if r != "" {
+			d.editText(func(s string) string { return s + r })
+		}
+	}
+	return d, actNone
+}
+
+// resetPrompt is r on the Prompt row: back to the generated prompt.
+func (d *launchDialog) resetPrompt() {
+	d.err = ""
+	if !d.promptDone {
+		d.info = "the prompt is the generated one"
+		return
+	}
+	d.restorePrompt()
+	d.retryID = ""
+	d.info = "generated prompt restored"
+}
+
+// editText changes the focused row if it is a text row. The model row turns
+// into free text: typing replaces the picked model.
+func (d *launchDialog) editText(f func(string) string) {
+	switch d.focus {
+	case fModel:
+		if !d.typing {
+			d.typing = true
+			// a typed character replaces the selection; backspace trims it
+			if f("") != "" {
+				d.in.Model = ""
+			}
+		}
+		d.in.Model = f(d.in.Model)
+	case fBase:
+		d.in.Base = f(d.in.Base)
+		d.baseEdited = true
+	case fName:
+		d.in.Name = f(d.in.Name)
+	default:
+		return
+	}
+	d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
+}
+
+// cycle moves the focused choice row one step.
+func (d launchDialog) cycle(dir int) (launchDialog, launchAct) {
+	switch d.focus {
+	case fWhere:
+		next := launch.Target(cycleChoice(launchTargets, string(d.in.Target), dir))
+		d.in.AutoTarget = false
+		d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
+		if next == d.in.Target {
+			return d, actNone
+		}
+		d.in.Target = next
+		return d, actTargetChanged
+	case fAgent:
+		ids := make([]string, len(launch.Agents))
+		for i, a := range launch.Agents {
+			ids[i] = a.ID
+		}
+		next := cycleChoice(ids, d.in.Agent, dir)
+		d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
+		if next == d.in.Agent {
+			return d, actNone
+		}
+		d.in.Agent = next
+		d.in.Model, d.typing = "", false
+		d.models = []launch.Model{{}}
+		return d, actAgentChanged
+	case fModel:
+		ids := make([]string, len(d.models))
+		for i, m := range d.models {
+			ids[i] = m.ID
+		}
+		cur := d.in.Model
+		if d.typing {
+			cur = "\x00" // not in the list: right goes to the first entry, left to the last
+		}
+		d.in.Model, d.typing = cycleChoice(ids, cur, dir), false
+	case fPlace:
+		d.in.Place = launch.Place(cycleChoice([]string{string(launch.PlacePane), string(launch.PlaceWindow)}, string(d.in.Place), dir))
+	case fSplit:
+		d.in.Split = launch.Split(cycleChoice([]string{string(launch.SplitHorizontal), string(launch.SplitVertical)}, string(d.in.Split), dir))
+	default:
+		return d, actNone
+	}
+	d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
+	return d, actNone
+}
+
+// cycleChoice steps through vals from cur. A cur that is not in vals starts
+// before the first entry (right) or after the last (left).
+func cycleChoice(vals []string, cur string, dir int) string {
+	if len(vals) == 0 {
+		return cur
+	}
+	i := -1
+	for j, v := range vals {
+		if v == cur {
+			i = j
+			break
+		}
+	}
+	if i < 0 && dir < 0 {
+		i = 0
+	}
+	return vals[((i+dir)%len(vals)+len(vals))%len(vals)]
+}
+
+// summary is the one line the user confirms.
+func (d launchDialog) summary() string {
+	mark := " ·"
+	if d.in.AutoTarget {
+		mark = " ◆"
+	}
+	model := d.in.Model
+	if strings.TrimSpace(model) == "" {
+		model = "default model"
+	}
+	var where string
+	switch {
+	case d.orca():
+		where = "new workspace"
+	case d.in.Place == launch.PlaceWindow:
+		where = "new window"
+	case d.in.Split == launch.SplitVertical:
+		where = "new pane (below)"
+	default:
+		where = "new pane (right)"
+	}
+	parts := []string{string(d.in.Target) + mark + " " + where, d.in.Agent, model}
+	if d.orca() {
+		base := d.in.Base
+		if d.findingBase() {
+			base = "finding base…"
+		}
+		parts = append(parts, base+" → "+d.in.Name)
+	}
+	if d.in.PasteOnly {
+		parts = append(parts, "paste only")
+	}
+	if d.promptDone {
+		parts = append(parts, "prompt edited")
+	}
+	s := strings.Join(parts, " · ")
+	if d.in.ContextLen > launch.WarnChars {
+		s += fmt.Sprintf(" · ⚠ large issue, %d characters", d.in.ContextLen)
+	}
+	// herdr paste-only sends the text with the paste markers around it, which count too.
+	size := launch.ArgvSize(d.in.Target, d.in.PasteOnly, d.in.ContextBytes)
+	if lim := launch.ArgvLimit(); d.in.Target != launch.TargetTmux && size*10 >= lim*9 {
+		if size > lim {
+			s += fmt.Sprintf(" · ⚠ %d bytes is over the %d-byte limit, the launch will be refused", size, lim)
+		} else {
+			s += fmt.Sprintf(" · ⚠ %d bytes is near the %d-byte limit", size, lim)
+		}
+	}
+	return s
+}
+
+// minWrap is the narrowest width text is wrapped to (a wide character needs 2).
+const minWrap = 4
+
+// wrapLines indents text by one space and wraps it to width display columns
+// (0 means no wrapping). Continuation lines are indented too.
+func wrapLines(s string, width int) string {
+	if width > 0 {
+		s = ansi.Wrap(s, max(width-1, minWrap), "")
+	}
+	return " " + strings.ReplaceAll(s, "\n", "\n ")
+}
+
+// fitLines wraps any line of s wider than width display columns. It is the
+// safety net for lines built from styled pieces.
+func fitLines(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if ansi.StringWidth(l) > width {
+			lines[i] = ansi.Wrap(l, max(width, minWrap), "")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// clipTail shortens s to room display columns for showing, keeping the end
+// (where typing happens) behind a leading ellipsis. The stored value is not touched.
+func clipTail(s string, room int) string {
+	w := ansi.StringWidth(s)
+	if room <= 0 || w <= room {
+		return s
+	}
+	if room < 2 {
+		return "…"
+	}
+	return ansi.TruncateLeft(s, w-(room-1), "…")
+}
+
+// view renders the dialog body, every line at most width display columns
+// wide (0 means unlimited); the caller draws the box around it.
+func (d launchDialog) view(width int) string {
+	var b strings.Builder
+	b.WriteString(styCols.Render(fmt.Sprintf(" Send #%d to an agent", d.in.Issue.Number)) + "\n")
+	b.WriteString(styDim.Render(wrapLines(d.in.Issue.Title, width)) + "\n\n")
+	if d.expanded {
+		d.formRows(&b, width)
+		b.WriteString("\n" + wrapLines(d.summary(), width) + "\n")
+	} else {
+		b.WriteString(wrapLines(d.summary(), width) + "\n")
+	}
+	if d.orca() && d.baseNote != "" && !d.baseEdited {
+		b.WriteString(styDim.Render(wrapLines(d.baseNote, width)) + "\n")
+	}
+	switch {
+	case d.run:
+		b.WriteString("\n " + styRun.Render("launching…") + "\n")
+	case d.failure != "":
+		b.WriteString("\n" + styErr.Render(wrapLines(d.failure, width)) + "\n")
+		// on the Prompt row enter opens the editor, so the hint says where enter launches
+		enter := "enter"
+		if d.expanded && d.focus == fPrompt {
+			enter = "move to another row, then enter"
+		}
+		again := enter + " to try again"
+		if d.retryID != "" {
+			again = enter + " retries the same launch (it may already be running)"
+		}
+		b.WriteString(styDim.Render(wrapLines(again, width)) + "\n")
+	}
+	if d.err != "" {
+		b.WriteString("\n" + styErr.Render(wrapLines(d.err, width)) + "\n")
+	}
+	if d.info != "" {
+		b.WriteString("\n" + styDim.Render(wrapLines(d.info, width)) + "\n")
+	}
+	keys := "enter launch   e edit   esc cancel"
+	if d.expanded {
+		keys = "tab/↑↓ move   ←/→ choose   type to edit   enter launch   esc cancel"
+		if d.focus == fPrompt {
+			keys = "enter edit the prompt in $EDITOR   r restore it   tab/↑↓ move (enter launches from the other rows)   esc cancel"
+		}
+	}
+	if d.editing {
+		keys = "the editor is open"
+	}
+	if d.run {
+		keys = "wait for the launch to finish"
+	}
+	b.WriteString("\n" + styDim.Render(wrapLines(keys, width)) + "\n")
+	return fitLines(b.String(), width)
+}
+
+// rowPrefix is the width of the focus mark, the label and the space after it.
+const rowPrefix = 2 + 8 + 1
+
+// formRows writes the rows that apply to the current target and place.
+func (d launchDialog) formRows(b *strings.Builder, width int) {
+	room := 0 // columns left for a value; 0 means unlimited
+	if width > 0 {
+		room = max(width-rowPrefix, 1)
+	}
+	for f := fWhere; f < fieldCount; f++ {
+		if !d.applies(f) {
+			continue
+		}
+		mark := "  "
+		if d.focus == f {
+			mark = styKey.Render("▸ ")
+		}
+		focused := d.focus == f
+		var val, note string
+		switch f {
+		case fWhere:
+			val = "‹ " + string(d.in.Target) + " ›"
+		case fAgent:
+			val = "‹ " + d.in.Agent + " ›"
+		case fModel:
+			switch {
+			case d.typing:
+				val = textValue(d.in.Model, focused, room)
+				note = "a mistyped name only fails in the agent pane"
+			default:
+				name := d.in.Model
+				if name == "" {
+					name = "default"
+				}
+				val = "‹ " + clipTail(name, max(room-4, 0)) + " ›"
+				for _, m := range d.models {
+					if m.ID == d.in.Model && m.ID != "" {
+						note = m.Hint
+					}
+				}
+				if focused {
+					note = "type to enter another name"
+				}
+			}
+		case fBase:
+			val = textValue(d.in.Base, focused, room)
+			if d.findingBase() {
+				note = "finding base…"
+			}
+		case fName:
+			val = textValue(d.in.Name, focused, room)
+			note = "Orca's workspace name; Orca adds its own prefix"
+		case fPlace:
+			val = "‹ " + string(d.in.Place) + " ›"
+		case fSplit:
+			val = "‹ " + string(d.in.Split) + " ›"
+		case fPrompt:
+			val = clipTail(d.promptRow(), room)
+			switch {
+			case focused && d.promptDone:
+				note = "enter edits it again in $EDITOR, r restores the generated prompt"
+			case focused:
+				note = "enter edits the whole prompt in $EDITOR (this launch only)"
+			}
+			// the note stays on the row or is left out (the key line below says the same), so it never
+			// wraps back under the labels
+			if room > 0 && ansi.StringWidth(val)+2+ansi.StringWidth(note) > room {
+				note = ""
+			}
+		}
+		fmt.Fprintf(b, "%s%-8s %s", mark, launchFieldName[f], val)
+		b.WriteString(hint(note != "", note))
+		b.WriteString("\n")
+	}
+}
+
+// textValue shows an editable value, with the cursor when focused, clipped to room columns.
+func textValue(s string, focused bool, room int) string {
+	if focused {
+		return clipTail(s, max(room-1, 0)) + "█"
+	}
+	return clipTail(s, room)
+}

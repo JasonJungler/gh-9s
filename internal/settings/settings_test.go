@@ -339,3 +339,71 @@ func TestKeysAreMatchedIgnoringCase(t *testing.T) {
 		t.Errorf("an unknown key is quoted once: %v", err)
 	}
 }
+
+func TestLaunchSettingsDefaults(t *testing.T) {
+	want := []struct {
+		key, def string
+		options  []string
+	}{
+		{"launch_target", "auto", []string{"auto", "orca", "herdr", "tmux"}},
+		{"launch_agent", "claude", []string{"claude", "devin"}},
+		{"launch_tmux_place", "pane", []string{"pane", "window"}},
+		{"launch_split", "horizontal", []string{"horizontal", "vertical"}},
+	}
+	for _, w := range want {
+		d, ok := Lookup(w.key)
+		if !ok {
+			t.Errorf("%s is not in the registry", w.key)
+			continue
+		}
+		if d.Kind != Enum {
+			t.Errorf("%s kind = %v, want Enum", w.key, d.Kind)
+		}
+		if d.Default != w.def {
+			t.Errorf("%s default = %v, want %s", w.key, d.Default, w.def)
+		}
+		if strings.Join(d.Options, ",") != strings.Join(w.options, ",") {
+			t.Errorf("%s options = %v, want %v", w.key, d.Options, w.options)
+		}
+		if got := Memory().String(w.key); got != w.def {
+			t.Errorf("Memory().String(%s) = %q, want %q", w.key, got, w.def)
+		}
+	}
+	for _, key := range []string{"launch_tmux_place", "launch_split"} {
+		if d, _ := Lookup(key); !strings.Contains(d.Desc, "herdr") {
+			t.Errorf("%s Desc %q should say herdr uses it too", key, d.Desc)
+		}
+	}
+}
+
+func TestLaunchSubmitSettingDefaultsToOn(t *testing.T) {
+	d, ok := Lookup("launch_submit")
+	if !ok {
+		t.Fatal("launch_submit is not in the registry")
+	}
+	if d.Kind != Bool || d.Default != true {
+		t.Errorf("launch_submit = kind %v default %v, want a Bool that defaults to true", d.Kind, d.Default)
+	}
+	if !Memory().Bool("launch_submit") {
+		t.Error("launch_submit is not on by default")
+	}
+	s := Memory()
+	if _, err := s.Set("launch_submit", "off"); !errors.Is(err, ErrNotSaved) || s.Bool("launch_submit") { // a memory store has no file
+		t.Errorf("off: err = %v, value = %v", err, s.Bool("launch_submit"))
+	}
+}
+
+// A description is one line in the settings list; launch_submit's was far longer than the others, and the
+// detail belongs in the docs.
+func TestLaunchSubmitDescIsAsShortAsTheOthers(t *testing.T) {
+	d, _ := Lookup("launch_submit")
+	longest := 0
+	for _, o := range Registry {
+		if o.Key != "launch_submit" {
+			longest = max(longest, len(o.Desc))
+		}
+	}
+	if len(d.Desc) > longest {
+		t.Errorf("launch_submit Desc is %d bytes, longer than any other (%d): %q", len(d.Desc), longest, d.Desc)
+	}
+}
