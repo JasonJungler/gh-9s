@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -111,16 +112,31 @@ func editorExec(initial string, done func(text string, err error) tea.Msg) tea.C
 	})
 }
 
+// createEditorFile makes the temporary file the editor works on; tests replace it.
+var createEditorFile = func() (*os.File, error) { return os.CreateTemp("", "gh9s-*.md") }
+
+// writeAndClose writes text to w and closes it. Both errors matter: a short write or a failed flush on close
+// leaves a truncated file. w is closed even when the write failed.
+func writeAndClose(w io.WriteCloser, text string) error {
+	_, err := io.WriteString(w, text)
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 // editorCommand writes initial to a temporary file and builds the command that edits it. The
 // editor setting may carry arguments ("code --wait"), so it goes through the shell; the file
 // name is passed as an argument, never pasted into the script.
 func editorCommand(initial string) (cmd *exec.Cmd, path string, err error) {
-	f, err := os.CreateTemp("", "gh9s-*.md")
+	f, err := createEditorFile()
 	if err != nil {
 		return nil, "", err
 	}
-	_, _ = f.WriteString(initial)
-	_ = f.Close()
+	if err := writeAndClose(f, initial); err != nil {
+		_ = os.Remove(f.Name()) // a truncated file must never be opened and read back as the edited text
+		return nil, "", fmt.Errorf("writing the text for the editor: %w", err)
+	}
 	editor := os.Getenv("VISUAL")
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
