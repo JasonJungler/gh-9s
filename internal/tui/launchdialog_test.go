@@ -165,23 +165,23 @@ func TestEExpandsAndTabCyclesApplicableFields(t *testing.T) {
 	if d.expanded {
 		t.Fatal("dialog starts expanded")
 	}
-	if got, want := fmt.Sprint(focusOrder(t, d)), "[Where Agent Model Base Branch]"; got != want {
+	if got, want := fmt.Sprint(focusOrder(t, d)), "[Where Agent Model Base Branch Prompt]"; got != want {
 		t.Errorf("orca order = %s, want %s", got, want)
 	}
 	in := tmuxInput()
-	if got, want := fmt.Sprint(focusOrder(t, newLaunchDialog(in))), "[Where Agent Model Place Split]"; got != want {
+	if got, want := fmt.Sprint(focusOrder(t, newLaunchDialog(in))), "[Where Agent Model Place Split Prompt]"; got != want {
 		t.Errorf("tmux pane order = %s, want %s", got, want)
 	}
 	in.Target = launch.TargetHerdr
 	in.Place = launch.PlaceWindow
-	if got, want := fmt.Sprint(focusOrder(t, newLaunchDialog(in))), "[Where Agent Model Place]"; got != want {
+	if got, want := fmt.Sprint(focusOrder(t, newLaunchDialog(in))), "[Where Agent Model Place Prompt]"; got != want {
 		t.Errorf("herdr window order = %s, want %s", got, want)
 	}
 	// shift+tab goes backwards and also skips what does not apply
 	e, _ := launchKeys(newLaunchDialog(tmuxInput()), "e")
 	e, _ = e.update(tabBack())
-	if e.focused() != fSplit {
-		t.Errorf("shift+tab from Where reached %s, want Split", launchFieldName[e.focused()])
+	if e.focused() != fPrompt {
+		t.Errorf("shift+tab from Where reached %s, want Prompt", launchFieldName[e.focused()])
 	}
 }
 
@@ -655,7 +655,7 @@ func TestViewLinesFitTheWidth(t *testing.T) {
 				e := newLaunchDialog(in)
 				// walk the focus over every row of the expanded form
 				e, _ = launchKeys(e, "e")
-				for i := 0; i < 6; i++ {
+				for i := 0; i < int(fieldCount); i++ {
 					states[fmt.Sprintf("expanded focus %s", launchFieldName[e.focused()])] = e
 					e, _ = launchKeys(e, "tab")
 				}

@@ -91,6 +91,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.launchModelsLoaded(msg), nil
 	case launchBaseMsg:
 		return m.launchBaseLoaded(msg), nil
+	case launchPromptMsg:
+		return m.launchPromptEdited(msg), nil
 	case launchDoneMsg:
 		return m.launchDone(msg), nil
 	case mergeInfoMsg:

@@ -90,9 +90,16 @@ type editedMsg struct {
 var editorCmd = realEditorCmd
 
 func realEditorCmd(initial string) tea.Cmd {
+	return editorExec(initial, func(text string, err error) tea.Msg { return editedMsg{text: text, err: err} })
+}
+
+// editorExec opens $VISUAL / $EDITOR on a temporary file holding initial and, once the editor closes, reports the
+// file's text (or the failure) as the message done builds. The file is removed in every case. Other callers that
+// need an identity on the answer (the launch dialog) build their own message in done.
+func editorExec(initial string, done func(text string, err error) tea.Msg) tea.Cmd {
 	cmd, path, err := editorCommand(initial)
 	if err != nil {
-		return func() tea.Msg { return editedMsg{err: err} }
+		return func() tea.Msg { return done("", err) }
 	}
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		b, rerr := os.ReadFile(path)
@@ -100,7 +107,7 @@ func realEditorCmd(initial string) tea.Cmd {
 		if err == nil {
 			err = rerr
 		}
-		return editedMsg{text: string(b), err: err}
+		return done(string(b), err)
 	})
 }
 

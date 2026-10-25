@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -26,7 +27,10 @@ type launchInput struct {
 	Split      launch.Split
 	// PasteOnly says the text is only placed in the agent's input box (the launch_submit setting is off);
 	// the user presses Enter there. The zero value submits.
-	PasteOnly  bool
+	PasteOnly bool
+	// Context is the generated prompt: what the Prompt row summarises, opens in the editor and restores. It
+	// may be empty in tests that only look at the sizes below.
+	Context    string
 	ContextLen int // size of the text that will be sent, in characters (runes)
 	// ContextBytes is the same size in bytes. Orca and herdr take the text as a program argument, which the
 	// platform limits in bytes (launch.ArgvLimit), so a text of few characters can still be too big.
@@ -43,6 +47,7 @@ const (
 	actSubmit                  // start the launch
 	actAgentChanged            // the agent changed: load its models and call withModels
 	actTargetChanged           // the target changed: for Orca, load the default base if not asked yet
+	actEditPrompt              // open prompt() in the editor; answer with promptEdited
 )
 
 // launchField is one row of the expanded dialog.
@@ -57,11 +62,12 @@ const (
 	fName
 	fPlace
 	fSplit
+	fPrompt
 	fieldCount
 )
 
 // launchFieldName labels the rows.
-var launchFieldName = [fieldCount]string{"Where", "Agent", "Model", "Base", "Branch", "Place", "Split"}
+var launchFieldName = [fieldCount]string{"Where", "Agent", "Model", "Base", "Branch", "Place", "Split", "Prompt"}
 
 // launchTargets is the order the Where field cycles through.
 var launchTargets = []string{string(launch.TargetOrca), string(launch.TargetHerdr), string(launch.TargetTmux)}
@@ -83,6 +89,14 @@ type launchDialog struct {
 	err        string // why enter was refused
 	failure    string // the last launch failure, shown until the next start
 	retryID    string // operation id of a launch whose reply was lost
+
+	// The prompt is the generated in.Context until the user edits it; the edit lives in the dialog only (one
+	// launch), never in the settings or the launch prefs. The sizes the warnings use follow it.
+	promptText       string // the edited prompt, valid when promptDone
+	promptDone       bool
+	genLen, genBytes int    // the sizes of the generated prompt, restored by a reset
+	editing          bool   // the editor is open: keys are ignored and nothing is launched
+	info             string // something to tell that is not an error ("prompt unchanged")
 }
 
 // newLaunchDialog opens the compact confirmation.
@@ -93,7 +107,75 @@ func newLaunchDialog(in launchInput) launchDialog {
 	if in.Split == "" {
 		in.Split = launch.SplitHorizontal
 	}
-	return launchDialog{in: in, models: in.Models}
+	return launchDialog{in: in, models: in.Models, genLen: in.ContextLen, genBytes: in.ContextBytes}
+}
+
+// prompt is the text a launch will send: the edited prompt, or the generated one.
+func (d launchDialog) prompt() string {
+	if d.promptDone {
+		return d.promptText
+	}
+	return d.in.Context
+}
+
+// promptEdited takes what the editor returned. The text is cleaned like generated text (launch.CleanContext);
+// an editor error, an empty result or no change keeps the previous prompt and says why. A text equal to the
+// generated prompt is not an edit: the edited mark goes away.
+func (d launchDialog) promptEdited(text string, err error) launchDialog {
+	d.editing = false
+	d.err, d.info = "", ""
+	if err != nil {
+		d.err = "the editor failed, the prompt is unchanged: " + printable(err.Error())
+		return d
+	}
+	clean := launch.CleanContext(text)
+	switch {
+	case clean == "":
+		d.err = "prompt is empty, the previous prompt is kept"
+	case clean == launch.CleanContext(d.prompt()):
+		d.info = "prompt unchanged"
+	case clean == launch.CleanContext(d.in.Context):
+		d.restorePrompt()
+		d.info = "prompt is the generated one again"
+		d.retryID = ""
+	default:
+		d.promptText, d.promptDone = clean, true
+		d.in.ContextLen, d.in.ContextBytes = utf8.RuneCountInString(clean), len(clean)
+		d.retryID = "" // an edit: a lost-reply retry no longer describes the request
+	}
+	return d
+}
+
+// restorePrompt goes back to the generated prompt and its sizes.
+func (d *launchDialog) restorePrompt() {
+	d.promptText, d.promptDone = "", false
+	d.in.ContextLen, d.in.ContextBytes = d.genLen, d.genBytes
+}
+
+// printable replaces control characters, so text from outside (an error message) cannot reach the layout.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+// promptRow is the value of the Prompt row.
+func (d launchDialog) promptRow() string {
+	if d.promptDone {
+		return fmt.Sprintf("edited · %d characters", d.in.ContextLen)
+	}
+	what := "title + body"
+	switch n := len(d.in.Issue.Comments); n {
+	case 0:
+	case 1:
+		what += " + 1 comment"
+	default:
+		what += fmt.Sprintf(" + %d comments", n)
+	}
+	return fmt.Sprintf("%s · %d characters", what, d.in.ContextLen)
 }
 
 func (d launchDialog) focused() launchField { return d.focus }
@@ -103,7 +185,7 @@ func (d launchDialog) running() bool { return d.run }
 // start marks the launch as running; enter and esc are ignored until failed.
 func (d launchDialog) start() launchDialog {
 	d.run = true
-	d.err, d.failure = "", ""
+	d.err, d.failure, d.info = "", "", ""
 	return d
 }
 
@@ -225,13 +307,18 @@ func (d *launchDialog) move(dir int) {
 
 // update handles one key and says what the caller should do.
 func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
-	if d.run {
+	if d.run || d.editing {
 		return d, actNone
 	}
+	d.info = ""
 	switch k.Type {
 	case tea.KeyEsc:
 		return d, actCancel
 	case tea.KeyEnter:
+		if d.expanded && d.focus == fPrompt {
+			d.err, d.editing = "", true
+			return d, actEditPrompt
+		}
 		if d.findingBase() {
 			d.err = "still finding the base branch…"
 			return d, actNone
@@ -270,6 +357,12 @@ func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
 	case tea.KeySpace:
 		d.editText(func(s string) string { return s + " " })
 	case tea.KeyRunes:
+		if d.focus == fPrompt {
+			if string(k.Runes) == "r" && !k.Paste {
+				d.resetPrompt()
+			}
+			return d, actNone
+		}
 		// A paste arrives as one message: keep what can be shown, drop newlines,
 		// tabs and escape sequences instead of letting them reach the layout.
 		r := strings.Map(func(r rune) rune {
@@ -283,6 +376,18 @@ func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
 		}
 	}
 	return d, actNone
+}
+
+// resetPrompt is r on the Prompt row: back to the generated prompt.
+func (d *launchDialog) resetPrompt() {
+	d.err = ""
+	if !d.promptDone {
+		d.info = "the prompt is the generated one"
+		return
+	}
+	d.restorePrompt()
+	d.retryID = ""
+	d.info = "generated prompt restored"
 }
 
 // editText changes the focused row if it is a text row. The model row turns
@@ -407,6 +512,9 @@ func (d launchDialog) summary() string {
 	if d.in.PasteOnly {
 		parts = append(parts, "paste only")
 	}
+	if d.promptDone {
+		parts = append(parts, "prompt edited")
+	}
 	s := strings.Join(parts, " · ")
 	if d.in.ContextLen > launch.WarnChars {
 		s += fmt.Sprintf(" · ⚠ large issue, %d characters", d.in.ContextLen)
@@ -492,9 +600,18 @@ func (d launchDialog) view(width int) string {
 	if d.err != "" {
 		b.WriteString("\n" + styErr.Render(wrapLines(d.err, width)) + "\n")
 	}
+	if d.info != "" {
+		b.WriteString("\n" + styDim.Render(wrapLines(d.info, width)) + "\n")
+	}
 	keys := "enter launch   e edit   esc cancel"
 	if d.expanded {
 		keys = "tab/↑↓ move   ←/→ choose   type to edit   enter launch   esc cancel"
+		if d.focus == fPrompt {
+			keys = "enter edit the prompt in $EDITOR   r restore it   tab/↑↓ move (enter launches from the other rows)   esc cancel"
+		}
+	}
+	if d.editing {
+		keys = "the editor is open"
 	}
 	if d.run {
 		keys = "wait for the launch to finish"
@@ -559,6 +676,14 @@ func (d launchDialog) formRows(b *strings.Builder, width int) {
 			val = "‹ " + string(d.in.Place) + " ›"
 		case fSplit:
 			val = "‹ " + string(d.in.Split) + " ›"
+		case fPrompt:
+			val = d.promptRow()
+			switch {
+			case focused && d.promptDone:
+				note = "enter edits it again in $EDITOR, r restores the generated prompt"
+			case focused:
+				note = "enter edits the whole prompt in $EDITOR (this launch only)"
+			}
 		}
 		fmt.Fprintf(b, "%s%-8s %s", mark, launchFieldName[f], val)
 		b.WriteString(hint(note != "", note))

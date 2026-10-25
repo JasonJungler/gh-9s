@@ -20,8 +20,10 @@ import (
 var (
 	launcher = launch.Launcher{Run: launch.ExecRun, Getenv: os.Getenv, Fetch: ghcli.FetchBase, Resolve: ghcli.ResolveBase}
 	// launchDo runs a launch; it is launcher.Do unless a test fakes it.
-	launchDo          = func(r launch.Request) (launch.Result, error) { return launcher.Do(r) }
-	launchModels      = launch.ListModels
+	launchDo     = func(r launch.Request) (launch.Result, error) { return launcher.Do(r) }
+	launchModels = launch.ListModels
+	// launchEdit opens the prompt in $VISUAL / $EDITOR; tests replace it so no real editor starts.
+	launchEdit        = editorExec
 	launchDir         = os.Getwd
 	launchDefaultBase = ghcli.DefaultBase
 	launchPrefsPath   = func() string {
@@ -52,6 +54,13 @@ type launchBaseMsg struct {
 	seq  int
 	base string
 	note string // set when the base is a local branch because the repo has no remote
+}
+
+// launchPromptMsg carries the text the editor returned for the open dialog's prompt.
+type launchPromptMsg struct {
+	seq  int // the dialog it was asked for (model.launchSeq)
+	text string
+	err  error
 }
 
 // launchDoneMsg says how a launch ended.
@@ -155,6 +164,7 @@ func (m model) openLaunch(d ghcli.IssueDetail, t launch.Target) (model, tea.Cmd)
 	text := launch.BuildContext(d)
 	dlg := newLaunchDialog(launchInput{
 		Issue:        d,
+		Context:      text,
 		Target:       t,
 		AutoTarget:   cfg.String("launch_target") == "auto",
 		Agent:        agent,
@@ -220,9 +230,15 @@ func (m model) launchKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.launchDlg = &d
 		return m, cmd
+	case actEditPrompt:
+		m.launchDlg = &d
+		seq, edit := m.launchSeq, launchEdit
+		return m, edit(d.prompt(), func(text string, err error) tea.Msg {
+			return launchPromptMsg{seq: seq, text: text, err: err}
+		})
 	case actSubmit:
 		req := d.request()
-		req.Context = launch.BuildContext(d.in.Issue)
+		req.Context = d.prompt()
 		req.Dir = m.launchWD
 		d = d.start()
 		m.launchDlg = &d
@@ -245,6 +261,17 @@ func (m model) launchModelsLoaded(msg launchModelsMsg) model {
 		return m
 	}
 	d := m.launchDlg.withModels(msg.models)
+	m.launchDlg = &d
+	return m
+}
+
+// launchPromptEdited puts the edited prompt in the dialog, unless it was closed or replaced, or was not waiting
+// for an editor (a late answer is dropped).
+func (m model) launchPromptEdited(msg launchPromptMsg) model {
+	if !m.launchOpen(msg.seq) || !m.launchDlg.editing {
+		return m
+	}
+	d := m.launchDlg.promptEdited(msg.text, msg.err)
 	m.launchDlg = &d
 	return m
 }
