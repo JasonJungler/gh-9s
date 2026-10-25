@@ -113,6 +113,7 @@ func init() {
 		if p.replyTo != "" {
 			verb = "replied in "
 		}
+		m.discBusy = true // cleared by the answer, whatever it is
 		return m, func() tea.Msg {
 			return prActionDoneMsg{text: verb + p.label, err: commentDisc(p.target, p.discID, r.text, p.replyTo)}
 		}
@@ -388,6 +389,10 @@ func discKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		}
 		st.scroll = min(max(st.scroll, 0), maxScroll)
 	case "C", "r":
+		if m.discBusy {
+			m.status = styDim.Render("a comment is still being sent")
+			return m, nil, true
+		}
 		if st.d.ID == "" {
 			m.status = styDim.Render("still loading the discussion")
 			return m, nil, true

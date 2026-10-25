@@ -48,7 +48,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen, m.helpTop = true, 0
 		return m, nil
 	}
-	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox || m.view == viewBoard) {
+	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox || m.view == viewBoard || m.view == viewDiscussions) {
 		if m.view == viewBoard && m.boardSt().colsActive(m) {
 			m.status = styDim.Render("the preview pane is not shown in columns; b goes back to the list")
 			return m, nil

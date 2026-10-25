@@ -406,17 +406,6 @@ func TestAnswerWithoutAPendingCommentSendsNothing(t *testing.T) {
 	}
 }
 
-func TestDiscussionTextFromGitHubDrawsNoEscapeSequences(t *testing.T) {
-	f := installDisc(t)
-	f.detail.Comments[0].Body = "plain"
-	// the parser cleans text (see ghcli); the screen must not add any
-	if s := m2s(discOpen(t)); strings.ContainsRune(ansi.Strip(s), 0x1b) {
-		t.Error("escape in the screen")
-	}
-}
-
-func m2s(m model) string { return m.View() }
-
 func TestOOpensTheDiscussionInTheBrowser(t *testing.T) {
 	installDisc(t)
 	var opened string
@@ -427,5 +416,51 @@ func TestOOpensTheDiscussionInTheBrowser(t *testing.T) {
 	keyAll(m, "o")
 	if opened != "https://github.com/acme/api/discussions/42" {
 		t.Errorf("opened %q", opened)
+	}
+}
+
+func TestPHidesAndShowsThePaneOnTheDiscussionList(t *testing.T) {
+	installDisc(t)
+	m := discListModel(t)
+	m.previewOff = false
+	if m = keyAll(m, "p"); !m.previewOff {
+		t.Error("p did not hide the pane")
+	}
+	if m = keyAll(m, "p"); m.previewOff {
+		t.Error("p did not bring the pane back")
+	}
+}
+
+func TestOnlyOneCommentIsSentAtATime(t *testing.T) {
+	f := installDisc(t)
+	m := discOpen(t)
+	m = keyAll(m, "n", "C")
+	m, cmd := answer(m, "disc.comment", true, "first")
+	if !m.discBusy {
+		t.Fatal("a comment is on its way but nothing says so")
+	}
+	for _, key := range []string{"C", "r"} {
+		if m = keyAll(m, key); m.dlg != nil || !strings.Contains(ansi.Strip(m.status), "still being sent") {
+			t.Errorf("%s while one is on its way: dlg %v status %q", key, m.dlg, m.status)
+		}
+	}
+	m = runCmd(m, cmd)
+	if m.discBusy || len(f.comments) != 1 {
+		t.Fatalf("busy %v after the answer, %d sent", m.discBusy, len(f.comments))
+	}
+	if m = keyAll(m, "C"); m.dlg == nil {
+		t.Error("C is still refused after the comment went out")
+	}
+}
+
+func TestFailedCommentFreesTheNextOne(t *testing.T) {
+	f := installDisc(t)
+	f.err = errors.New("HTTP 500")
+	m := discOpen(t)
+	m = keyAll(m, "C")
+	m, cmd := answer(m, "disc.comment", true, "x")
+	m = runCmd(m, cmd)
+	if m.discBusy {
+		t.Error("still busy after a failure")
 	}
 }

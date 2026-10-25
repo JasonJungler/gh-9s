@@ -76,6 +76,7 @@ type model struct {
 	discCat      string            // the discussion category the list is narrowed to ("" = all): its id
 	discCatName  string            // and its name, for the title
 	disc         string            // the discussion shown
+	discBusy     bool              // a discussion comment is on its way; one at a time
 	prFilter     ghcli.PRFilter    // PR list filter
 
 	mode                          inputMode
