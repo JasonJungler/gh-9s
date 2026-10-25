@@ -88,7 +88,7 @@ Orca and herdr receive the issue as a program argument, and the operating system
 | macOS | 524,288 |
 | Other | 30,000 |
 
-The limit counts bytes, not characters: Chinese, Japanese and emoji take 3 or 4 bytes each, so 40,000 Chinese characters are already about 120,000 bytes. When the issue is near the limit (90% or more) or over it, the confirmation line says so. Only Orca and herdr show the byte count and the limit there; tmux has no such limit and shows nothing about bytes.
+The limit counts bytes, not characters: Chinese, Japanese and emoji take 3 or 4 bytes each, so 40,000 Chinese characters are already about 120,000 bytes. When the issue is near the limit (90% or more) or over it, the confirmation line says so. With `launch_submit` off, herdr also sends 12 bytes of paste markers around the text in the same argument (see below), and those count too; the line shows the size with them. Only Orca and herdr show the byte count and the limit there; tmux has no such limit and shows nothing about bytes.
 
 On macOS, an Orca issue of more than 131,071 bytes cannot go in one `create` call. gh-9s then creates the workspace, starts the agent, waits for it to be idle and sends the text to its terminal, which gives the same result. On Linux the two limits are the same, so that path is never needed.
 
@@ -109,21 +109,21 @@ How readiness is detected differs. tmux watches the pane for the agent's ready t
 
 The `launch_submit` setting (default on) decides what happens to the issue once the agent is ready. With `off`, gh-9s only places the text in the agent's input box. You read it, edit it if you like, and press `Enter` in the agent yourself. It is one global setting, not one per environment. Change it in `:settings` or with `:set launch_submit off`.
 
-When it is off, the confirmation line ends with `· paste only`, and after a successful launch the message says that the text is in the agent's input and that you must press `Enter` there. Nothing is sent to the agent before you do.
+When it is off, the confirmation line ends with `· paste only`, and after a successful launch the message ends with `paste only: press Enter in the agent`. gh-9s itself never presses `Enter`. Whether a newline in the text could still submit it depends on the agent having turned on bracketed paste (see below); tmux checks that and refuses if it is not on.
 
 How each environment does it:
 
 | Environment | What gh-9s does | Status |
 |---|---|---|
-| tmux | Pastes the text with `paste-buffer -p` (a bracketed paste, as before) and skips the final `Enter`. A multi-line text arrives as one paste, so it stays in the input box. | Checked against a real tmux server with a program that echoed its raw input: the bracketed paste arrived and nothing else. |
+| tmux | First waits, for up to 5 seconds, for the pane to report that its program has turned on bracketed paste (`#{bracket_paste_flag}` is `1`). Then it pastes the text with `paste-buffer -p` and skips the final `Enter`. If the program has turned bracketed paste on, a multi-line text arrives as one paste, so it stays in the input box. If the flag never becomes `1`, gh-9s pastes nothing and fails at `paste` with `the agent has not turned on bracketed paste; nothing was pasted, so the text was not placed`. Without bracketed paste, tmux would send each line feed as Enter and the first line would submit. The wait is there because an agent's ready banner can show before it has turned bracketed paste on. | Checked against a real tmux server with a program that echoed its raw input: the bracketed paste arrived and nothing else, and the flag read `0` for a plain program and `1` after it turned bracketed paste on. **Unverified:** a real Claude Code or Devin under tmux. Claude Code is expected to turn bracketed paste on; if neither does, the launch fails at `paste` and nothing is placed. |
 | herdr | `herdr agent prompt` always presses `Enter` and has no option to skip it, so gh-9s uses `herdr pane send-text` instead. | Checked live (herdr 0.8.2), see below. |
-| Orca | Always uses the longer path: create the workspace without an agent, launch the agent, wait until it is idle, then `orca terminal send --text` **without** `--enter`. This is the path already used for an issue too big for one `create` call, so the steps in [When a step fails](#when-a-step-fails) are the same. | **Not tested against a real Orca.** It is only covered by unit tests with a fake Orca. It is also not known whether `orca terminal send --text` delivers a multi-line text as a bracketed paste. If it does not, a newline in the text may submit it. Try it on a throwaway issue first. |
+| Orca | Always uses the longer path: create the workspace without an agent, launch the agent, wait until it is idle, then `orca terminal send --text` **without** `--enter`. This is the path already used for an issue too big for one `create` call. Compared with the normal Orca path it adds the `start agent` and `agent not ready` steps (see [The longer Orca path](#the-longer-orca-path)) and has no retry after a lost reply. | **Not tested against a real Orca.** It is only covered by unit tests with a fake Orca. It is also not known whether `orca terminal send --text` delivers a multi-line text as a bracketed paste. If it does not, a newline in the text may submit it. Try it on a throwaway issue first. |
 
 ### herdr
 
 `herdr pane send-text` was tried in a throwaway pane running a program that echoed the raw bytes it received. It writes the text exactly as given, adds no newline and no `Enter`, and does not make it a bracketed paste, even when the program asked for bracketed paste. A newline in the text would therefore arrive as a plain line feed, which an agent can take for `Enter` and submit.
 
-So gh-9s wraps the text itself in the bracketed paste markers (`ESC[200~` before and `ESC[201~` after), so the agent reads the whole issue, newlines included, as one paste. Control characters are already removed from the issue text, so the text cannot contain the closing marker; as a second check, herdr refuses to send a text that has any control character other than newline and tab, and sends nothing. This relies on the agent having turned on bracketed paste, as agent terminal interfaces normally do. Only the echo program was used to check the bytes: no real Claude Code or Devin was run, so whether they keep the pasted text in their input box is not verified. A program that has not turned on bracketed paste would show the markers as characters.
+So gh-9s wraps the text itself in the bracketed paste markers (`ESC[200~` before and `ESC[201~` after), so the agent reads the whole issue, newlines included, as one paste. Control characters are already removed from the issue text, so the text cannot contain the closing marker; as a second check, herdr refuses to send a text that has any control character other than newline and tab, and sends nothing. This relies on the agent having turned on bracketed paste, as agent terminal interfaces normally do; Claude Code and Devin are expected to, but that is not verified. Only the echo program was used to check the bytes: no real Claude Code or Devin was run, so whether they keep the pasted text in their input box is not verified. Unlike tmux, gh-9s cannot ask herdr whether the program turned bracketed paste on, so it does not check. A program that has not turned on bracketed paste may show the markers as characters or submit at a newline.
 
 ### The longer Orca path
 
@@ -174,9 +174,9 @@ The dialog stays open and names the step that failed:
 | `fetch` | `git fetch` failed (Orca). No workspace was created. |
 | `create workspace` | Orca could not create the workspace, or the request was refused before anything ran (for example, an empty or unsafe name, or text too large to pass) |
 | `open pane` | The pane, window or tab could not be opened |
-| `start agent` | The agent could not be started, or (herdr) did not become ready |
-| `agent not ready` | The agent did not become ready in 30 seconds (tmux). Nothing was pasted. |
-| `paste` | The agent is running but the text could not be sent (with `launch_submit` off: could not be placed in its input) |
+| `start agent` | The agent could not be started, or (herdr) did not become ready, or (Orca's longer path) the agent launch was not confirmed |
+| `agent not ready` | The agent did not become ready in 30 seconds (tmux, and Orca's longer path, where Orca's wait for the agent to be idle timed out). Nothing was pasted. |
+| `paste` | The agent is running but the text could not be sent (with `launch_submit` off: could not be placed in its input, for example in tmux because the agent has not turned on bracketed paste) |
 
 Whatever was already created is left open for you to take over. Nothing is cleaned up and nothing is retried silently. `enter` in the failed dialog tries again from the start, which can make a second pane or workspace, so check what is already open first.
 
