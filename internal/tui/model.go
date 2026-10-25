@@ -126,6 +126,8 @@ type model struct {
 	boardColsOn    bool               // the columns layout is chosen, for the session
 	boardOp        *boardOp           // a write being collected through dialogs
 	boardBusy      bool               // a write is running
+	undo           *undoRec           // the last change that can be taken back
+	undoNext       *undoRec           // ... of the write now running
 	projectChoices []ghcli.ProjectRef // the Projects offered by the pin dialog
 	board          pins.Project       // the Project the board screen shows
 

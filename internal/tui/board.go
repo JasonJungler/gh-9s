@@ -37,15 +37,16 @@ type boardState struct {
 	loaded   bool
 	loadedAt time.Time
 	tab      int
-	viewName string      // the chosen view by name; its position can change
-	cols     bool        // the columns layout
-	col, win int         // the selected column and the first one drawn
-	curs     map[int]int // the selected card of each column
-	tops     map[int]int // the first card drawn in each column
-	view     int         // 0 is "All items", n is the Project's view n-1
-	me       string      // the logged-in user, when a view's filter asks for @me
-	force    bool        // the next fetch ignores the reuse window (R)
-	back     string      // the card an issue or PR was opened from, selected again on return
+	viewName string          // the chosen view by name; its position can change
+	cols     bool            // the columns layout
+	col, win int             // the selected column and the first one drawn
+	curs     map[int]int     // the selected card of each column
+	tops     map[int]int     // the first card drawn in each column
+	view     int             // 0 is "All items", n is the Project's view n-1
+	me       string          // the logged-in user, when a view's filter asks for @me
+	force    bool            // the next fetch ignores the reuse window (R)
+	back     string          // the card an issue or PR was opened from, selected again on return
+	marks    map[string]bool // marked cards by item id
 }
 
 // boardPayload is one answer of fetchProject.
@@ -64,7 +65,7 @@ func init() {
 		apply:    boardApply,
 		key:      boardKeyHandler,
 		body:     boardBody,
-		footer:   "tab/h/l switch column  [/] switch view  enter open  s status  a assign  n add  x remove  X archive  N draft  e edit  v field  b columns  f pin/unpin Project  o browser  / filter",
+		footer:   "tab/h/l switch column  [/] switch view  enter open  space mark  s status  a assign  n add  u undo  x remove  X archive  N draft  e edit  v field  b columns  f pin/unpin Project  o browser  / filter",
 	})
 }
 
@@ -125,6 +126,15 @@ func boardApply(m model, msg screenMsg) model {
 		name = m.boardViewMemo[st.key]
 	}
 	st.data, st.loaded, st.loadedAt, st.force, st.me = pl.p, true, boardNow(), false, pl.me
+	if len(st.marks) > 0 { // marks of cards that are gone are dropped
+		kept := map[string]bool{}
+		for _, it := range pl.p.Items {
+			if st.marks[it.ID] {
+				kept[it.ID] = true
+			}
+		}
+		st.marks = kept
+	}
 	if fresh { // a Project opened for the first time follows the session's choice of layout
 		st.cols = m.boardColsOn
 	}
@@ -279,6 +289,13 @@ func (m model) rebuildBoard(st boardState, keepID string) model {
 	st.tab = min(max(st.tab, 0), len(tabs)-1)
 	m = m.withScreenData(viewBoard, st)
 	m.tbl = table{cols: []string{"ITEM", "TITLE", "STATE", "ASSIGNEES", "LABELS", "UPDATED"}, rows: boardRows(st.data, tabs[st.tab])}
+	if len(st.marks) > 0 {
+		for i, it := range tabs[st.tab].items {
+			if st.marks[st.data.Items[it].ID] {
+				m.tbl.rows[i].cells[0] = "● " + m.tbl.rows[i].cells[0]
+			}
+		}
+	}
 	if f := st.roadmapField(); f != "" { // a roadmap lists its date where the others list the age
 		m.tbl.cols[5] = strings.ToUpper(trunc(f, 12))
 		for i, it := range tabs[st.tab].items {
@@ -412,6 +429,23 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return next, cmd, true
 	case "n":
 		next, cmd := m.startAdd()
+		return next, cmd, true
+	case " ":
+		return m.toggleMark(), nil, true
+	case "esc":
+		if len(st.marks) > 0 {
+			return m.clearMarks(), nil, true
+		}
+		return m, nil, false
+	case "ctrl+up", "ctrl+down":
+		delta := 1
+		if k.String() == "ctrl+up" {
+			delta = -1
+		}
+		next, cmd := m.startReorder(delta)
+		return next, cmd, true
+	case "u":
+		next, cmd := m.startUndo()
 		return next, cmd, true
 	case "x":
 		next, cmd := m.startRemove()
@@ -645,6 +679,7 @@ func (m model) switchBoardView(delta int) model {
 	memo[st.key] = st.viewName
 	m.boardViewMemo = memo
 	st.tab, st.col, st.curs, st.tops, st.win = 0, 0, nil, nil, 0
+	st.marks = nil
 	m.filter = ""
 	return m.rebuildBoard(st, "")
 }

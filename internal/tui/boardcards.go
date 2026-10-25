@@ -26,12 +26,18 @@ func init() {
 		if !ok {
 			return m, nil
 		}
+		if len(op.bulk) > 0 {
+			return m.startWrite("removed "+cards(len(op.bulk)), bulkRun(op.bulk, func(it ghcli.ProjectItem) error { return removeItem(op.host, op.projectID, it.ID) }))
+		}
 		return m.startWrite("removed "+op.title, func() error { return removeItem(op.host, op.projectID, op.itemID) })
 	}
 	dialogHandlers["board.archive.ok"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		op, ok := m.takeConfirm(r)
 		if !ok {
 			return m, nil
+		}
+		if len(op.bulk) > 0 {
+			return m.startWrite("archived "+cards(len(op.bulk)), bulkRun(op.bulk, func(it ghcli.ProjectItem) error { return archiveItem(op.host, op.projectID, it.ID) }))
 		}
 		return m.startWrite("archived "+op.title, func() error { return archiveItem(op.host, op.projectID, op.itemID) })
 	}
@@ -56,11 +62,14 @@ func init() {
 		if !ok {
 			return m, nil
 		}
+		rec := &undoRec{key: op.key, host: op.host, projectID: op.projectID, title: op.title, kind: "created", what: "remove the draft “" + op.title + "” again"}
+		m.undoNext = rec
 		return m.startWrite("created the draft "+op.title, func() error {
 			id, err := addDraft(op.host, op.projectID, op.title)
 			if err != nil {
 				return err
 			}
+			rec.itemID = id
 			if op.optionID != "" {
 				if err := setProjectStatus(op.host, op.projectID, id, op.statusFld, op.optionID); err != nil {
 					return fmt.Errorf("created, but its Status could not be set: %w", err)
@@ -184,6 +193,9 @@ func init() {
 			return m, nil
 		}
 		f := *op.field
+		if op.card != nil {
+			m.undoNext = m.fieldUndo(op, *op.card, f, op.shown)
+		}
 		return m.startWrite("updated "+f.Name+" of "+op.title, func() error {
 			return setField(op.host, op.projectID, op.itemID, f.ID, f.Type, op.value)
 		})
@@ -213,7 +225,7 @@ func (m model) cardOp() (*boardOp, ghcli.ProjectItem, bool) {
 		return nil, it, false
 	}
 	op := m.newOp()
-	op.itemID, op.title = it.ID, it.Title
+	op.itemID, op.title, op.card = it.ID, it.Title, &it
 	return op, it, true
 }
 
@@ -227,6 +239,9 @@ func (m model) startRemoval(archive bool) (model, tea.Cmd) {
 	if m.boardOp != nil && m.boardOp.confirming {
 		m.status = styDim.Render("answer the question first")
 		return m, nil
+	}
+	if marked := m.boardSt().marked(); len(marked) > 0 {
+		return m.startBulkRemoval(marked, archive)
 	}
 	op, it, ok := m.cardOp()
 	if !ok {

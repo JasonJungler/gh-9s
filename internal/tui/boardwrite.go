@@ -50,6 +50,10 @@ type boardOp struct {
 	field      *ghcli.ProjectField // v: the field being set
 	value      *ghcli.FieldValue   // ... to this (nil: cleared)
 	shown      string
+	bulk       []ghcli.ProjectItem // the marked cards a write is about
+	afterID    string              // reorder: the card to go after
+	undoRec    *undoRec            // undo: what to take back
+	card       *ghcli.ProjectItem  // the card as it was at key-press time
 }
 
 // boardWriteDoneMsg is the outcome of a write.
@@ -87,6 +91,14 @@ func init() {
 		if !r.ok || op == nil || !op.confirming || !m.opAlive(op) {
 			return m, nil
 		}
+		if len(op.bulk) > 0 {
+			return m.startWrite("moved "+cards(len(op.bulk))+" to "+op.optionName, bulkRun(op.bulk, func(it ghcli.ProjectItem) error {
+				return setProjectStatus(op.host, op.projectID, it.ID, op.statusFld, op.optionID)
+			}))
+		}
+		if op.card != nil {
+			m.undoNext = m.statusUndo(op, *op.card, op.optionName)
+		}
 		return m.startWrite("moved "+op.title+" to "+op.optionName, func() error {
 			return setProjectStatus(op.host, op.projectID, op.itemID, op.statusFld, op.optionID)
 		})
@@ -98,6 +110,18 @@ func init() {
 			return m, nil
 		}
 		op.add, op.drop = diffNames(op.current, r.values)
+		if len(op.bulk) > 0 {
+			op.drop = nil // several cards: people are only added
+			if len(op.add) == 0 {
+				m.boardOp = nil
+				m.status = styDim.Render("no one chosen")
+				return m, nil
+			}
+			op.confirming = true
+			d := newConfirmDialog("board.assignees.ok", "Assign "+strings.Join(op.add, ", ")+" on "+cards(len(op.bulk))+" in "+displayRef(op.target)+"?", namesOf(op.bulk))
+			m.dlg = &d
+			return m, nil
+		}
 		if len(op.add)+len(op.drop) == 0 {
 			m.boardOp = nil
 			m.status = styDim.Render("no assignee changes")
@@ -120,6 +144,9 @@ func init() {
 		m.boardOp = nil
 		if !r.ok || op == nil || !op.confirming || !m.opAlive(op) {
 			return m, nil
+		}
+		if len(op.bulk) > 0 {
+			return m.startWrite("assigned "+strings.Join(op.add, ", ")+" on "+cards(len(op.bulk)), bulkAssignRun(op))
 		}
 		return m.startWrite("updated assignees on "+displayRef(op.target)+"#"+op.number, func() error {
 			if op.isPR {
@@ -156,11 +183,14 @@ func init() {
 		if !r.ok || op == nil || !op.confirming || !m.opAlive(op) {
 			return m, nil
 		}
+		rec := &undoRec{key: op.key, host: op.host, projectID: op.projectID, title: op.content.Title, kind: "created", what: "remove “" + op.content.Title + "” from the Project again"}
+		m.undoNext = rec
 		return m.startWrite("added "+op.content.Title, func() error {
 			id, err := addProjectItem(op.host, op.projectID, op.content.ID)
 			if err != nil {
 				return err
 			}
+			rec.itemID = id
 			if op.optionID != "" {
 				if err := setProjectStatus(op.host, op.projectID, id, op.statusFld, op.optionID); err != nil {
 					return fmt.Errorf("added, but its Status could not be set: %w", err)
@@ -186,6 +216,7 @@ func (m model) dropOp(op *boardOp) model {
 // startWrite runs a write unless one is already running.
 func (m model) startWrite(done string, fn func() error) (model, tea.Cmd) {
 	if m.boardBusy {
+		m.undoNext = nil
 		m.status = styDim.Render("still working on the last change")
 		return m, nil
 	}
@@ -225,6 +256,18 @@ func hostOfKey(key string) string {
 
 func (m model) onBoardWriteDone(msg boardWriteDoneMsg) (model, tea.Cmd) {
 	m.boardBusy = false
+	next := m.undoNext
+	m.undoNext = nil
+	if msg.err == nil {
+		m.undo = next // a change that can be taken back; anything else leaves the old record, which would now be stale
+		if next == nil {
+			m.undo = nil
+		}
+		if st, ok := m.screenData(viewBoard).(boardState); ok && st.key == msg.key {
+			st.marks = nil
+			m = m.withScreenData(viewBoard, st)
+		}
+	}
 	if msg.err != nil {
 		m.status = styErr.Render("✗ " + ghcli.CleanText(msg.err.Error()) + " (R shows what the Project looks like now)")
 	} else {
@@ -262,6 +305,9 @@ func (m model) startStatus() (model, tea.Cmd) {
 		return m, nil
 	}
 	st := m.boardSt()
+	if marked := st.marked(); len(marked) > 0 {
+		return m.startBulkStatus(marked)
+	}
 	it, ok := m.selectedCard()
 	if !ok || len(st.data.StatusIDs) == 0 {
 		m.status = styDim.Render("nothing to move here")
@@ -272,7 +318,7 @@ func (m model) startStatus() (model, tea.Cmd) {
 		return m, nil
 	}
 	op := m.newOp()
-	op.itemID, op.title = it.ID, it.Title
+	op.itemID, op.title, op.card = it.ID, it.Title, &it
 	m.boardOp = op
 	var choices []choice
 	for _, name := range st.data.StatusOrder {
@@ -299,7 +345,11 @@ func (m model) askStatus(op *boardOp, name string) (model, tea.Cmd) {
 	op.optionName, op.optionID = name, id
 	op.confirming = true
 	m.boardOp = op
-	d := newConfirmDialog("board.status.ok", "Move “"+op.title+"” to "+name+"?", ghcli.CleanText(st.data.Title))
+	q, detail := "Move “"+op.title+"” to "+name+"?", ghcli.CleanText(st.data.Title)
+	if len(op.bulk) > 0 {
+		q, detail = "Move "+cards(len(op.bulk))+" to "+name+"?", namesOf(op.bulk)
+	}
+	d := newConfirmDialog("board.status.ok", q, detail)
 	m.dlg = &d
 	return m, nil
 }
@@ -326,7 +376,10 @@ func (m model) moveCardSideways(delta int) (model, tea.Cmd) {
 		return m, nil
 	}
 	op := m.newOp()
-	op.itemID, op.title = it.ID, it.Title
+	op.itemID, op.title, op.card = it.ID, it.Title, &it
+	if marked := st.marked(); len(marked) > 0 {
+		op.bulk = marked
+	}
 	return m.askStatus(op, name)
 }
 
@@ -335,6 +388,9 @@ func (m model) startAssign() (model, tea.Cmd) {
 	if m.boardOp != nil && m.boardOp.confirming {
 		m.status = styDim.Render("answer the question first")
 		return m, nil
+	}
+	if marked := m.boardSt().marked(); len(marked) > 0 {
+		return m.startBulkAssign(marked)
 	}
 	it, ok := m.selectedCard()
 	if !ok || (it.Type != "Issue" && it.Type != "PullRequest") {
@@ -385,7 +441,11 @@ func (m model) onBoardAssignees(msg boardAssigneesMsg) (model, tea.Cmd) {
 		choices[i] = choice{label: n, value: n}
 	}
 	m.status = ""
-	return m.withDialog(newChoiceDialog("board.assignees", "Assignees for "+displayRef(msg.op.target)+"#"+msg.op.number, choices, true, msg.op.current)), nil
+	title := "Assignees for " + displayRef(msg.op.target) + "#" + msg.op.number
+	if len(msg.op.bulk) > 0 {
+		title = "Assign to " + cards(len(msg.op.bulk)) + " in " + displayRef(msg.op.target)
+	}
+	return m.withDialog(newChoiceDialog("board.assignees", title, choices, true, msg.op.current)), nil
 }
 
 // startAdd is n: ask for the issue or PR to add.

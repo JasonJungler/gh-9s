@@ -121,7 +121,7 @@ func padCell(s string, w int) string {
 }
 
 // cardLines draws one card in w columns: the item, the title on up to two lines, and who and what.
-func cardLines(p ghcli.Project, i, w int, selected bool) []string {
+func cardLines(p ghcli.Project, i, w int, selected, marked bool) []string {
 	it := p.Items[i]
 	r := boardRows(p, boardTab{items: []int{i}})[0]
 	tl := wrapTitle(it.Title, w)
@@ -134,6 +134,9 @@ func cardLines(p ghcli.Project, i, w int, selected bool) []string {
 	}
 	if meta == "" {
 		meta = "-"
+	}
+	if marked {
+		r.cells[0] = "● " + r.cells[0]
 	}
 	lines := []string{padCell(r.cells[0], w), padCell(tl[0], w), padCell(tl[1], w), padCell(meta, w)}
 	if selected {
@@ -187,7 +190,7 @@ func boardColumnsBody(m model, st boardState) string {
 		}
 		top := min(st.tops[c], max(len(col.cards)-m.colVisibleCards(), 0))
 		for ci := top; ci < len(col.cards) && len(lines) < h; ci++ {
-			lines = append(lines, cardLines(st.data, col.cards[ci], w, c == st.col && ci == st.curs[c])...)
+			lines = append(lines, cardLines(st.data, col.cards[ci], w, c == st.col && ci == st.curs[c], st.marks[st.data.Items[col.cards[ci]].ID])...)
 			lines = append(lines, strings.Repeat(" ", w))
 		}
 		body = append(body, lines)
