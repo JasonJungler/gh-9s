@@ -25,7 +25,7 @@ and in tmux:
 tmux ◆ new pane (right) · claude · default model
 ```
 
-`◆` means the environment was detected automatically. It becomes `·` once you pick one yourself. When `launch_submit` is off, the line ends with `· paste only`.
+`◆` means the environment was detected automatically. It becomes `·` once you pick one yourself. When `launch_submit` is off, the line ends with `· paste only`. For Orca, when `launch_orca_nested` is on, it also says `· child of current` (before `paste only`); nothing is added when the workspace is independent.
 
 | Key | Action |
 |---|---|
@@ -98,6 +98,10 @@ Orca gets a new workspace (a worktree) rather than a pane in your current direct
 
 1. gh-9s runs `git fetch` for the remote of the base, so the workspace starts from what the remote has now. A bare base such as `main` means the same branch on `origin`: gh-9s fetches `origin` and gives Orca `origin/main`, so the workspace starts from what the remote has and not from a local `main` that may be behind. If `origin` has no branch of that name but the name is a local branch, a tag or a commit id, that ref is used as it is and the launch shows the note `origin has no <base>; using the local ref <base>`. If the name is none of these, the launch stops at `fetch` and says the base was not found. A base that already names a remote, such as `upstream/main`, or that starts with `refs/`, is used as it is. If the repo has no remote, there is nothing to fetch and the launch continues from the local branch under its bare name, with the note `no remote, using the local branch`. If the fetch fails, the launch stops. It never falls back to an old ref without telling you.
 2. gh-9s asks Orca to create the workspace, link it to the issue and start the agent with the issue as its prompt. Orca does the starting and waiting itself. (With `launch_submit` off, Orca takes the longer path instead, see below.)
+
+New workspaces are independent by default. Orca normally infers a parent from where a command runs, so a workspace created from inside another Orca workspace would become its child (a "sub workspace"). gh-9s passes `--no-parent` to `orca worktree create` to prevent that, so the workspace is a top-level one. Turn on `launch_orca_nested` (`:set launch_orca_nested on`) and gh-9s passes nothing, so Orca uses its inferred parent: the workspace gh-9s runs in. The setting is read when the dialog opens, and a retry after a lost reply (`--retry-launch`) uses the same value as the launch it repeats. `--no-parent` only changes the lineage Orca shows. It does not change the git branch or the base the workspace starts from. It is not shown as a row in the edit form.
+
+**Verification:** the `--no-parent` flag is in `orca worktree create --help` (read only), and the exact arguments for both settings values, on the one-call path, the longer path and the retry, are checked by unit tests against a fake `orca`. The effect in a real Orca (that a workspace made from inside another one is a top-level workspace with the setting off and a child with it on) has not been verified live, because that would create workspaces.
 
 The base defaults to the base ref Orca has for the repo, or else `origin/<the default branch>` (`origin/main` if git cannot tell). In a repo with no remote there is no `origin/...`, so it is the branch that is checked out, and the dialog shows `no remote, using the local branch`. The base is looked up when the dialog opens. If you press `enter` before it arrives, nothing is launched: the dialog says `still finding the base branch…` and you press `enter` again once the base shows.
 
