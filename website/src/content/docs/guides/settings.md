@@ -37,6 +37,7 @@ If an environment variable overrides a setting, the screen says when your change
 | `launch_agent` | `claude` | `claude`, `devin` | The coding agent to start. A launch remembers the one it used. |
 | `launch_tmux_place` | `pane` | `pane`, `window` | Open the agent in a pane or a window. herdr uses this too (its window is a tab). |
 | `launch_split` | `horizontal` | `horizontal`, `vertical` | Which way a new pane splits. herdr uses this too. |
+| `launch_submit` | `true` | on / off | `on` sends the issue to the agent at once. `off` only puts it in the agent's input box and you press `Enter` there; Orca then uses its longer path. See [Paste only](/gh-9s/guides/send-to-agent/#paste-only-instead-of-submitting). |
 
 Examples:
 

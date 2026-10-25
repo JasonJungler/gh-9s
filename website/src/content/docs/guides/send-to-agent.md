@@ -3,9 +3,11 @@ title: Send an issue to an agent
 description: Press a on an issue to open a workspace or pane in Orca, herdr or tmux, start Claude Code or Devin there, and give it the issue.
 ---
 
-Press `a` on an issue to hand it to a coding agent. gh-9s opens a new workspace (Orca) or pane (herdr, tmux), starts the agent in it and gives it the issue as its first message. It works from the issue list and from the issue screen. Only issues are supported, not pull requests.
+Press `a` on an issue to hand it to a coding agent. gh-9s opens a new workspace (Orca) or pane (herdr, tmux), starts the agent in it and gives it the issue as its first message (or, with [paste only](#paste-only-instead-of-submitting), puts it in the agent's input box for you to send). It works from the issue list and from the issue screen. Only issues are supported, not pull requests.
 
 Nothing is created until you press `enter` on the confirmation.
+
+By default the issue is sent to the agent at once. If you would rather read it first and press `Enter` yourself, turn off the `launch_submit` setting: see [Paste only instead of submitting](#paste-only-instead-of-submitting).
 
 Devin support is unverified. Devin was not available when this was written, so its ready check and its model list have never run against the real program. Claude Code has been run. See [Devin](#devin).
 
@@ -23,7 +25,7 @@ and in tmux:
 tmux ◆ new pane (right) · claude · default model
 ```
 
-`◆` means the environment was detected automatically. It becomes `·` once you pick one yourself.
+`◆` means the environment was detected automatically. It becomes `·` once you pick one yourself. When `launch_submit` is off, the line ends with `· paste only`.
 
 | Key | Action |
 |---|---|
@@ -72,7 +74,7 @@ If you switched repos with `:repo`, so that the repo on screen is not the repo o
 Orca gets a new workspace (a worktree) rather than a pane in your current directory.
 
 1. gh-9s runs `git fetch` for the remote of the base, so the workspace starts from what the remote has now. A bare base such as `main` means the same branch on `origin`: gh-9s fetches `origin` and gives Orca `origin/main`, so the workspace starts from what the remote has and not from a local `main` that may be behind. If `origin` has no branch of that name but the name is a local branch, a tag or a commit id, that ref is used as it is and the launch shows the note `origin has no <base>; using the local ref <base>`. If the name is none of these, the launch stops at `fetch` and says the base was not found. A base that already names a remote, such as `upstream/main`, or that starts with `refs/`, is used as it is. If the repo has no remote, there is nothing to fetch and the launch continues from the local branch under its bare name, with the note `no remote, using the local branch`. If the fetch fails, the launch stops. It never falls back to an old ref without telling you.
-2. gh-9s asks Orca to create the workspace, link it to the issue and start the agent with the issue as its prompt. Orca does the starting and waiting itself.
+2. gh-9s asks Orca to create the workspace, link it to the issue and start the agent with the issue as its prompt. Orca does the starting and waiting itself. (With `launch_submit` off, Orca takes the longer path instead, see below.)
 
 The base defaults to the base ref Orca has for the repo, or else `origin/<the default branch>` (`origin/main` if git cannot tell). In a repo with no remote there is no `origin/...`, so it is the branch that is checked out, and the dialog shows `no remote, using the local branch`. The base is looked up when the dialog opens. If you press `enter` before it arrives, nothing is launched: the dialog says `still finding the base branch…` and you press `enter` again once the base shows.
 
@@ -97,11 +99,35 @@ These work in two steps, in a pane that gh-9s creates and names explicitly. The 
 1. Open the pane (or window, or herdr tab) in the layout you chose.
 2. Start the agent in it.
 3. Wait until the agent is ready, for up to 30 seconds.
-4. Paste the issue and press `enter`.
+4. Paste the issue and press `enter` (or, with `launch_submit` off, only paste it).
 
 If the agent is not ready in time, nothing is pasted and the pane stays open, so you can paste by hand. An agent that stops at a trust or login prompt counts as not ready on purpose.
 
 How readiness is detected differs. tmux watches the pane for the agent's ready text (for Claude Code, its `Claude Code v` banner) and checks that the pane is no longer running a shell. herdr's own `agent start` waits; a timeout there is reported as `start agent`.
+
+## Paste only instead of submitting
+
+The `launch_submit` setting (default on) decides what happens to the issue once the agent is ready. With `off`, gh-9s only places the text in the agent's input box. You read it, edit it if you like, and press `Enter` in the agent yourself. It is one global setting, not one per environment. Change it in `:settings` or with `:set launch_submit off`.
+
+When it is off, the confirmation line ends with `· paste only`, and after a successful launch the message says that the text is in the agent's input and that you must press `Enter` there. Nothing is sent to the agent before you do.
+
+How each environment does it:
+
+| Environment | What gh-9s does | Status |
+|---|---|---|
+| tmux | Pastes the text with `paste-buffer -p` (a bracketed paste, as before) and skips the final `Enter`. A multi-line text arrives as one paste, so it stays in the input box. | Checked against a real tmux server with a program that echoed its raw input: the bracketed paste arrived and nothing else. |
+| herdr | `herdr agent prompt` always presses `Enter` and has no option to skip it, so gh-9s uses `herdr pane send-text` instead. | Checked live (herdr 0.8.2), see below. |
+| Orca | Always uses the longer path: create the workspace without an agent, launch the agent, wait until it is idle, then `orca terminal send --text` **without** `--enter`. This is the path already used for an issue too big for one `create` call, so the steps in [When a step fails](#when-a-step-fails) are the same. | **Not tested against a real Orca.** It is only covered by unit tests with a fake Orca. It is also not known whether `orca terminal send --text` delivers a multi-line text as a bracketed paste. If it does not, a newline in the text may submit it. Try it on a throwaway issue first. |
+
+### herdr
+
+`herdr pane send-text` was tried in a throwaway pane running a program that echoed the raw bytes it received. It writes the text exactly as given, adds no newline and no `Enter`, and does not make it a bracketed paste, even when the program asked for bracketed paste. A newline in the text would therefore arrive as a plain line feed, which an agent can take for `Enter` and submit.
+
+So gh-9s wraps the text itself in the bracketed paste markers (`ESC[200~` before and `ESC[201~` after), so the agent reads the whole issue, newlines included, as one paste. Control characters are already removed from the issue text, so the text cannot contain the closing marker; as a second check, herdr refuses to send a text that has any control character other than newline and tab, and sends nothing. This relies on the agent having turned on bracketed paste, as agent terminal interfaces normally do. Only the echo program was used to check the bytes: no real Claude Code or Devin was run, so whether they keep the pasted text in their input box is not verified. A program that has not turned on bracketed paste would show the markers as characters.
+
+### The longer Orca path
+
+Because Orca starts the agent and sends the text in separate calls, the launch takes a little longer and has the extra steps `start agent` (the agent launch) and `agent not ready` (the wait). Unlike the normal Orca path, a lost reply from `agent launch` is a plain failure with no retry: the workspace already exists, so the dialog tells you to start the agent from Orca by hand. The text is still a program argument, so the byte limit above applies as before.
 
 ## What the agent receives
 
@@ -121,7 +147,7 @@ The same text for every agent and every environment:
 …
 ```
 
-All comments are included, in order. A comment from a deleted user shows `ghost`. An issue with no description shows `(no description)`. Labels and assignees are left out, and images stay as links. Control characters are removed so issue text cannot send terminal commands to the agent's terminal.
+All comments are included, in order. With `launch_submit` off the agent receives the same text; it is only not submitted. A comment from a deleted user shows `ghost`. An issue with no description shows `(no description)`. Labels and assignees are left out, and images stay as links. Control characters are removed so issue text cannot send terminal commands to the agent's terminal.
 
 Above 100,000 characters the line adds `⚠ large issue, N characters`. In Orca and herdr the byte limit above applies as well. Nothing is cut: an issue is either sent whole or refused.
 
@@ -150,7 +176,7 @@ The dialog stays open and names the step that failed:
 | `open pane` | The pane, window or tab could not be opened |
 | `start agent` | The agent could not be started, or (herdr) did not become ready |
 | `agent not ready` | The agent did not become ready in 30 seconds (tmux). Nothing was pasted. |
-| `paste` | The agent is running but the text could not be sent |
+| `paste` | The agent is running but the text could not be sent (with `launch_submit` off: could not be placed in its input) |
 
 Whatever was already created is left open for you to take over. Nothing is cleaned up and nothing is retried silently. `enter` in the failed dialog tries again from the start, which can make a second pane or workspace, so check what is already open first.
 
@@ -158,7 +184,7 @@ The one exception is an Orca launch whose reply was lost. The agent may already 
 
 ## Settings
 
-Four settings choose the defaults. See [Settings](/gh-9s/guides/settings/).
+Five settings choose the defaults. See [Settings](/gh-9s/guides/settings/).
 
 | Setting | Default | Values |
 |---|---|---|
@@ -166,3 +192,4 @@ Four settings choose the defaults. See [Settings](/gh-9s/guides/settings/).
 | `launch_agent` | `claude` | `claude`, `devin` |
 | `launch_tmux_place` | `pane` | `pane`, `window` |
 | `launch_split` | `horizontal` | `horizontal`, `vertical` |
+| `launch_submit` | `true` | on / off |
