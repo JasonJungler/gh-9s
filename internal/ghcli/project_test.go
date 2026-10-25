@@ -214,7 +214,7 @@ func TestDraftIssueBodyIsRead(t *testing.T) {
 	if err != nil || len(p.Items) != 1 || p.Items[0].Body != "text[31m here" && p.Items[0].Body != "text here" && strings.ContainsRune(p.Items[0].Body, 0x1b) {
 		t.Fatalf("%+v %v", p.Items, err)
 	}
-	if !strings.Contains(projectQuery, "DraftIssue{title body}") {
+	if !strings.Contains(projectQuery, "DraftIssue{id title body}") {
 		t.Error("query does not ask for the body")
 	}
 }
@@ -275,7 +275,7 @@ func TestMoreViewsThanReadAreSaid(t *testing.T) {
 }
 
 func TestQueryUsesViewFieldsNotConfiguration(t *testing.T) {
-	if strings.Contains(projectQuery, "configuration") || !strings.Contains(projectQuery, "fields(first:30){nodes{... on ProjectV2Field{name dataType}}}") {
+	if strings.Contains(projectQuery, "visibleFields") || !strings.Contains(projectQuery, "fields(first:30){nodes{... on ProjectV2Field{name dataType}}}") {
 		t.Error("view fields must be read with the long-standing fields(), which older Enterprise servers have")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +21,18 @@ type ProjectItem struct {
 	Updated           string
 	Assignees, Labels []string
 	Dates             map[string]string // date fields by field name, as YYYY-MM-DD
+	DraftID           string            // a draft card's own id, which editing it needs
+	Values            map[string]string // the other fields as text, by field id
+}
+
+// FieldOption is one choice of a single-select or iteration field.
+type FieldOption struct{ ID, Name string }
+
+// ProjectField is a field of a Project that can be changed from the board.
+type ProjectField struct {
+	ID, Name string
+	Type     string // TEXT, NUMBER, DATE, SINGLE_SELECT or ITERATION
+	Options  []FieldOption
 }
 
 // ProjectView is a saved view of a Project: its layout, filter text and first sort.
@@ -41,8 +54,9 @@ type Project struct {
 	StatusOrder []string // the options of the Status field, in the Project's order
 	Total       int      // how many items the Project has, which can be more than Items
 	Items       []ProjectItem
-	Views       []ProjectView // the saved views, in the Project's order
-	Note        string        // what could not be read, for the screen to say
+	Views       []ProjectView  // the saved views, in the Project's order
+	Note        string         // what could not be read, for the screen to say
+	Fields      []ProjectField // the fields besides Status that can be changed
 }
 
 // ErrMissingScope is returned when gh's token lacks the read:project scope.
@@ -66,7 +80,7 @@ const (
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:20){nodes{login}} labels(first:20){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:100){nodes{name layout filter fields(first:30){nodes{... on ProjectV2Field{name dataType}}} sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValues(first:30){nodes{__typename ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{name}}}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{title body}}}}}}}}`
+const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:100){nodes{name layout filter fields(first:30){nodes{... on ProjectV2Field{name dataType}}} sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} fields(first:50){nodes{... on ProjectV2Field{id name dataType} ... on ProjectV2SingleSelectField{id name dataType options{id name}} ... on ProjectV2IterationField{id name dataType configuration{iterations{id title}}}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValues(first:30){nodes{__typename ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldNumberValue{number field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldIterationValue{title field{... on ProjectV2FieldCommon{id name}}}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{id title body}}}}}}}}`
 
 type nameNodes struct {
 	Nodes []struct {
@@ -129,6 +143,23 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 							} `json:"sortByFields"`
 						} `json:"nodes"`
 					} `json:"views"`
+					Fields struct {
+						Nodes []struct {
+							ID       string `json:"id"`
+							Name     string `json:"name"`
+							DataType string `json:"dataType"`
+							Options  []struct {
+								ID   string `json:"id"`
+								Name string `json:"name"`
+							} `json:"options"`
+							Config *struct {
+								Iterations []struct {
+									ID    string `json:"id"`
+									Title string `json:"title"`
+								} `json:"iterations"`
+							} `json:"configuration"`
+						} `json:"nodes"`
+					} `json:"fields"`
 					Field *struct {
 						ID      string `json:"id"`
 						Options []struct {
@@ -146,8 +177,14 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 							ID     string `json:"id"`
 							Values struct {
 								Nodes []struct {
-									Date  string `json:"date"`
-									Field *struct {
+									Type   string   `json:"__typename"`
+									Date   string   `json:"date"`
+									Text   string   `json:"text"`
+									Number *float64 `json:"number"`
+									Name   string   `json:"name"`
+									Title  string   `json:"title"`
+									Field  *struct {
+										ID   string `json:"id"`
 										Name string `json:"name"`
 									} `json:"field"`
 								} `json:"nodes"`
@@ -160,6 +197,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 								Number  int    `json:"number"`
 								Title   string `json:"title"`
 								Body    string `json:"body"`
+								DraftID string `json:"id"`
 								State   string `json:"state"`
 								URL     string `json:"url"`
 								Updated string `json:"updatedAt"`
@@ -207,6 +245,31 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 			p.StatusIDs[name] = o.ID
 		}
 	}
+	for _, f := range pr.Fields.Nodes {
+		if f.ID == "" || f.ID == p.StatusField {
+			continue
+		}
+		pf := ProjectField{ID: f.ID, Name: oneLine(CleanText(f.Name))}
+		switch f.DataType {
+		case "TEXT", "NUMBER", "DATE":
+			pf.Type = f.DataType
+		case "SINGLE_SELECT":
+			pf.Type = f.DataType
+			for _, o := range f.Options {
+				pf.Options = append(pf.Options, FieldOption{o.ID, oneLine(CleanText(o.Name))})
+			}
+		case "ITERATION":
+			pf.Type = f.DataType
+			if f.Config != nil {
+				for _, o := range f.Config.Iterations {
+					pf.Options = append(pf.Options, FieldOption{o.ID, oneLine(CleanText(o.Title))})
+				}
+			}
+		default:
+			continue
+		}
+		p.Fields = append(p.Fields, pf)
+	}
 	if len(pr.Views.Nodes) >= maxViews {
 		p.Note = fmt.Sprintf("only the first %d views are read", maxViews)
 	}
@@ -231,11 +294,35 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		}
 		it := ProjectItem{ID: n.ID}
 		for _, v := range n.Values.Nodes {
-			if v.Field != nil && len(v.Date) >= 10 {
-				if it.Dates == nil {
-					it.Dates = map[string]string{}
+			if v.Field == nil {
+				continue
+			}
+			val := ""
+			switch v.Type {
+			case "ProjectV2ItemFieldDateValue":
+				if len(v.Date) >= 10 {
+					if it.Dates == nil {
+						it.Dates = map[string]string{}
+					}
+					it.Dates[oneLine(CleanText(v.Field.Name))] = CleanText(v.Date[:10])
+					val = CleanText(v.Date[:10])
 				}
-				it.Dates[oneLine(CleanText(v.Field.Name))] = CleanText(v.Date[:10])
+			case "ProjectV2ItemFieldTextValue":
+				val = oneLine(CleanText(v.Text))
+			case "ProjectV2ItemFieldNumberValue":
+				if v.Number != nil {
+					val = strconv.FormatFloat(*v.Number, 'f', -1, 64)
+				}
+			case "ProjectV2ItemFieldSingleSelectValue":
+				val = oneLine(CleanText(v.Name))
+			case "ProjectV2ItemFieldIterationValue":
+				val = oneLine(CleanText(v.Title))
+			}
+			if val != "" && v.Field.ID != "" {
+				if it.Values == nil {
+					it.Values = map[string]string{}
+				}
+				it.Values[v.Field.ID] = val
 			}
 		}
 		if n.Status != nil {
@@ -250,7 +337,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		it.Type, it.Title = c.Type, oneLine(CleanText(c.Title))
 		switch c.Type {
 		case "DraftIssue":
-			it.Draft, it.Body = true, CleanText(c.Body)
+			it.Draft, it.Body, it.DraftID = true, CleanText(c.Body), c.DraftID
 		default:
 			it.Number, it.State, it.URL, it.Updated = c.Number, c.State, CleanText(c.URL), c.Updated
 			if c.Repo != nil {

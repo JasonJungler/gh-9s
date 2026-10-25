@@ -64,7 +64,7 @@ func init() {
 		apply:    boardApply,
 		key:      boardKeyHandler,
 		body:     boardBody,
-		footer:   "tab/h/l switch column  [/] switch view  enter open  s status  a assign  n add  b columns  f pin/unpin Project  o browser  / filter",
+		footer:   "tab/h/l switch column  [/] switch view  enter open  s status  a assign  n add  x remove  X archive  N draft  e edit  v field  b columns  f pin/unpin Project  o browser  / filter",
 	})
 }
 
@@ -412,6 +412,21 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return next, cmd, true
 	case "n":
 		next, cmd := m.startAdd()
+		return next, cmd, true
+	case "x":
+		next, cmd := m.startRemove()
+		return next, cmd, true
+	case "X":
+		next, cmd := m.startArchive()
+		return next, cmd, true
+	case "N":
+		next, cmd := m.startBoardDraft()
+		return next, cmd, true
+	case "e":
+		next, cmd := m.startEditDraft()
+		return next, cmd, true
+	case "v":
+		next, cmd := m.startField()
 		return next, cmd, true
 	case "H", "L":
 		if !st.colsActive(m) {

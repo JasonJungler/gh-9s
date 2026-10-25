@@ -43,6 +43,13 @@ type boardOp struct {
 	add, drop  []string
 	inColumn   string // add: the Status of the column the cursor was in
 	confirming bool   // its confirm question is on screen or its answer is on the way
+	draftID    string // edit: the draft's own id
+	oldBody    string
+	newTitle   string
+	newBody    string
+	field      *ghcli.ProjectField // v: the field being set
+	value      *ghcli.FieldValue   // ... to this (nil: cleared)
+	shown      string
 }
 
 // boardWriteDoneMsg is the outcome of a write.
