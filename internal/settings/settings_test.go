@@ -375,3 +375,20 @@ func TestLaunchSettingsDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestLaunchSubmitSettingDefaultsToOn(t *testing.T) {
+	d, ok := Lookup("launch_submit")
+	if !ok {
+		t.Fatal("launch_submit is not in the registry")
+	}
+	if d.Kind != Bool || d.Default != true {
+		t.Errorf("launch_submit = kind %v default %v, want a Bool that defaults to true", d.Kind, d.Default)
+	}
+	if !Memory().Bool("launch_submit") {
+		t.Error("launch_submit is not on by default")
+	}
+	s := Memory()
+	if _, err := s.Set("launch_submit", "off"); !errors.Is(err, ErrNotSaved) || s.Bool("launch_submit") { // a memory store has no file
+		t.Errorf("off: err = %v, value = %v", err, s.Bool("launch_submit"))
+	}
+}

@@ -24,6 +24,9 @@ type launchInput struct {
 	Base, Name string // Orca only: the ref to branch from, and the workspace name
 	Place      launch.Place
 	Split      launch.Split
+	// PasteOnly says the text is only placed in the agent's input box (the launch_submit setting is off);
+	// the user presses Enter there. The zero value submits.
+	PasteOnly  bool
 	ContextLen int // size of the text that will be sent, in characters (runes)
 	// ContextBytes is the same size in bytes. Orca and herdr take the text as a program argument, which the
 	// platform limits in bytes (launch.ArgvLimit), so a text of few characters can still be too big.
@@ -174,6 +177,8 @@ func (d launchDialog) request() launch.Request {
 		Name:    strings.TrimSpace(d.in.Name),
 		Issue:   d.in.Issue.Number,
 		RetryID: d.retryID,
+
+		PasteOnly: d.in.PasteOnly,
 	}
 }
 
@@ -398,6 +403,9 @@ func (d launchDialog) summary() string {
 			base = "finding base…"
 		}
 		parts = append(parts, base+" → "+d.in.Name)
+	}
+	if d.in.PasteOnly {
+		parts = append(parts, "paste only")
 	}
 	s := strings.Join(parts, " · ")
 	if d.in.ContextLen > launch.WarnChars {

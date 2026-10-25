@@ -58,6 +58,7 @@ type launchBaseMsg struct {
 type launchDoneMsg struct {
 	seq          int
 	agent, model string // what was launched, remembered on success
+	pasteOnly    bool   // the text was only placed in the agent's input
 	res          launch.Result
 	err          error
 }
@@ -162,6 +163,7 @@ func (m model) openLaunch(d ghcli.IssueDetail, t launch.Target) (model, tea.Cmd)
 		Name:         launch.BranchName(d.Number, d.Title),
 		Place:        launch.Place(cfg.String("launch_tmux_place")),
 		Split:        launch.Split(cfg.String("launch_split")),
+		PasteOnly:    !cfg.Bool("launch_submit"),
 		ContextLen:   utf8.RuneCountInString(text),
 		ContextBytes: len(text),
 	})
@@ -227,7 +229,7 @@ func (m model) launchKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		seq, do := m.launchSeq, launchDo
 		return m, func() tea.Msg {
 			res, err := do(req)
-			return launchDoneMsg{seq: seq, agent: req.Agent.ID, model: req.Model, res: res, err: err}
+			return launchDoneMsg{seq: seq, agent: req.Agent.ID, model: req.Model, pasteOnly: req.PasteOnly, res: res, err: err}
 		}
 	}
 	m.launchDlg = &d
@@ -269,6 +271,9 @@ func (m model) launchDone(msg launchDoneMsg) model {
 		return m
 	}
 	status := styOK.Render("✓ launched: " + strings.TrimSpace(msg.res.Where+" "+msg.res.Branch))
+	if msg.pasteOnly {
+		status += styDim.Render(" · the text is in the agent's input, press Enter there to send it")
+	}
 	if msg.res.Note != "" {
 		status += styDim.Render(" · " + msg.res.Note)
 	}

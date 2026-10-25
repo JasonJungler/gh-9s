@@ -47,6 +47,8 @@ var Registry = []Def{
 		Kind: Enum, Default: "pane", Options: []string{"pane", "window"}},
 	{Key: "launch_split", Label: "Launch split", Desc: "which way a new pane splits; herdr uses this too",
 		Kind: Enum, Default: "horizontal", Options: []string{"horizontal", "vertical"}},
+	{Key: "launch_submit", Label: "Launch submit", Desc: "on: send the issue to the agent at once; off: only put it in the agent's input box, and you press Enter there. Orca then uses its longer path",
+		Kind: Bool, Default: true},
 }
 
 // Lookup finds a setting by key.

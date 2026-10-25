@@ -829,3 +829,75 @@ func TestLaunchOnlyTheLatestListFetchOpensTheDialog(t *testing.T) {
 		t.Error("an answer that was already used reopened the dialog")
 	}
 }
+
+func TestLaunchSubmitsByDefault(t *testing.T) {
+	f := installLaunch(t, tmuxEnv)
+	f.results = []launch.Result{{Where: "tmux pane"}}
+	m := pressLaunch(issueOnScreen(t), "a")
+	if v := ansi.Strip(m.View()); strings.Contains(v, "paste only") {
+		t.Errorf("the dialog mentions paste only although launch_submit is on:\n%s", v)
+	}
+	m = pressLaunch(m, "enter")
+	if len(f.reqs) != 1 || f.reqs[0].PasteOnly {
+		t.Fatalf("requests = %+v; want one that submits", f.reqs)
+	}
+	if st := ansi.Strip(m.status); strings.Contains(st, "Enter") || strings.Contains(st, "input") {
+		t.Errorf("status = %q; a submitted launch must not tell the user to press Enter", st)
+	}
+}
+
+func TestLaunchSubmitOffPastesOnly(t *testing.T) {
+	f := installLaunch(t, tmuxEnv)
+	f.results = []launch.Result{{Where: "tmux pane", Note: "a note"}}
+	m := issueOnScreen(t, "launch_submit", "off")
+	m = pressLaunch(m, "a")
+	if m.launchDlg == nil {
+		t.Fatalf("no dialog: %q", ansi.Strip(m.status))
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "new pane (right) · claude · default model · paste only") {
+		t.Errorf("the dialog does not show the mode:\n%s", v)
+	}
+	// the mode is not a field of the form
+	m = pressLaunch(m, "e")
+	for i := 0; i < 8; i++ {
+		if v := ansi.Strip(m.View()); strings.Contains(v, "Submit") {
+			t.Errorf("the form has a submit row:\n%s", v)
+		}
+		m = pressLaunch(m, "tab")
+	}
+	m = pressLaunch(m, "enter")
+	if len(f.reqs) != 1 || !f.reqs[0].PasteOnly {
+		t.Fatalf("requests = %+v; want one with PasteOnly", f.reqs)
+	}
+	st := ansi.Strip(m.status)
+	for _, want := range []string{"launched: tmux pane", "in the agent's input", "press Enter", "a note"} {
+		if !strings.Contains(st, want) {
+			t.Errorf("status = %q; want it to contain %q", st, want)
+		}
+	}
+	if m.launchDlg != nil {
+		t.Error("the dialog stayed open after a success")
+	}
+}
+
+func TestLaunchSubmitOffReachesOrcaToo(t *testing.T) {
+	f := installLaunch(t, map[string]string{"ORCA_WORKTREE_ID": "x"})
+	f.results = []launch.Result{{Where: "issue-42-fix-login-crash", Branch: "me/issue-42-fix-login-crash"}}
+	m := pressLaunch(issueOnScreen(t, "launch_submit", "off"), "a", "enter")
+	if len(f.reqs) != 1 || !f.reqs[0].PasteOnly || f.reqs[0].Target != launch.TargetOrca {
+		t.Fatalf("requests = %+v", f.reqs)
+	}
+	if st := ansi.Strip(m.status); !strings.Contains(st, "me/issue-42-fix-login-crash") || !strings.Contains(st, "press Enter") {
+		t.Errorf("status = %q", st)
+	}
+}
+
+// A result for a dialog that is gone still says the text waits for Enter.
+func TestLaunchDoneAfterClosedDialogStillSaysPressEnter(t *testing.T) {
+	m := issueOnScreen(t)
+	m.launchSeq = 5
+	m = m.launchDone(launchDoneMsg{seq: 3, pasteOnly: true, res: launch.Result{Where: "tmux pane"}})
+	if st := ansi.Strip(m.status); !strings.Contains(st, "press Enter") {
+		t.Errorf("status = %q", st)
+	}
+}

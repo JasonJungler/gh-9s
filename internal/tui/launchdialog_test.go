@@ -82,6 +82,44 @@ func TestSummaryTmuxPaneAndWindow(t *testing.T) {
 	}
 }
 
+func TestSummaryShowsPasteOnly(t *testing.T) {
+	in := orcaInput()
+	in.PasteOnly = true
+	if got, want := newLaunchDialog(in).summary(), "orca ◆ new workspace · claude · default model · origin/main → issue-42-fix-login · paste only"; got != want {
+		t.Errorf("orca summary = %q, want %q", got, want)
+	}
+	in = tmuxInput()
+	in.PasteOnly = true
+	if got, want := newLaunchDialog(in).summary(), "tmux ◆ new pane (right) · claude · opus · paste only"; got != want {
+		t.Errorf("tmux summary = %q, want %q", got, want)
+	}
+	// submitting says nothing extra
+	if got := newLaunchDialog(tmuxInput()).summary(); strings.Contains(got, "paste only") {
+		t.Errorf("summary = %q mentions paste only although the text is submitted", got)
+	}
+	// it stays when the warnings follow, and the request carries it
+	in.ContextLen = launch.WarnChars + 1
+	d := newLaunchDialog(in)
+	if got := d.summary(); !strings.Contains(got, " · paste only · ⚠ large issue") {
+		t.Errorf("summary = %q", got)
+	}
+	if !d.request().PasteOnly || newLaunchDialog(tmuxInput()).request().PasteOnly {
+		t.Error("request.PasteOnly does not follow the input")
+	}
+}
+
+func TestPasteOnlyIsWrappedLikeTheRestOfTheSummary(t *testing.T) {
+	in := orcaInput()
+	in.PasteOnly = true
+	v := ansi.Strip(newLaunchDialog(in).view(30))
+	if !strings.Contains(strings.ReplaceAll(v, "\n ", " "), "paste only") {
+		t.Errorf("the wrapped view lost the mode:\n%s", v)
+	}
+	if w, line := longestLine(v); w > 30 {
+		t.Errorf("line is %d columns: %q", w, line)
+	}
+}
+
 func TestEnterSubmitsCompact(t *testing.T) {
 	d := newLaunchDialog(orcaInput())
 	if _, act := d.update(k("enter")); act != actSubmit {
@@ -588,6 +626,7 @@ func TestViewLinesFitTheWidth(t *testing.T) {
 				in.Target, in.Place, in.Base, in.Name = target, place, long, cjk
 				in.Model = cjk
 				in.ContextLen = launch.WarnChars + 1
+				in.PasteOnly = true // the longest summary
 				states := map[string]launchDialog{"compact": newLaunchDialog(in)}
 				e := newLaunchDialog(in)
 				// walk the focus over every row of the expanded form
