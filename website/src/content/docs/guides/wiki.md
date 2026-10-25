@@ -55,7 +55,7 @@ Only one wiki change can be under way at a time; `e`, `n`, `x` and `R` say so wh
 
 `n` asks for the title, then opens an empty editor, then asks for the commit message (`Create <Title>`). The title becomes the file name: spaces turn into `-` and `.md` is added. A title is refused when it is empty, longer than 100 characters, starts with `.`, `-` or `_`, contains `-` (write a space, because GitHub shows dashes in file names as spaces), contains any of `/ \ : * ? " < > |` or a control character, or matches an existing page (whatever the case or format). A page with nothing written in it is not created.
 
-GitHub creates a wiki together with its first page. If a repository has its wiki turned on but no page yet, the view says so and the first page has to be made in the browser (`o`); `n` explains that too. If the wiki is turned off for the repository, the view says that.
+GitHub creates a wiki together with its first page. If a repository has its wiki turned on but no page yet, the view says so and the first page has to be made in the browser (`o`); `n` explains that too. If the wiki is turned off for the repository, the view says that. These empty screens also say how to leave: the list is a top-level screen, so `esc` has nothing to go back to; press `1`–`5` or `0` for another view, or `q` to quit.
 
 ## Delete
 
