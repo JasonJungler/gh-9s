@@ -70,7 +70,7 @@ What happens to the text that comes back from the editor:
 - Trailing spaces and blank lines at the end are removed.
 - A text that is empty after that is refused with `prompt is empty`, and the previous prompt is kept. Saving without a change, an editor that fails or exits with an error, and a text equal to the generated one also leave the prompt as it was (the last one clears the `edited` mark).
 
-The edit belongs to this one launch. It is not saved in the settings, in the remembered model file or in your drafts; the next time you press `a` the prompt is generated again. Changing Where, Agent, Model, Base, Branch, Place or Split does not discard it. While the editor is open nothing can be launched or cancelled; `esc` works as before once it has closed. Orca also refuses a text that begins with `-`, because Orca could read it as an option.
+The edit belongs to this one launch. It is not saved in the settings, in the remembered model file or in your drafts; the next time you press `a` the prompt is generated again. Changing Where, Agent, Model, Base, Branch, Place or Split does not discard it. While the editor is open nothing can be launched or cancelled; `esc` works as before once it has closed. A prompt that begins with `-` (a Markdown bullet, `--help`) is refused for Orca, and for herdr when the prompt is submitted, because they could read it as an option: the dialog says so and nothing is created. Start the prompt with a word. Pasting without submitting in herdr is not affected, and neither is tmux.
 
 The opening sentence, `Please solve this issue`, is fixed. There is no setting for it: `:settings` can only hold on/off, choice and number values, not free text. Edit the prompt to change it for one launch.
 
