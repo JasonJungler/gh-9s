@@ -1,0 +1,32 @@
+---
+title: gh-9s
+description: A k9s-style terminal UI for GitHub, as a gh extension.
+template: splash
+hero:
+  tagline: Trigger workflows, review pull requests and manage issues from your terminal.
+  actions:
+    - text: Get started
+      link: /gh-9s/guides/getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/MurabitoB/gh-9s
+      icon: github
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+	<Card title="Actions" icon="rocket">
+		Trigger workflows, watch runs as a live job graph, and pin favorite workflows.
+	</Card>
+	<Card title="Pull requests" icon="pencil">
+		List and filter PRs, read the diff, comment, review and merge.
+	</Card>
+	<Card title="Issues" icon="list-format">
+		List and filter issues, comment, close, and manage labels and assignees.
+	</Card>
+	<Card title="Repos" icon="document">
+		An interactive picker to move between any repo you can reach.
+	</Card>
+</CardGrid>
