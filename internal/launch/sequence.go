@@ -14,6 +14,11 @@ type Request struct {
 	Base    string // base ref for an Orca workspace
 	Name    string // branch or workspace name for an Orca workspace
 	Issue   int
+
+	// RetryID is the operation id of an Orca launch whose reply was lost (see
+	// LostReplyError). When set, the same launch is asked again with it
+	// instead of starting a new one.
+	RetryID string
 }
 
 // Step names the stage of a launch that failed.
