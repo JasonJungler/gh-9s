@@ -19,10 +19,10 @@ func TestLauncherFetchBeforeCreate(t *testing.T) {
 	}}
 	l := Launcher{
 		Run: rec.run, Getenv: noEnv,
-		Fetch: func(dir, base string) (string, error) {
+		Fetch: func(dir, base string) (string, string, error) {
 			order = append(order, "fetch")
 			fetches = append(fetches, fetchCall{dir, base})
-			return "no remote, using the local branch", nil
+			return base, "no remote, using the local branch", nil
 		},
 	}
 	res, err := l.Do(orcaReq())
@@ -47,7 +47,7 @@ func TestLauncherFetchNoteJoinsOrcaNote(t *testing.T) {
 	r := orcaReq()
 	r.Context = strings.Repeat("a", orcaPromptMax+1)
 	rec := &recorder{reply: fallbackReply(orcaSendWarnOut)}
-	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(string, string) (string, error) { return "fetched", nil }}
+	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(_, b string) (string, string, error) { return b, "fetched", nil }}
 	res, err := l.Do(r)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestLauncherFetchFailureStopsEverything(t *testing.T) {
 	rec := &recorder{}
 	l := Launcher{
 		Run: rec.run, Getenv: noEnv,
-		Fetch: func(dir, base string) (string, error) { return "", errors.New("could not resolve host") },
+		Fetch: func(dir, base string) (string, string, error) { return "", "", errors.New("could not resolve host") },
 	}
 	_, err := l.Do(orcaReq())
 	var se *StepError
@@ -87,7 +87,7 @@ func TestLauncherWithoutFetchRefusesOrca(t *testing.T) {
 
 func TestLauncherOrcaFailureKeepsStep(t *testing.T) {
 	rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaLostOut), errors.New("exit status 1") }}
-	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(string, string) (string, error) { return "", nil }}
+	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(_, b string) (string, string, error) { return b, "", nil }}
 	_, err := l.Do(orcaReq())
 	var lost *LostReplyError
 	var se *StepError
@@ -96,10 +96,10 @@ func TestLauncherOrcaFailureKeepsStep(t *testing.T) {
 	}
 }
 
-func failFetch(t *testing.T) func(string, string) (string, error) {
-	return func(dir, base string) (string, error) {
+func failFetch(t *testing.T) func(string, string) (string, string, error) {
+	return func(dir, base string) (string, string, error) {
 		t.Errorf("Fetch(%q, %q) was called", dir, base)
-		return "", errors.New("unexpected fetch")
+		return "", "", errors.New("unexpected fetch")
 	}
 }
 
@@ -137,7 +137,7 @@ func TestLauncherSkipsFetchForHerdr(t *testing.T) {
 
 func TestLauncherPicksBackendByTarget(t *testing.T) {
 	claude, _ := LookupAgent("claude")
-	fetch := func(string, string) (string, error) { return "", nil }
+	fetch := func(_, b string) (string, string, error) { return b, "", nil }
 
 	t.Run("orca", func(t *testing.T) {
 		rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
@@ -230,7 +230,7 @@ func TestLauncherRefusesTextOverTheCeilingBeforeAnyCall(t *testing.T) {
 					return fallbackReply(orcaSendOkOut)(c)
 				}}
 				fetched := 0
-				l := Launcher{Run: rec.run, Getenv: herdrEnv, Fetch: func(string, string) (string, error) { fetched++; return "", nil }}
+				l := Launcher{Run: rec.run, Getenv: herdrEnv, Fetch: func(_, b string) (string, string, error) { fetched++; return b, "", nil }}
 				r := orcaReq()
 				r.Target = target
 				r.Agent = claude
@@ -285,7 +285,7 @@ func TestLauncherChecksOrcaArgumentsBeforeFetch(t *testing.T) {
 	} {
 		rec := &recorder{}
 		fetched := 0
-		l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(string, string) (string, error) { fetched++; return "", nil }}
+		l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(_, b string) (string, string, error) { fetched++; return b, "", nil }}
 		r := orcaReq()
 		mod(&r)
 		_, err := l.Do(r)
@@ -296,5 +296,63 @@ func TestLauncherChecksOrcaArgumentsBeforeFetch(t *testing.T) {
 		if fetched != 0 || len(rec.calls) != 0 {
 			t.Errorf("fetched %d times, %d calls: a bad argument must cost nothing", fetched, len(rec.calls))
 		}
+	}
+}
+
+func TestLauncherPassesTheResolvedBaseToOrca(t *testing.T) {
+	rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
+	var fetched []string
+	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(_, b string) (string, string, error) {
+		fetched = append(fetched, b)
+		return "origin/" + b, "", nil
+	}}
+	r := orcaReq()
+	r.Base = "main"
+	if _, err := l.Do(r); err != nil {
+		t.Fatal(err)
+	}
+	if len(fetched) != 1 || fetched[0] != "main" {
+		t.Errorf("fetched %v, want the base as typed", fetched)
+	}
+	if len(rec.calls) != 1 {
+		t.Fatalf("calls = %+v", rec.calls)
+	}
+	args := rec.calls[0].args
+	for i, a := range args {
+		if a == "--base-branch" {
+			if args[i+1] != "origin/main" {
+				t.Errorf("orca got --base-branch %q, want origin/main (the stale local main is not the base)", args[i+1])
+			}
+			return
+		}
+	}
+	t.Errorf("no --base-branch in %q", args)
+}
+
+func TestLauncherRetrySkipsFetchAndUsesTheSameBase(t *testing.T) {
+	rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
+	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: failFetch(t),
+		Resolve: func(_, b string) (string, string, error) { return "origin/" + b, "", nil }}
+	r := orcaReq()
+	r.Base = "main"
+	r.RetryID = orcaOp
+	if _, err := l.Do(r); err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(rec.calls[0].args, " ")
+	if !strings.Contains(args, "--base-branch origin/main") || !strings.Contains(args, "--retry-launch "+orcaOp) {
+		t.Errorf("retry args = %q", args)
+	}
+}
+
+func TestLauncherRetryWithoutResolveStillNeverFetches(t *testing.T) {
+	rec := &recorder{}
+	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: failFetch(t)}
+	r := orcaReq()
+	r.RetryID = orcaOp
+	_, err := l.Do(r)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepFetch || len(rec.calls) != 0 {
+		t.Errorf("err = %v, calls = %d: with no way to resolve the base the retry must stop before orca", err, len(rec.calls))
 	}
 }

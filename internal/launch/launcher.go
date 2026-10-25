@@ -42,13 +42,20 @@ type Launcher struct {
 	Run    RunFunc
 	Getenv func(string) string
 	// Fetch brings the remote of base up to date before an Orca workspace is
-	// made from it. It returns a note to show the user, or an error.
-	Fetch func(dir, base string) (string, error)
+	// made from it. It returns the ref the workspace must branch from (a bare
+	// branch becomes <remote>/<branch>, so Orca does not use a stale local
+	// branch), a note to show the user, or an error.
+	Fetch func(dir, base string) (ref, note string, err error)
+	// Resolve is Fetch without the fetching: it only says which ref base
+	// means. A retry uses it, since the base was fetched for the original
+	// request.
+	Resolve func(dir, base string) (ref, note string, err error)
 }
 
 // Do launches r. The text size and (for Orca) the arguments are checked before
 // anything runs. For Orca it then fetches the base and creates nothing if that
-// fails. A failure is a *StepError naming the stage; whatever was already
+// fails; Orca is given the ref Fetch resolved, never the base as typed. A retry
+// (Request.RetryID) resolves the base the same way but does not fetch again. A failure is a *StepError naming the stage; whatever was already
 // created is left in place and nothing is retried.
 func (l Launcher) Do(r Request) (Result, error) {
 	if r.Target == TargetOrca || r.Target == TargetHerdr {
@@ -61,13 +68,18 @@ func (l Launcher) Do(r Request) (Result, error) {
 		if err := (orcaBackend{}).check(r); err != nil {
 			return Result{}, &StepError{StepCreate, err}
 		}
-		if l.Fetch == nil {
-			return Result{}, &StepError{StepFetch, errors.New("no way to fetch the base was configured")}
+		prepare, what := l.Fetch, "fetch"
+		if r.RetryID != "" {
+			prepare, what = l.Resolve, "resolve"
 		}
-		note, err := l.Fetch(r.Dir, r.Base)
+		if prepare == nil {
+			return Result{}, &StepError{StepFetch, errors.New("no way to " + what + " the base was configured")}
+		}
+		ref, note, err := prepare(r.Dir, r.Base)
 		if err != nil {
 			return Result{}, &StepError{StepFetch, err}
 		}
+		r.Base = ref
 		res, err := orcaBackend{run: l.Run}.launch(r)
 		if err != nil {
 			return Result{}, err

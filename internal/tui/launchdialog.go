@@ -66,10 +66,11 @@ var launchTargets = []string{string(launch.TargetOrca), string(launch.TargetHerd
 type launchDialog struct {
 	in         launchInput
 	models     []launch.Model
-	typing     bool // the model is free text, not a pick from models
-	baseEdited bool // the user changed the base (even back to empty), so withBase leaves it alone
-	baseAsked  bool // the default base was asked for (withBaseLoading); it is asked once per dialog
-	baseLoad   bool // ... and has not arrived yet
+	typing     bool   // the model is free text, not a pick from models
+	baseEdited bool   // the user changed the base (even back to empty), so withBase leaves it alone
+	baseAsked  bool   // the default base was asked for (withBaseLoading); it is asked once per dialog
+	baseLoad   bool   // ... and has not arrived yet
+	baseNote   string // what to tell about the default base (no remote: the local branch is used)
 	expanded   bool
 	focus      launchField
 	run        bool
@@ -102,9 +103,11 @@ func (d launchDialog) start() launchDialog {
 
 // failed ends a running launch and keeps the dialog open to show why. When Orca
 // lost its reply, the next request carries the operation id so the same launch
-// is asked again instead of started afresh.
+// is asked again instead of started afresh. Only an edit drops that id: a retry
+// that fails by itself (git, orca, anything) says nothing about whether the
+// first launch happened, so the next enter must still be the same retry.
 func (d launchDialog) failed(err error) launchDialog {
-	d.run, d.err, d.retryID = false, "", ""
+	d.run, d.err = false, ""
 	var lost *launch.LostReplyError
 	var se *launch.StepError
 	_, _ = errors.As(err, &lost), errors.As(err, &se)
@@ -147,10 +150,10 @@ func (d launchDialog) findingBase() bool {
 
 // withBase sets the base once it is known, unless the user already typed one
 // (an edited field counts as typed even when it was cleared again).
-func (d launchDialog) withBase(b string) launchDialog {
+func (d launchDialog) withBase(b, note string) launchDialog {
 	d.baseLoad = false
 	if !d.baseEdited {
-		d.in.Base = b
+		d.in.Base, d.baseNote = b, note
 	}
 	return d
 }
@@ -451,6 +454,9 @@ func (d launchDialog) view(width int) string {
 		b.WriteString("\n" + wrapLines(d.summary(), width) + "\n")
 	} else {
 		b.WriteString(wrapLines(d.summary(), width) + "\n")
+	}
+	if d.orca() && d.baseNote != "" && !d.baseEdited {
+		b.WriteString(styDim.Render(wrapLines(d.baseNote, width)) + "\n")
 	}
 	switch {
 	case d.run:

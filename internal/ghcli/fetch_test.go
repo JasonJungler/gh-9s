@@ -46,7 +46,7 @@ func TestFetchBaseUpdates(t *testing.T) {
 	if got := gitIn(t, r.dir, "rev-parse", "origin/main"); got == want {
 		t.Fatal("the clone already has the new commit; the test proves nothing")
 	}
-	note, err := FetchBase(r.dir, "origin/main")
+	_, note, err := FetchBase(r.dir, "origin/main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestFetchBaseUpdates(t *testing.T) {
 func TestFetchBaseBareBranchUsesOrigin(t *testing.T) {
 	r := newFetchRepos(t)
 	want := r.pushNew(t)
-	note, err := FetchBase(r.dir, "main")
+	_, note, err := FetchBase(r.dir, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestFetchBaseOtherRemote(t *testing.T) {
 	r := newFetchRepos(t)
 	gitIn(t, r.dir, "remote", "add", "upstream", r.bare)
 	want := r.pushNew(t)
-	if _, err := FetchBase(r.dir, "upstream/main"); err != nil {
+	if _, _, err := FetchBase(r.dir, "upstream/main"); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitIn(t, r.dir, "rev-parse", "upstream/main"); got != want {
@@ -92,7 +92,7 @@ func TestFetchBaseNoRemote(t *testing.T) {
 	r := newFetchRepos(t)
 	local := filepath.Join(filepath.Dir(r.dir), "local")
 	gitIn(t, filepath.Dir(r.dir), "init", "-q", "-b", "main", local)
-	note, err := FetchBase(local, "origin/main")
+	_, note, err := FetchBase(local, "origin/main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestFetchBaseFailure(t *testing.T) {
 	if err := os.RemoveAll(r.bare); err != nil {
 		t.Fatal(err)
 	}
-	note, err := FetchBase(r.dir, "origin/main")
+	_, note, err := FetchBase(r.dir, "origin/main")
 	if err == nil {
 		t.Fatal("a fetch that failed must be an error, not a fallback")
 	}
@@ -125,7 +125,7 @@ func TestFetchBaseUnmatchedRemoteNoOrigin(t *testing.T) {
 	before := gitIn(t, r.dir, "rev-parse", "upstream/main")
 	r.pushNew(t)
 	for _, base := range []string{"main", "origin/main"} {
-		note, err := FetchBase(r.dir, base)
+		_, note, err := FetchBase(r.dir, base)
 		if err == nil {
 			t.Fatalf("base %q: want an error, got note %q", base, note)
 		}
@@ -149,7 +149,7 @@ func TestFetchBaseUnmatchedRemoteNoOrigin(t *testing.T) {
 func TestFetchBaseBranchWithSlashes(t *testing.T) {
 	r := newFetchRepos(t)
 	want := r.pushNew(t)
-	if _, err := FetchBase(r.dir, "origin/feature/x"); err != nil {
+	if _, _, err := FetchBase(r.dir, "origin/feature/x"); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitIn(t, r.dir, "rev-parse", "origin/main"); got != want {
@@ -160,7 +160,7 @@ func TestFetchBaseBranchWithSlashes(t *testing.T) {
 func TestFetchBaseBareNameThatLooksLikeARemote(t *testing.T) {
 	r := newFetchRepos(t)
 	want := r.pushNew(t)
-	if _, err := FetchBase(r.dir, "fork"); err != nil {
+	if _, _, err := FetchBase(r.dir, "fork"); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitIn(t, r.dir, "rev-parse", "origin/main"); got != want {
@@ -195,5 +195,83 @@ func TestDefaultBranchFallsBackToMain(t *testing.T) {
 	}
 	if got := DefaultBranch(filepath.Join(t.TempDir(), "missing")); got != "main" {
 		t.Errorf("not a repository: DefaultBranch = %q, want main", got)
+	}
+}
+
+func TestFetchBaseReturnsTheResolvedRef(t *testing.T) {
+	r := newFetchRepos(t)
+	gitIn(t, r.dir, "remote", "add", "upstream", r.bare)
+	gitIn(t, r.dir, "branch", "-q", "release", "main")
+	for base, want := range map[string]string{
+		"main":             "origin/main",
+		"release":          "origin/release",
+		"feature/x":        "origin/feature/x",
+		"origin/main":      "origin/main",
+		"upstream/main":    "upstream/main",
+		"origin/feature/x": "origin/feature/x",
+	} {
+		ref, note, err := FetchBase(r.dir, base)
+		if err != nil || note != "" || ref != want {
+			t.Errorf("FetchBase(%q) = %q, %q, %v; want %q", base, ref, note, err, want)
+		}
+		ref, note, err = ResolveBase(r.dir, base)
+		if err != nil || note != "" || ref != want {
+			t.Errorf("ResolveBase(%q) = %q, %q, %v; want %q", base, ref, note, err, want)
+		}
+	}
+}
+
+func TestResolveBaseDoesNotFetch(t *testing.T) {
+	r := newFetchRepos(t)
+	before := gitIn(t, r.dir, "rev-parse", "origin/main")
+	r.pushNew(t)
+	ref, _, err := ResolveBase(r.dir, "main")
+	if err != nil || ref != "origin/main" {
+		t.Fatalf("ref = %q, err = %v", ref, err)
+	}
+	if got := gitIn(t, r.dir, "rev-parse", "origin/main"); got != before {
+		t.Error("ResolveBase fetched")
+	}
+}
+
+func TestResolveBaseWithoutRemoteKeepsTheName(t *testing.T) {
+	lone := t.TempDir()
+	gitIn(t, lone, "init", "-q", "-b", "main")
+	for _, base := range []string{"main", "origin/main"} {
+		ref, note, err := FetchBase(lone, base)
+		if err != nil || ref != base || note != "no remote, using the local branch" {
+			t.Errorf("FetchBase(%q) = %q, %q, %v", base, ref, note, err)
+		}
+	}
+}
+
+func TestResolveBaseErrors(t *testing.T) {
+	r := newFetchRepos(t)
+	gitIn(t, r.dir, "remote", "rename", "origin", "upstream")
+	if ref, _, err := ResolveBase(r.dir, "main"); err == nil {
+		t.Errorf("a bare base with no origin must fail, got %q", ref)
+	}
+}
+
+func TestDefaultBaseWithOrigin(t *testing.T) {
+	r := newFetchRepos(t)
+	base, note := DefaultBase(r.dir)
+	if base != "origin/main" || note != "" {
+		t.Errorf("DefaultBase = %q, %q; want origin/main and no note", base, note)
+	}
+}
+
+func TestDefaultBaseWithoutRemoteIsTheLocalBranch(t *testing.T) {
+	lone := t.TempDir()
+	gitIn(t, lone, "init", "-q", "-b", "trunk")
+	base, note := DefaultBase(lone)
+	if base != "trunk" || note != "no remote, using the local branch" {
+		t.Errorf("DefaultBase = %q, %q; want trunk with the no-remote note (origin/main would not exist)", base, note)
+	}
+	// a detached HEAD has no branch name: fall back to main
+	gitIn(t, lone, "commit", "-q", "--allow-empty", "-m", "x")
+	gitIn(t, lone, "checkout", "-q", "--detach")
+	if base, _ := DefaultBase(lone); base != "main" {
+		t.Errorf("detached: DefaultBase = %q, want main", base)
 	}
 }

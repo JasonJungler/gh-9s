@@ -18,13 +18,13 @@ import (
 
 // Outside calls the launch makes; tests replace them.
 var (
-	launcher = launch.Launcher{Run: launch.ExecRun, Getenv: os.Getenv, Fetch: ghcli.FetchBase}
+	launcher = launch.Launcher{Run: launch.ExecRun, Getenv: os.Getenv, Fetch: ghcli.FetchBase, Resolve: ghcli.ResolveBase}
 	// launchDo runs a launch; it is launcher.Do unless a test fakes it.
-	launchDo            = func(r launch.Request) (launch.Result, error) { return launcher.Do(r) }
-	launchModels        = launch.ListModels
-	launchDir           = os.Getwd
-	launchDefaultBranch = ghcli.DefaultBranch
-	launchPrefsPath     = func() string {
+	launchDo          = func(r launch.Request) (launch.Result, error) { return launcher.Do(r) }
+	launchModels      = launch.ListModels
+	launchDir         = os.Getwd
+	launchDefaultBase = ghcli.DefaultBase
+	launchPrefsPath   = func() string {
 		if d := configDir(); d != "" {
 			return filepath.Join(d, "launch.json")
 		}
@@ -51,6 +51,7 @@ type launchModelsMsg struct {
 type launchBaseMsg struct {
 	seq  int
 	base string
+	note string // set when the base is a local branch because the repo has no remote
 }
 
 // launchDoneMsg says how a launch ended.
@@ -173,15 +174,15 @@ func (m model) openLaunch(d ghcli.IssueDetail, t launch.Target) (model, tea.Cmd)
 }
 
 // launchBaseCmd looks up the default Orca base in the background: Orca's base ref for the repo,
-// else origin/<default branch>.
+// else origin/<default branch>, or the local branch (with a note) when the repo has no remote.
 func launchBaseCmd(seq int, dir string) tea.Cmd {
-	run, branch := launcher.Run, launchDefaultBranch
+	run, defaultBase := launcher.Run, launchDefaultBase
 	return func() tea.Msg {
-		base, ok := launch.OrcaDefaultBase(run, dir)
-		if !ok {
-			base = "origin/" + branch(dir)
+		if base, ok := launch.OrcaDefaultBase(run, dir); ok {
+			return launchBaseMsg{seq: seq, base: base}
 		}
-		return launchBaseMsg{seq: seq, base: base}
+		base, note := defaultBase(dir)
+		return launchBaseMsg{seq: seq, base: base, note: note}
 	}
 }
 
@@ -249,7 +250,7 @@ func (m model) launchBaseLoaded(msg launchBaseMsg) model {
 	if !m.launchOpen(msg.seq) {
 		return m
 	}
-	d := m.launchDlg.withBase(msg.base)
+	d := m.launchDlg.withBase(msg.base, msg.note)
 	m.launchDlg = &d
 	return m
 }

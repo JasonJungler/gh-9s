@@ -33,6 +33,9 @@ var orcaTerminalPattern = regexp.MustCompile(`^term_[0-9a-f]{8}-[0-9a-f]{4}-[0-9
 // values that do not match.
 var orcaOperationExact = regexp.MustCompile(`^[0-9]{13}-[0-9a-f]{32}$`)
 
+// orcaLostReplyCode is the error code Orca gives when it cannot say whether a launch happened.
+const orcaLostReplyCode = "agent_session_operation_unknown"
+
 // LostReplyError means Orca could not confirm whether a launch happened. The
 // agent may be running already, so the only safe move is to ask Orca again with
 // the same operation id (Request.RetryID), never to launch afresh.
@@ -291,7 +294,7 @@ func orcaFailure(out []byte, err error) error {
 		var data struct {
 			OperationID string `json:"operationId"`
 		}
-		if json.Unmarshal(env.Error.Data, &data) == nil && orcaOperationExact.MatchString(data.OperationID) {
+		if env.Error.Code == orcaLostReplyCode && json.Unmarshal(env.Error.Data, &data) == nil && orcaOperationExact.MatchString(data.OperationID) {
 			id = data.OperationID
 		}
 	}

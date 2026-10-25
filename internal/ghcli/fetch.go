@@ -16,40 +16,72 @@ const fetchTimeout = 2 * time.Minute
 // noRemoteNote is what FetchBase says when the repository has no remote at all.
 const noRemoteNote = "no remote, using the local branch"
 
-// FetchBase brings the remote that base names up to date with git fetch, so a new branch starts from what the
-// remote has now. base is <remote>/<branch> or a bare branch (which means the remote called origin). When the
-// repository has no remote to fetch from it is not an error: note says the local branch is used instead.
-// A fetch that fails, or a base that names no remote when there is no origin to fall back on, is an error
-// (carrying git's own message for a failed fetch), never a fallback.
-func FetchBase(dir, base string) (note string, err error) {
+// ResolveBase says which ref base means, without touching the network: base is <remote>/<branch> (kept as it
+// is) or a bare branch, which means the same branch on the remote called origin, so ref is "origin/<branch>"
+// and a new branch starts from what the remote has, not from a stale local branch of the same name. When the
+// repository has no remote at all, ref is base unchanged and note says the local branch is used instead. A
+// base that names no remote when there is no origin to fall back on is an error.
+func ResolveBase(dir, base string) (ref, note string, err error) {
+	_, ref, note, err = resolveBase(dir, base)
+	return ref, note, err
+}
+
+// resolveBase is ResolveBase that also returns the remote to fetch ("" when there is none).
+func resolveBase(dir, base string) (remote, ref, note string, err error) {
 	out, err := fetchGit(dir, "remote")
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
 	remotes := strings.Fields(out)
-	remote := ""
+	if len(remotes) == 0 {
+		return "", base, noRemoteNote, nil
+	}
 	for _, r := range remotes {
 		if strings.HasPrefix(base, r+"/") && len(r) > len(remote) {
 			remote = r
 		}
 	}
-	if remote == "" {
-		for _, r := range remotes {
-			if r == "origin" {
-				remote = r
-			}
+	if remote != "" {
+		return remote, base, "", nil
+	}
+	for _, r := range remotes {
+		if r == "origin" {
+			return r, "origin/" + base, "", nil
 		}
 	}
-	if len(remotes) == 0 {
-		return noRemoteNote, nil
+	return "", "", "", fmt.Errorf("base %q names no remote and there is no origin (remotes: %s)", base, strings.Join(remotes, ", "))
+}
+
+// FetchBase resolves base like ResolveBase and then brings that remote up to date with git fetch, so a new
+// branch starts from what the remote has now. ref is what to branch from. A fetch that fails is an error
+// (carrying git's own message), never a fallback.
+func FetchBase(dir, base string) (ref, note string, err error) {
+	remote, ref, note, err := resolveBase(dir, base)
+	if err != nil {
+		return "", "", err
 	}
 	if remote == "" {
-		return "", fmt.Errorf("base %q names no remote and there is no origin (remotes: %s)", base, strings.Join(remotes, ", "))
+		return ref, note, nil // no remote: nothing to fetch
 	}
 	if _, err := fetchGit(dir, "fetch", remote); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return "", nil
+	return ref, "", nil
+}
+
+// DefaultBase is the base the launch dialog starts with: origin's default branch as "origin/<branch>". A
+// repository with no remote has no origin/<branch>, so it is the local branch that is checked out ("main" if
+// none is), with the note that the local branch is used.
+func DefaultBase(dir string) (base, note string) {
+	out, err := fetchGit(dir, "remote")
+	if err == nil && len(strings.Fields(out)) == 0 {
+		b, err := fetchGit(dir, "symbolic-ref", "--short", "HEAD")
+		if b = strings.TrimSpace(b); err != nil || b == "" {
+			b = "main"
+		}
+		return b, noRemoteNote
+	}
+	return "origin/" + DefaultBranch(dir), ""
 }
 
 // DefaultBranch is the default branch of the origin remote of the repository in dir, as git last learned it

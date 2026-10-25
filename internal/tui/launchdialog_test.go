@@ -329,6 +329,30 @@ func TestRetryRequestCarriesOperationIDUntilEdited(t *testing.T) {
 	}
 }
 
+func TestRetryIDSurvivesAPlainFailureOfTheRetry(t *testing.T) {
+	const id = "1700000000000-0123456789abcdef0123456789abcdef"
+	lost := &launch.StepError{Step: launch.StepCreate, Err: &launch.LostReplyError{OperationID: id, Cause: "no reply"}}
+	d := newLaunchDialog(orcaInput()).start().failed(lost)
+	for name, err := range map[string]error{
+		"resolve": &launch.StepError{Step: launch.StepFetch, Err: errors.New("git is gone")},
+		"orca":    &launch.StepError{Step: launch.StepCreate, Err: errors.New("repo_not_found")},
+		"bare":    errors.New("boom"),
+	} {
+		again := d.start().failed(err)
+		if got := again.request().RetryID; got != id {
+			t.Errorf("%s: RetryID = %q after a plain failure of the retry; want %q kept (clearing it would launch a duplicate)", name, got, id)
+		}
+		if v := again.view(100); !strings.Contains(v, "retries the same launch") {
+			t.Errorf("%s: view no longer offers the retry:\n%s", name, v)
+		}
+	}
+	// a plain failure of an original launch is not a retry situation
+	plain := newLaunchDialog(orcaInput()).start().failed(&launch.StepError{Step: launch.StepCreate, Err: errors.New("repo_not_found")})
+	if got := plain.request().RetryID; got != "" {
+		t.Errorf("RetryID = %q after a plain failure; want none", got)
+	}
+}
+
 func TestOrcaRequiresBaseAndBranch(t *testing.T) {
 	in := orcaInput()
 	in.Base = ""
@@ -356,7 +380,7 @@ func TestOrcaRequiresBaseAndBranch(t *testing.T) {
 	}
 	// withBase fills a base that was loaded later, unless the user typed one
 	in.Base = ""
-	if got := newLaunchDialog(in).withBase("origin/dev").request().Base; got != "origin/dev" {
+	if got := newLaunchDialog(in).withBase("origin/dev", "").request().Base; got != "origin/dev" {
 		t.Errorf("withBase = %q", got)
 	}
 }

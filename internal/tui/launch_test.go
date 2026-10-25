@@ -33,7 +33,7 @@ const fakeWorkDir = "/work/app"
 func installLaunch(t *testing.T, env map[string]string) *launchFakes {
 	t.Helper()
 	f := &launchFakes{env: env}
-	oldDo, oldModels, oldDir, oldBranch, oldEnv, oldL := launchDo, launchModels, launchDir, launchDefaultBranch, envGet, launcher
+	oldDo, oldModels, oldDir, oldBranch, oldEnv, oldL := launchDo, launchModels, launchDir, launchDefaultBase, envGet, launcher
 	launchDo = func(r launch.Request) (launch.Result, error) {
 		f.reqs = append(f.reqs, r)
 		i := len(f.reqs) - 1
@@ -55,14 +55,14 @@ func installLaunch(t *testing.T, env map[string]string) *launchFakes {
 		return []launch.Model{{}, {ID: "opus"}, {ID: "sonnet"}}
 	}
 	launchDir = func() (string, error) { return fakeWorkDir, nil }
-	launchDefaultBranch = func(string) string { return "trunk" }
+	launchDefaultBase = func(string) (string, string) { return "origin/trunk", "" }
 	envGet = func(k string) string { return f.env[k] }
 	launcher.Run = func(dir string, stdin []byte, name string, args ...string) ([]byte, error) {
 		f.ran = append(f.ran, append([]string{name}, args...))
 		return nil, errors.New("not in orca")
 	}
 	t.Cleanup(func() {
-		launchDo, launchModels, launchDir, launchDefaultBranch, envGet, launcher = oldDo, oldModels, oldDir, oldBranch, oldEnv, oldL
+		launchDo, launchModels, launchDir, launchDefaultBase, envGet, launcher = oldDo, oldModels, oldDir, oldBranch, oldEnv, oldL
 	})
 	return f
 }
@@ -386,6 +386,47 @@ func TestRetryReusesOperationId(t *testing.T) {
 	m = pressLaunch(m, "e", "tab", "tab", "tab", "tab", "x", "enter")
 	if len(f.reqs) != 3 || f.reqs[2].RetryID != "" || f.reqs[2].Name != "issue-42-fix-login-crashx" {
 		t.Errorf("after an edit: %+v; want a new launch", f.reqs[len(f.reqs)-1])
+	}
+}
+
+func TestRetryStaysAfterTheRetryFailsToo(t *testing.T) {
+	const id = "1730000000000-0123456789abcdef0123456789abcdef"
+	f := installLaunch(t, map[string]string{"ORCA_WORKTREE_ID": "x"})
+	f.errs = []error{
+		&launch.StepError{Step: launch.StepCreate, Err: &launch.LostReplyError{OperationID: id, Cause: "orca did not answer"}},
+		&launch.StepError{Step: launch.StepFetch, Err: errors.New("git did not answer")},
+		nil,
+	}
+	m := pressLaunch(issueOnScreen(t), "a", "enter", "enter", "enter")
+	if len(f.reqs) != 3 {
+		t.Fatalf("requests = %d, want 3", len(f.reqs))
+	}
+	for i, r := range f.reqs[1:] {
+		if r.RetryID != id {
+			t.Errorf("request %d: RetryID = %q, want %q: a failed retry must not turn the next enter into a fresh launch", i+1, r.RetryID, id)
+		}
+	}
+	if m.launchDlg != nil {
+		t.Error("the dialog stayed open after the retry succeeded")
+	}
+}
+
+func TestLaunchDefaultBaseWithoutRemoteShowsTheNote(t *testing.T) {
+	f := installLaunch(t, map[string]string{"ORCA_WORKTREE_ID": "x"})
+	launchDefaultBase = func(string) (string, string) { return "trunk", "no remote, using the local branch" }
+	m, cmd := update(issueOnScreen(t), k("a"))
+	bases := baseMsgs(launchMsgs(cmd))
+	if len(bases) != 1 || bases[0].base != "trunk" || bases[0].note == "" {
+		t.Fatalf("base answers = %+v", bases)
+	}
+	m, _ = update(m, bases[0])
+	v := ansi.Strip(m.View())
+	if m.launchDlg.in.Base != "trunk" || !strings.Contains(v, "trunk → issue-42") || !strings.Contains(v, "no remote, using the local branch") {
+		t.Errorf("base=%q; the dialog does not show the note:\n%s", m.launchDlg.in.Base, v)
+	}
+	m = pressLaunch(m, "enter")
+	if len(f.reqs) != 1 || f.reqs[0].Base != "trunk" {
+		t.Errorf("requests = %+v", f.reqs)
 	}
 }
 

@@ -698,3 +698,15 @@ func TestOrcaDefaultBaseRejectsOddRepoID(t *testing.T) {
 		t.Errorf("calls = %d, an odd repo id must not be passed on", len(rec.calls))
 	}
 }
+
+func TestOrcaOperationIDWithAnotherCodeIsNotALostReply(t *testing.T) {
+	out := `{"ok":false,"error":{"code":"repo_not_found","message":"repo_not_found","data":{"operationId":"` + orcaOp + `"}}}`
+	err := orcaFailure([]byte(out), errors.New("exit status 1"))
+	var lost *LostReplyError
+	if errors.As(err, &lost) {
+		t.Errorf("only agent_session_operation_unknown is a lost reply: %v", err)
+	}
+	if !strings.Contains(err.Error(), "repo_not_found") {
+		t.Errorf("err = %v", err)
+	}
+}
