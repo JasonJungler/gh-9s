@@ -315,7 +315,7 @@ func TestDefaultBaseWithoutRemoteIsTheLocalBranch(t *testing.T) {
 		t.Errorf("DefaultBase = %q, %q; want trunk with the no-remote note (origin/main would not exist)", base, note)
 	}
 	// a detached HEAD has no branch name: fall back to main
-	gitIn(t, lone, "commit", "-q", "--allow-empty", "-m", "x")
+	gitIn(t, lone, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "x") // CI has no git identity
 	gitIn(t, lone, "checkout", "-q", "--detach")
 	if base, _ := DefaultBase(lone); base != "main" {
 		t.Errorf("detached: DefaultBase = %q, want main", base)

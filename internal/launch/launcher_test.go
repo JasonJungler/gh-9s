@@ -45,7 +45,9 @@ func TestLauncherFetchBeforeCreate(t *testing.T) {
 
 func TestLauncherFetchNoteJoinsOrcaNote(t *testing.T) {
 	r := orcaReq()
-	r.Context = strings.Repeat("a", orcaPromptMax+1)
+	// paste only always takes the longer path, so this does not depend on the platform's argv ceiling
+	// (on Linux it equals orcaPromptMax, which would refuse a context one byte over it)
+	r.PasteOnly = true
 	rec := &recorder{reply: fallbackReply(orcaSendWarnOut)}
 	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(_, b string) (string, string, error) { return b, "fetched", nil }}
 	res, err := l.Do(r)
