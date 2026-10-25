@@ -167,3 +167,33 @@ func TestFetchBaseBareNameThatLooksLikeARemote(t *testing.T) {
 		t.Errorf("origin/main = %s, want %s", got, want)
 	}
 }
+
+func TestDefaultBranchFromOriginHead(t *testing.T) {
+	r := newFetchRepos(t)
+	if got := DefaultBranch(r.dir); got != "main" {
+		t.Errorf("DefaultBranch = %q, want main", got)
+	}
+	// a remote whose default branch is not main, with a slash in its name
+	gitIn(t, r.dir, "checkout", "-q", "-b", "release/v2")
+	gitIn(t, r.dir, "push", "-q", "origin", "release/v2")
+	gitIn(t, r.dir, "remote", "set-head", "origin", "release/v2")
+	if got := DefaultBranch(r.dir); got != "release/v2" {
+		t.Errorf("DefaultBranch = %q, want release/v2", got)
+	}
+}
+
+func TestDefaultBranchFallsBackToMain(t *testing.T) {
+	r := newFetchRepos(t)
+	gitIn(t, r.dir, "remote", "set-head", "origin", "--delete")
+	if got := DefaultBranch(r.dir); got != "main" {
+		t.Errorf("without origin/HEAD: DefaultBranch = %q, want main", got)
+	}
+	lone := t.TempDir()
+	gitIn(t, lone, "init", "-q", "-b", "trunk")
+	if got := DefaultBranch(lone); got != "main" {
+		t.Errorf("no remote: DefaultBranch = %q, want main", got)
+	}
+	if got := DefaultBranch(filepath.Join(t.TempDir(), "missing")); got != "main" {
+		t.Errorf("not a repository: DefaultBranch = %q, want main", got)
+	}
+}

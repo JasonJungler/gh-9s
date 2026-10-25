@@ -52,6 +52,21 @@ func FetchBase(dir, base string) (note string, err error) {
 	return "", nil
 }
 
+// DefaultBranch is the default branch of the origin remote of the repository in dir, as git last learned it
+// (refs/remotes/origin/HEAD), without the "origin/" in front. It asks no server. When git does not know it (no
+// origin, no origin/HEAD, not a repository) it is "main".
+func DefaultBranch(dir string) string {
+	out, err := fetchGit(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "main"
+	}
+	b := strings.TrimPrefix(strings.TrimSpace(out), "origin/")
+	if b == "" {
+		return "main"
+	}
+	return b
+}
+
 // fetchGit runs git in dir without ever asking on the terminal, and returns stdout; the error carries git's own words.
 // It is not wikiGit: that one runs git with every credential helper but gh's dropped (it only talks to the wiki
 // remote through gh), which would break fetching the user's own repository with their own helper or keychain.
