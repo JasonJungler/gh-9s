@@ -97,6 +97,7 @@ Projects tab: `enter` open the board, `a` pin, `f` or `d` unpin (asks first), `o
 | `C` | Comment |
 | `r` | Review: approve, request changes, or comment |
 | `m` | Merge |
+| `M` | Add to / remove from Projects (asks first) |
 | `tab` | Select an image |
 | `enter` | Show the selected image |
 | `o` | Open the image, or the PR |
@@ -152,6 +153,7 @@ In the file tree:
 | `O` / `C` / `A` | Open / closed / all |
 | `u` | Assigned to me |
 | `m` | Opened by me |
+| `M` | Add to / remove from Projects (asks first) |
 | `f` | Pin or unpin this repository |
 | `o` | Open in the browser |
 
@@ -189,6 +191,13 @@ In the file tree:
 | `H` / `L` | Move the card to the previous / next column (column board) |
 | `a` | Change assignees |
 | `n` | Add an issue or PR |
+| `x` / `X` | Remove the card from the Project / archive it |
+| `N` | New draft card (gets the Status of the column you are in) |
+| `e` | Edit a draft card's title and text |
+| `v` | Change another field of the card |
+| `space` | Mark the card (`●`); `s` `a` `x` `X` `H` `L` then act on all marked cards. `esc` clears the marks |
+| `ctrl+↑` / `ctrl+↓` | Move the card one place up / down (not in a sorted view) |
+| `u` | Undo the last Status or field change, added card or new draft |
 | `b` | Switch between list and column board |
 | `h` `j` `k` `l` | In the column board: change column / card |
 | `]` / `[` | Next / previous saved view |
