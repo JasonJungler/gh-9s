@@ -25,8 +25,8 @@ user's explicit "發佈".
    opens the browser).
 4. **Comment:** `C` adds a top-level comment. **Reply:** `r` replies to the selected comment (selecting a reply
    replies in the same thread: GitHub Discussions nest one level only). Both use the same dialog flow as the issue
-   comment (text dialog, `ctrl+e` editor, saved draft, one confirm that names the repo and number, e.g.
-   `acme/app#42`, and for a reply whose comment it answers).
+   comment (a text dialog with the `ctrl+e` editor whose title names the repo and number, e.g. `acme/app#42`, and for
+   a reply whom it answers; sending the dialog is the confirmation, as for an issue comment).
 5. **Moving over comments:** `j`/`k` scroll as on the issue screen; `n`/`N` select the next / previous comment or
    reply (marked `▌` in the margin) and scroll it into view; `esc` goes back. (My call: `n`/`N` rather than `tab`,
    which the PR screen uses for images.)
@@ -76,7 +76,7 @@ extended to it. Keys appear in `?` help, the footers, the README and the website
 - Category emoji are dropped; only names are shown.
 - The list query also reads `body` (the preview pane needs it); a body is cut to a sensible length for the list.
 - After a comment or reply is sent, that Discussion is read again (same identity), so the new text shows.
-- Reply drafts are kept per Discussion and top-level comment id; a reply's confirm names the comment it answers.
+- A reply's dialog names the author it answers. (There are no saved drafts: the issue comment dialog has none either; an earlier line of this spec said so by mistake.)
 
 ## Left to the builder
 

@@ -20,7 +20,7 @@ const (
 // not switched it off, the screen is one of the lists and the terminal is wide enough.
 func (m model) previewShown() bool {
 	switch m.view {
-	case viewPRs, viewIssues, viewInbox, viewBoard:
+	case viewPRs, viewIssues, viewInbox, viewBoard, viewDiscussions:
 	default:
 		return false
 	}

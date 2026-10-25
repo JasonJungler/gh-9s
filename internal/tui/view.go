@@ -102,6 +102,12 @@ func (m model) View() string {
 	if m.view == viewIssue {
 		title += " issue=#" + m.issue
 	}
+	if m.view == viewDiscussions && m.discCatName != "" {
+		title += " category=" + m.discCatName
+	}
+	if m.view == viewDiscussion {
+		title += " discussion=#" + m.disc
+	}
 	if m.view == viewBoard {
 		title = " gh9s  <board>  " + m.boardTitle()
 	}

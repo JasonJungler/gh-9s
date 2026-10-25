@@ -34,6 +34,8 @@ type prAction struct {
 	body      string
 	want      string   // for a list being fetched: "labels" or "assignees"
 	current   []string // labels or assignees the issue has now, for diffing a multi-choice answer
+	discID    string   // a discussion comment: the discussion's own id
+	replyTo   string   // and the top-level comment it replies to ("" = a new comment)
 }
 
 // prActionDoneMsg reports how an action ended.
