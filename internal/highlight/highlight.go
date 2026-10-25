@@ -110,6 +110,7 @@ func withLimit[T any](limit time.Duration, fn func() T) (out T, ok bool) {
 	default:
 		return out, false
 	}
+	start := time.Now()
 	done := make(chan T, 1)
 	go func() {
 		defer func() { <-slots }()
@@ -123,6 +124,9 @@ func withLimit[T any](limit time.Duration, fn func() T) (out T, ok bool) {
 	}()
 	select {
 	case v := <-done:
+		if time.Since(start) > limit { // both were ready: the budget was spent, so it is a timeout
+			return out, false
+		}
 		return v, true
 	case <-time.After(limit):
 		return out, false
