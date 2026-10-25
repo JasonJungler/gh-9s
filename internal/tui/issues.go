@@ -51,7 +51,7 @@ func init() {
 		},
 		key:    issuesKey,
 		body:   func(m model) string { return m.tableBody() },
-		footer: "enter open  O/C/A open/closed/all  u assigned to me  m opened by me  M projects  f pin-repo  o browser",
+		footer: "enter open  a agent  O/C/A open/closed/all  u assigned to me  m opened by me  M projects  f pin-repo  o browser",
 		poll:   false,
 	})
 	register(viewIssue, screen{
@@ -70,7 +70,7 @@ func init() {
 		},
 		key:    issueKey,
 		body:   issueBody,
-		footer: "C comment  x close  X reopen  l labels  s assignees  M projects  o open  j/k scroll",
+		footer: "a agent  C comment  x close  X reopen  l labels  s assignees  M projects  o open  j/k scroll",
 	})
 	dialogHandlers["issue.close"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		p := m.pending
@@ -140,8 +140,8 @@ func issueFilterName(f ghcli.IssueFilter) string {
 	return name
 }
 
-// issuesKey sets the list filter (O/C/A = open/closed/all; u, m toggle assigned to me / opened by me)
-// and opens an issue. Everything else (movement, /, o, esc) is the shared table behaviour.
+// issuesKey sets the list filter (O/C/A = open/closed/all; u, m toggle assigned to me / opened by me),
+// opens an issue, and sends one to a coding agent (a). Everything else (movement, /, o, esc) is the shared table behaviour.
 func issuesKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	switch k.String() {
 	case "O":
@@ -161,6 +161,13 @@ func issuesKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return next, cmd, true
 	case "m":
 		m.issueFilter.OpenedByMe = !m.issueFilter.OpenedByMe
+	case "a":
+		r, ok := m.selected()
+		if !ok {
+			return m, nil, true
+		}
+		next, cmd := m.launchFromList(r.id)
+		return next, cmd, true
 	case "enter":
 		r, ok := m.selected()
 		if !ok {
@@ -209,6 +216,9 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		st.scroll = maxScroll
 	case "M":
 		next, cmd := m.startProjectAssign(m.issue)
+		return next, cmd, true
+	case "a":
+		next, cmd := m.launchFromIssue(st.d)
 		return next, cmd, true
 	case "C":
 		m, p := m.startIssueAction(st)

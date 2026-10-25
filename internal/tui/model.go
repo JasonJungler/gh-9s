@@ -10,6 +10,7 @@ import (
 	"github.com/MurabitoB/gh-9s/internal/favorites"
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
+	"github.com/MurabitoB/gh-9s/internal/launch"
 	"github.com/MurabitoB/gh-9s/internal/pins"
 	"github.com/MurabitoB/gh-9s/internal/recent"
 	"github.com/MurabitoB/gh-9s/internal/settings"
@@ -127,6 +128,10 @@ type model struct {
 	expanded         map[string]bool
 	specs            map[string][]workflow.JobSpec // workflow job specs, by run ID
 	form             *triggerForm                  // non-nil while the trigger form is open
+	launchDlg        *launchDialog                 // non-nil while the send-to-an-agent dialog is open
+	launchSeq        int                           // counts launch dialogs opened; a late answer for an older one is dropped
+	launchWD         string                        // the directory the open launch dialog launches in
+	launchPrefs      *launch.Prefs                 // the model remembered per agent; nil remembers nothing
 	favs             *favorites.Store              // nil when the favorites file could not be loaded
 	curRepo          ghcli.RepoRef                 // repo of the current directory, host included
 	latest           map[string]latestEntry
@@ -222,6 +227,8 @@ func Run() error {
 	}
 	var banner string
 	m.settings, banner = loadSettings()
+	m.banner = joinBanner(m.banner, banner)
+	m.launchPrefs, banner = loadLaunchPrefs()
 	m.banner = joinBanner(m.banner, banner)
 	if ds, err := drafts.Load(drafts.DefaultPath()); err != nil {
 		m.banner = joinBanner(m.banner, "drafts are not saved: "+err.Error())

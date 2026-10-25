@@ -30,6 +30,9 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.form != nil {
 		return m.formKey(k)
 	}
+	if m.launchDlg != nil {
+		return m.launchKey(k)
+	}
 	if m.mode == modeConfirm {
 		mode := m.mode
 		m.mode = modeNormal

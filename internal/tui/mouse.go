@@ -26,7 +26,7 @@ func (m model) wheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.mode != modeNormal { // a prompt is being typed into
 		return m, nil
 	}
-	if m.previewShown() && m.dlg == nil && m.picker == nil && m.form == nil && !m.helpOpen {
+	if m.previewShown() && m.dlg == nil && m.picker == nil && m.form == nil && m.launchDlg == nil && !m.helpOpen {
 		if lw, _ := m.paneWidths(); msg.X >= lw {
 			step := wheelLines
 			if key == tea.KeyUp {
