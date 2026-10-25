@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/launch"
@@ -83,8 +83,7 @@ func newLaunchDialog(in launchInput) launchDialog {
 	if in.Split == "" {
 		in.Split = launch.SplitHorizontal
 	}
-	d := launchDialog{in: in, models: in.Models}
-	return d
+	return launchDialog{in: in, models: in.Models}
 }
 
 func (d launchDialog) focused() launchField { return d.focus }
@@ -102,23 +101,24 @@ func (d launchDialog) start() launchDialog {
 // lost its reply, the next request carries the operation id so the same launch
 // is asked again instead of started afresh.
 func (d launchDialog) failed(err error) launchDialog {
-	d.run = false
-	d.err = ""
-	d.retryID = ""
-	msg := err.Error()
+	d.run, d.err, d.retryID = false, "", ""
 	var lost *launch.LostReplyError
-	if errors.As(err, &lost) {
+	var se *launch.StepError
+	_, _ = errors.As(err, &lost), errors.As(err, &se)
+	msg := "no details"
+	switch {
+	case lost != nil:
 		d.retryID = lost.OperationID
 		msg = lost.Cause + "; the launch may already have happened"
+	case se != nil && se.Err != nil:
+		msg = se.Err.Error()
+	case se == nil && err != nil && err.Error() != "":
+		msg = err.Error()
 	}
-	var se *launch.StepError
-	if errors.As(err, &se) {
-		if lost == nil {
-			msg = se.Err.Error()
-		}
-		msg = se.Step + ": " + msg
+	d.failure = "failed: " + msg
+	if se != nil {
+		d.failure = "failed at " + se.Step + ": " + msg
 	}
-	d.failure = msg
 	return d
 }
 
@@ -169,6 +169,9 @@ func (d launchDialog) applies(f launchField) bool {
 
 // invalid says what stops the launch, or "".
 func (d launchDialog) invalid() string {
+	if _, ok := launch.LookupAgent(d.in.Agent); !ok {
+		return "unknown agent " + d.in.Agent
+	}
 	if d.orca() {
 		if strings.TrimSpace(d.in.Base) == "" {
 			return "base is required"
@@ -190,12 +193,6 @@ func (d *launchDialog) move(dir int) {
 	}
 }
 
-// edited records that a field changed: a lost-reply retry no longer describes it.
-func (d *launchDialog) edited() {
-	d.retryID = ""
-	d.err = ""
-}
-
 // update handles one key and says what the caller should do.
 func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
 	if d.run {
@@ -206,6 +203,9 @@ func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
 		return d, actCancel
 	case tea.KeyEnter:
 		if msg := d.invalid(); msg != "" {
+			if !d.expanded {
+				msg += ", press e to edit"
+			}
 			d.err = msg
 			return d, actNone
 		}
@@ -213,11 +213,14 @@ func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
 		return d, actSubmit
 	}
 	if !d.expanded {
-		if k.Type == tea.KeyRunes && string(k.Runes) == "e" {
+		if k.Type == tea.KeyRunes && string(k.Runes) == "e" && !k.Alt && !k.Paste {
 			d.expanded = true
 			d.err = ""
 		}
 		return d, actNone
+	}
+	if k.Alt && (k.Type == tea.KeyRunes || k.Type == tea.KeySpace || k.Type == tea.KeyBackspace) {
+		return d, actNone // Alt chords are not text
 	}
 	switch k.Type {
 	case tea.KeyTab, tea.KeyDown:
@@ -233,8 +236,17 @@ func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
 	case tea.KeySpace:
 		d.editText(func(s string) string { return s + " " })
 	case tea.KeyRunes:
-		r := string(k.Runes)
-		d.editText(func(s string) string { return s + r })
+		// A paste arrives as one message: keep what can be shown, drop newlines,
+		// tabs and escape sequences instead of letting them reach the layout.
+		r := strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, string(k.Runes))
+		if r != "" {
+			d.editText(func(s string) string { return s + r })
+		}
 	}
 	return d, actNone
 }
@@ -260,7 +272,7 @@ func (d *launchDialog) editText(f func(string) string) {
 	default:
 		return
 	}
-	d.edited()
+	d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
 }
 
 // cycle moves the focused choice row one step.
@@ -275,7 +287,7 @@ func (d launchDialog) cycle(dir int) (launchDialog, launchAct) {
 			ids[i] = a.ID
 		}
 		next := cycleChoice(ids, d.in.Agent, dir)
-		d.edited()
+		d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
 		if next == d.in.Agent {
 			return d, actNone
 		}
@@ -300,7 +312,7 @@ func (d launchDialog) cycle(dir int) (launchDialog, launchAct) {
 	default:
 		return d, actNone
 	}
-	d.edited()
+	d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
 	return d, actNone
 }
 
@@ -355,24 +367,54 @@ func (d launchDialog) summary() string {
 	return s
 }
 
-// wrapLines indents text by one space and wraps it to width (0 means no wrapping).
+// minWrap is the narrowest width text is wrapped to (a wide character needs 2).
+const minWrap = 4
+
+// wrapLines indents text by one space and wraps it to width display columns
+// (0 means no wrapping). Continuation lines are indented too.
 func wrapLines(s string, width int) string {
-	if width > 2 && lipgloss.Width(s) > width-2 {
-		s = lipgloss.NewStyle().Width(width - 2).Render(s)
+	if width > 0 {
+		s = ansi.Wrap(s, max(width-1, minWrap), "")
 	}
 	return " " + strings.ReplaceAll(s, "\n", "\n ")
 }
 
-// view renders the dialog body; the caller draws the box around it.
+// fitLines wraps any line of s wider than width display columns. It is the
+// safety net for lines built from styled pieces.
+func fitLines(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if ansi.StringWidth(l) > width {
+			lines[i] = ansi.Wrap(l, max(width, minWrap), "")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// clipTail shortens s to room display columns for showing, keeping the end
+// (where typing happens) behind a leading ellipsis. The stored value is not touched.
+func clipTail(s string, room int) string {
+	w := ansi.StringWidth(s)
+	if room <= 0 || w <= room {
+		return s
+	}
+	if room < 2 {
+		return "…"
+	}
+	return ansi.TruncateLeft(s, w-(room-1), "…")
+}
+
+// view renders the dialog body, every line at most width display columns
+// wide (0 means unlimited); the caller draws the box around it.
 func (d launchDialog) view(width int) string {
 	var b strings.Builder
 	b.WriteString(styCols.Render(fmt.Sprintf(" Send #%d to an agent", d.in.Issue.Number)) + "\n")
-	if d.in.Issue.Title != "" {
-		b.WriteString(styDim.Render(wrapLines(d.in.Issue.Title, width)) + "\n")
-	}
-	b.WriteString("\n")
+	b.WriteString(styDim.Render(wrapLines(d.in.Issue.Title, width)) + "\n\n")
 	if d.expanded {
-		d.formRows(&b)
+		d.formRows(&b, width)
 		b.WriteString("\n" + wrapLines(d.summary(), width) + "\n")
 	} else {
 		b.WriteString(wrapLines(d.summary(), width) + "\n")
@@ -381,15 +423,15 @@ func (d launchDialog) view(width int) string {
 	case d.run:
 		b.WriteString("\n " + styRun.Render("launching…") + "\n")
 	case d.failure != "":
-		b.WriteString("\n" + styErr.Render(wrapLines("failed at "+d.failure, width)) + "\n")
+		b.WriteString("\n" + styErr.Render(wrapLines(d.failure, width)) + "\n")
 		again := "enter to try again"
 		if d.retryID != "" {
 			again = "enter retries the same launch (it may already be running)"
 		}
-		b.WriteString(styDim.Render(" "+again) + "\n")
+		b.WriteString(styDim.Render(wrapLines(again, width)) + "\n")
 	}
 	if d.err != "" {
-		b.WriteString("\n" + styErr.Render(" "+d.err) + "\n")
+		b.WriteString("\n" + styErr.Render(wrapLines(d.err, width)) + "\n")
 	}
 	keys := "enter launch   e edit   esc cancel"
 	if d.expanded {
@@ -398,12 +440,19 @@ func (d launchDialog) view(width int) string {
 	if d.run {
 		keys = "wait for the launch to finish"
 	}
-	b.WriteString("\n" + styDim.Render(" "+keys) + "\n")
-	return b.String()
+	b.WriteString("\n" + styDim.Render(wrapLines(keys, width)) + "\n")
+	return fitLines(b.String(), width)
 }
 
+// rowPrefix is the width of the focus mark, the label and the space after it.
+const rowPrefix = 2 + 8 + 1
+
 // formRows writes the rows that apply to the current target and place.
-func (d launchDialog) formRows(b *strings.Builder) {
+func (d launchDialog) formRows(b *strings.Builder, width int) {
+	room := 0 // columns left for a value; 0 means unlimited
+	if width > 0 {
+		room = max(width-rowPrefix, 1)
+	}
 	for f := fWhere; f < fieldCount; f++ {
 		if !d.applies(f) {
 			continue
@@ -422,17 +471,14 @@ func (d launchDialog) formRows(b *strings.Builder) {
 		case fModel:
 			switch {
 			case d.typing:
-				val = d.in.Model
-				if focused {
-					val += "█"
-				}
+				val = textValue(d.in.Model, focused, room)
 				note = "a mistyped name only fails in the agent pane"
 			default:
 				name := d.in.Model
 				if name == "" {
 					name = "default"
 				}
-				val = "‹ " + name + " ›"
+				val = "‹ " + clipTail(name, max(room-4, 0)) + " ›"
 				for _, m := range d.models {
 					if m.ID == d.in.Model && m.ID != "" {
 						note = m.Hint
@@ -443,22 +489,25 @@ func (d launchDialog) formRows(b *strings.Builder) {
 				}
 			}
 		case fBase:
-			val = textValue(d.in.Base, focused)
+			val = textValue(d.in.Base, focused, room)
 		case fName:
-			val = textValue(d.in.Name, focused)
+			val = textValue(d.in.Name, focused, room)
 			note = "Orca's workspace name; Orca adds its own prefix"
 		case fPlace:
 			val = "‹ " + string(d.in.Place) + " ›"
 		case fSplit:
 			val = "‹ " + string(d.in.Split) + " ›"
 		}
-		fmt.Fprintf(b, "%s%-8s %s%s\n", mark, launchFieldName[f], val, hint(note != "", note))
+		fmt.Fprintf(b, "%s%-8s %s", mark, launchFieldName[f], val)
+		b.WriteString(hint(note != "", note))
+		b.WriteString("\n")
 	}
 }
 
-func textValue(s string, focused bool) string {
+// textValue shows an editable value, with the cursor when focused, clipped to room columns.
+func textValue(s string, focused bool, room int) string {
 	if focused {
-		return s + "█"
+		return clipTail(s, max(room-1, 0)) + "█"
 	}
-	return s
+	return clipTail(s, room)
 }
