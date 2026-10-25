@@ -6,7 +6,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-(cd "$root" && mise exec -- go build -o "$work/gh-9s" . && mise exec -- go build -o "$work/fluent-demo" ./cmd/fluent-demo)
+(cd "$root" && mise exec -- go build -o "$work/gh-9s" .)
 "$here/setup.sh" "$work/env" > "$work/env.sh"
 export DEMO="$work"
 cd "$here"
