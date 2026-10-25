@@ -33,6 +33,10 @@ If an environment variable overrides a setting, the screen says when your change
 | `preview_min_columns` | `120` | 80 to 400 | The narrowest terminal that shows the preview pane |
 | `mouse` | `true` | on / off | Scroll with the mouse wheel. See [Interface basics](/gh-9s/guides/interface/#mouse). |
 | `delete_branch_after_merge` | `false` | on / off | Starting value of the "delete branch?" checkbox in the merge dialog |
+| `launch_target` | `auto` | `auto`, `orca`, `herdr`, `tmux` | Where `a` starts a coding agent for an issue. `auto` uses the environment gh-9s is running in. See [Send an issue to an agent](/gh-9s/guides/send-to-agent/). |
+| `launch_agent` | `claude` | `claude`, `devin` | The coding agent to start. A launch remembers the one it used. |
+| `launch_tmux_place` | `pane` | `pane`, `window` | Open the agent in a pane or a window. herdr uses this too (its window is a tab). |
+| `launch_split` | `horizontal` | `horizontal`, `vertical` | Which way a new pane splits. herdr uses this too. |
 
 Examples:
 
