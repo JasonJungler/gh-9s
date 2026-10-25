@@ -88,50 +88,51 @@ type model struct {
 	mi                            int
 	follow                        bool
 
-	note           string                    // explanation tied to the current view (cleared when the view changes)
-	banner         string                    // sticky startup problem, always shown
-	runMeta        ghcli.RunMeta             // the watched run's status and conclusion as last seen
-	runStatus      string                    // last seen status of the watched run, for the finished notification
-	pendingMerge   *mergeAction              // the merge being collected through dialogs
-	settings       *settings.Store           // the configuration; nil means in-memory defaults (see cfg)
-	drafts         *drafts.Store             // inline review comments not sent yet, kept on disk
-	rerunWait      int                       // polls left to wait for a re-run's new attempt to show up
-	logJump        bool                      // the next log to load opens at its first failure
-	pendingRun     *runAct                   // a run action waiting for its confirmation
-	askIcons       bool                      // the first-run question about Nerd Font icons is on screen
-	iconHelp       bool                      // ... with its help text
-	sendingKey     string                    // the PR whose review is being sent right now
-	pendingDraft   *pendingDraft             // a comment being written in a dialog
-	pending        *prAction                 // the PR action being collected through dialogs
-	dlg            *dialog                   // a question being asked (text, choice or yes/no)
-	repoCache      map[string]repoCacheEntry // the repos I can access, per host, reused for a while
-	picker         *picker                   // the repo picker overlay, when open
-	recents        *recent.Store             // repos chosen before; nil if the file could not be read
-	sdata          map[viewKind]any          // per-screen data, see screen.go
-	graph          graph.Graph
-	gstyle         graph.Style
-	gsel           int
-	expanded       map[string]bool
-	specs          map[string][]workflow.JobSpec // workflow job specs, by run ID
-	form           *triggerForm                  // non-nil while the trigger form is open
-	favs           *favorites.Store              // nil when the favorites file could not be loaded
-	curRepo        ghcli.RepoRef                 // repo of the current directory, host included
-	latest         map[string]latestEntry
-	aliasFor       favorites.Favorite
-	pins           *pins.Store        // pinned repos and Projects; nil means none are kept (see pinStore)
-	favTab         int                // the tab of the favorites screen, kept for the session
-	pinDel         *pins.Repo         // the pinned repo a confirm dialog is about
-	pinDelProject  *pins.Project      // ... or the pinned Project
-	boardViewMemo  map[string]string  // the view chosen on each Project (by name), for the session
-	boardColsOn    bool               // the columns layout is chosen, for the session
-	boardOp        *boardOp           // a write being collected through dialogs
-	boardBusy      bool               // a write is running
-	projOp         *projOp            // Projects of an issue or PR being changed through dialogs
-	projBusy       bool               // ... and being written
-	undo           *undoRec           // the last change that can be taken back
-	undoNext       *undoRec           // ... of the write now running
-	projectChoices []ghcli.ProjectRef // the Projects offered by the pin dialog
-	board          pins.Project       // the Project the board screen shows
+	note             string                    // explanation tied to the current view (cleared when the view changes)
+	banner           string                    // sticky startup problem, always shown
+	runMeta          ghcli.RunMeta             // the watched run's status and conclusion as last seen
+	runStatus        string                    // last seen status of the watched run, for the finished notification
+	pendingMerge     *mergeAction              // the merge being collected through dialogs
+	settings         *settings.Store           // the configuration; nil means in-memory defaults (see cfg)
+	drafts           *drafts.Store             // inline review comments not sent yet, kept on disk
+	rerunWait        int                       // polls left to wait for a re-run's new attempt to show up
+	logJump          bool                      // the next log to load opens at its first failure
+	pendingRun       *runAct                   // a run action waiting for its confirmation
+	askIcons         bool                      // the first-run question about Nerd Font icons is on screen
+	iconHelp         bool                      // ... with its help text
+	sendingKey       string                    // the PR whose review is being sent right now
+	pendingDraft     *pendingDraft             // a comment being written in a dialog
+	pending          *prAction                 // the PR action being collected through dialogs
+	dlg              *dialog                   // a question being asked (text, choice or yes/no)
+	repoCache        map[string]repoCacheEntry // the repos I can access, per host, reused for a while
+	picker           *picker                   // the repo picker overlay, when open
+	recents          *recent.Store             // repos chosen before; nil if the file could not be read
+	sdata            map[viewKind]any          // per-screen data, see screen.go
+	graph            graph.Graph
+	gstyle           graph.Style
+	gsel             int
+	expanded         map[string]bool
+	specs            map[string][]workflow.JobSpec // workflow job specs, by run ID
+	form             *triggerForm                  // non-nil while the trigger form is open
+	favs             *favorites.Store              // nil when the favorites file could not be loaded
+	curRepo          ghcli.RepoRef                 // repo of the current directory, host included
+	latest           map[string]latestEntry
+	aliasFor         favorites.Favorite
+	pins             *pins.Store        // pinned repos and Projects; nil means none are kept (see pinStore)
+	favTab           int                // the tab of the favorites screen, kept for the session
+	pinDel           *pins.Repo         // the pinned repo a confirm dialog is about
+	pinDelProject    *pins.Project      // ... or the pinned Project
+	boardViewMemo    map[string]string  // the view chosen on each Project (by name), for the session
+	boardColsOn      bool               // the columns layout is chosen, for the session
+	boardOp          *boardOp           // a write being collected through dialogs
+	boardBusy        bool               // a write is running
+	projOp           *projOp            // Projects of an issue or PR being changed through dialogs
+	projBusy         bool               // ... and being written
+	undo             *undoRec           // the last change that can be taken back
+	undoWhy, undoKey string             // why the last change cannot be undone, and on which Project
+	undoNext         *undoRec           // ... of the write now running
+	projectChoices   []ghcli.ProjectRef // the Projects offered by the pin dialog
+	board            pins.Project       // the Project the board screen shows
 
 	prChecks     map[string]prCheck // the checks column of the PR list, by PR number, for prChecksKey
 	prChecksKey  string             // which repo and filter prChecks is of

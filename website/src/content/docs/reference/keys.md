@@ -196,7 +196,7 @@ In the file tree:
 | `e` | Edit a draft card's title and text |
 | `v` | Change another field of the card |
 | `space` | Mark the card (`●`); `s` `a` `x` `X` `H` `L` then act on all marked cards. `esc` clears the marks |
-| `ctrl+↑` / `ctrl+↓` | Move the card one place up / down (not in a sorted view) |
+| `ctrl+↑` / `ctrl+↓` (or `alt+↑` / `alt+↓`) | Move the card one place up / down (not in a sorted view) |
 | `u` | Undo the last Status or field change, added card or new draft |
 | `b` | Switch between list and column board |
 | `h` `j` `k` `l` | In the column board: change column / card |

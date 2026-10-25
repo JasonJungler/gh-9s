@@ -34,7 +34,7 @@ const archiveItemMutation = `mutation($project:ID!,$item:ID!){archiveProjectV2It
 
 const addDraftMutation = `mutation($project:ID!,$title:String!){addProjectV2DraftIssue(input:{projectId:$project,title:$title}){projectItem{id}}}`
 
-const editDraftMutation = `mutation($draft:ID!,$title:String!,$body:String!){updateProjectV2DraftIssue(input:{draftIssueId:$draft,title:$title,body:$body}){draftIssue{id}}}`
+const editDraftMutation = `mutation($draft:ID!,$title:String,$body:String){updateProjectV2DraftIssue(input:{draftIssueId:$draft,title:$title,body:$body}){draftIssue{id}}}`
 
 const setFieldMutation = `mutation($project:ID!,$item:ID!,$field:ID!,$value:ProjectV2FieldValue!){updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:$value}){projectV2Item{id}}}`
 
@@ -46,9 +46,12 @@ const moveItemMutation = `mutation($project:ID!,$item:ID!,$after:ID){updateProje
 var projectInput = RunInput
 
 // graphqlBody builds the request body; variables travel as JSON, never inside the query text.
-func graphqlBody(query string, vars map[string]any) []byte {
-	b, _ := json.Marshal(map[string]any{"query": query, "variables": vars})
-	return b
+func graphqlBody(query string, vars map[string]any) ([]byte, error) {
+	b, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	if err != nil {
+		return nil, fmt.Errorf("the request could not be built: %w", err)
+	}
+	return b, nil
 }
 
 func inputArgs(host string) []string { return append(graphqlArgs(host), "--input", "-") }
@@ -63,7 +66,17 @@ func writeErr(host string, err error) error {
 
 // runWrite sends one request and returns its data; GraphQL errors become errors.
 func runWrite(host, query string, vars map[string]any) (json.RawMessage, error) {
-	out, err := projectInput(graphqlBody(query, vars), inputArgs(host)...)
+	return runWriteMode(host, query, vars, false)
+}
+
+// runWriteMode is runWrite; with partial set, data that came back with errors is used (a lookup that SSO
+// blocked in part still answers for the rest).
+func runWriteMode(host, query string, vars map[string]any, partial bool) (json.RawMessage, error) {
+	body, berr := graphqlBody(query, vars)
+	if berr != nil {
+		return nil, berr
+	}
+	out, err := projectInput(body, inputArgs(host)...)
 	if err != nil && len(out) == 0 {
 		return nil, writeErr(host, err)
 	}
@@ -74,7 +87,7 @@ func runWrite(host, query string, vars map[string]any) (json.RawMessage, error) 
 	if jerr := json.Unmarshal(out, &resp); jerr != nil {
 		return nil, jerr
 	}
-	if len(resp.Errors) > 0 {
+	if len(resp.Errors) > 0 && !(partial && len(resp.Data) > 0 && string(resp.Data) != "null") {
 		return nil, writeErr(host, errors.New(CleanText(resp.Errors[0].Message)))
 	}
 	if len(resp.Data) == 0 || string(resp.Data) == "null" {
@@ -104,7 +117,7 @@ type Content struct {
 
 // ResolveContent finds an issue or PR by repo and number, to add it to a Project.
 func ResolveContent(host, owner, name string, number int) (Content, error) {
-	data, err := runWrite(host, contentQuery, map[string]any{"owner": owner, "name": name, "number": number})
+	data, err := runWriteMode(host, contentQuery, map[string]any{"owner": owner, "name": name, "number": number}, true)
 	if err != nil {
 		return Content{}, err
 	}
@@ -235,15 +248,25 @@ func AddProjectDraft(host, projectID, title string) (string, error) {
 	return d.Add.Item.ID, nil
 }
 
-// EditProjectDraft changes a draft card's title and text.
-func EditProjectDraft(host, draftID, title, body string) error {
+// EditProjectDraft changes a draft card's title and/or text; a nil part is left as it is on GitHub.
+func EditProjectDraft(host, draftID string, title, body *string) error {
 	if err := need(draftID); err != nil {
 		return err
 	}
-	if strings.TrimSpace(title) == "" {
-		return errors.New("a draft needs a title")
+	vars := map[string]any{"draft": draftID}
+	if title != nil {
+		if strings.TrimSpace(*title) == "" {
+			return errors.New("a draft needs a title")
+		}
+		vars["title"] = *title
 	}
-	_, err := runWrite(host, editDraftMutation, map[string]any{"draft": draftID, "title": title, "body": body})
+	if body != nil {
+		vars["body"] = *body
+	}
+	if title == nil && body == nil {
+		return errors.New("nothing to change")
+	}
+	_, err := runWrite(host, editDraftMutation, vars)
 	return err
 }
 

@@ -3,6 +3,7 @@ package ghcli
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 )
@@ -181,10 +182,11 @@ func TestDraftCreateAndEdit(t *testing.T) {
 		t.Error("empty title accepted")
 	}
 	captured(t, `{"data":{"updateProjectV2DraftIssue":{"draftIssue":{"id":"D"}}}}`)
-	if err := EditProjectDraft("", "D", "t", "b"); err != nil {
+	ts, bs, empty := "t", "b", "  "
+	if err := EditProjectDraft("", "D", &ts, &bs); err != nil {
 		t.Error(err)
 	}
-	if EditProjectDraft("", "", "t", "b") == nil || EditProjectDraft("", "D", "", "b") == nil {
+	if EditProjectDraft("", "", &ts, &bs) == nil || EditProjectDraft("", "D", &empty, &bs) == nil || EditProjectDraft("", "D", nil, nil) == nil {
 		t.Error("bad edit accepted")
 	}
 }
@@ -257,5 +259,28 @@ func TestFieldsAndDraftIdsAreRead(t *testing.T) {
 	it := p.Items[0]
 	if it.DraftID != "DI" || it.Values["F1"] != "High" || it.Values["F4"] != "3" || it.Values["F5"] != "2026-11-05" || strings.ContainsRune(it.Values["F3"], 0x1b) {
 		t.Errorf("item %+v", it)
+	}
+}
+
+func TestGraphqlBodyRefusesNumbersJSONCannotCarry(t *testing.T) {
+	if _, err := graphqlBody("q", map[string]any{"n": math.NaN()}); err == nil {
+		t.Error("NaN accepted")
+	}
+	if _, err := graphqlBody("q", map[string]any{"n": math.Inf(1)}); err == nil {
+		t.Error("Inf accepted")
+	}
+	if _, err := graphqlBody("q", map[string]any{"n": 2.5}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestEditDraftSendsOnlyWhatChanged(t *testing.T) {
+	body := captured(t, `{"data":{"updateProjectV2DraftIssue":{"draftIssue":{"id":"D"}}}}`)
+	ts := "new"
+	if err := EditProjectDraft("", "D", &ts, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(*body), `"title":"new"`) || strings.Contains(string(*body), `"body"`) {
+		t.Errorf("body %s", *body)
 	}
 }

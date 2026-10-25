@@ -364,9 +364,17 @@ func (m model) startUndo() (model, tea.Cmd) {
 		m.status = styDim.Render("answer the question first")
 		return m, nil
 	}
+	if m.loading {
+		m.status = styDim.Render("still refreshing the board; try again in a moment")
+		return m, nil
+	}
 	r := m.undo
 	if r == nil || r.key != projectKey(m.board) {
-		m.status = styDim.Render("nothing to undo here (only a Status or field change, an added card or a new draft can be)")
+		if m.undoWhy != "" && m.undoKey == projectKey(m.board) {
+			m.status = styDim.Render(m.undoWhy)
+		} else {
+			m.status = styDim.Render("nothing to undo here (only a Status or field change, an added card or a new draft can be)")
+		}
 		return m, nil
 	}
 	if r.kind != "created" {
@@ -409,8 +417,7 @@ func init() {
 			return m, nil
 		}
 		u := op.undoRec
-		m.undo = nil // an undo is not itself undone
-		return m.startWrite("undone: "+u.what, func() error {
+		return m.startWrite("undone: "+u.what, func() error { // the record is dropped when it worked (onBoardWriteDone)
 			switch u.kind {
 			case "status":
 				if u.prev == nil {

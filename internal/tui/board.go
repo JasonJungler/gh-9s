@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/icons"
@@ -297,7 +298,7 @@ func (m model) rebuildBoard(st boardState, keepID string) model {
 		}
 	}
 	if f := st.roadmapField(); f != "" { // a roadmap lists its date where the others list the age
-		m.tbl.cols[5] = strings.ToUpper(trunc(f, 12))
+		m.tbl.cols[5] = strings.ToUpper(ansi.Truncate(f, 12, "…"))
 		for i, it := range tabs[st.tab].items {
 			d := st.data.Items[it].Dates[f]
 			if d == "" {
@@ -437,9 +438,9 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 			return m.clearMarks(), nil, true
 		}
 		return m, nil, false
-	case "ctrl+up", "ctrl+down":
+	case "ctrl+up", "ctrl+down", "alt+up", "alt+down": // alt for terminals where the system keeps ctrl+arrows
 		delta := 1
-		if k.String() == "ctrl+up" {
+		if k.String() == "ctrl+up" || k.String() == "alt+up" {
 			delta = -1
 		}
 		next, cmd := m.startReorder(delta)
@@ -464,7 +465,7 @@ func boardKeyHandler(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		return next, cmd, true
 	case "H", "L":
 		if !st.colsActive(m) {
-			m.status = styDim.Render("H and L move a card between columns; b shows the columns, s picks a Status")
+			m.status = styDim.Render("H and L move a card between columns in the column board (b, needs room); s picks a Status")
 			return m, nil, true
 		}
 		delta := 1
@@ -551,8 +552,6 @@ func (m model) openBoardItem(st boardState, id string) (model, tea.Cmd, bool) {
 	if !found || owner == "" || name == "" {
 		return m, nil, true
 	}
-	st.back = id
-	m = m.withScreenData(viewBoard, st)
 	host := m.board.Host
 	if host == "github.com" {
 		host = ""
@@ -562,6 +561,8 @@ func (m model) openBoardItem(st boardState, id string) (model, tea.Cmd, bool) {
 		m.status = styErr.Render("✗ this card names a repo gh-9s will not use")
 		return m, nil, true
 	}
+	st.back = id
+	m = m.withScreenData(viewBoard, st)
 	m.target = ref
 	m.prTarget = m.target
 	if it.Type == "PullRequest" {

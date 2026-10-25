@@ -104,7 +104,9 @@ func init() {
 		m.status = styDim.Render("working…")
 		return m, func() tea.Msg {
 			// each call has its own timeout, so the run stops at the first one that does not answer
-			err := runWithin(writeTimeout*time.Duration(len(op.add)+len(op.remove)+2), func() error {
+			done := 0
+			total := len(op.add) + len(op.remove)
+			err := runWithin(writeTimeout*time.Duration(total+2), func() error {
 				for _, id := range op.add {
 					if err := runWithin(writeTimeout, func() error {
 						_, err := addProjectItem(op.host, id, op.content.ID)
@@ -112,20 +114,29 @@ func init() {
 					}); err != nil {
 						return fmt.Errorf("adding to %s: %w", op.names[id], err)
 					}
+					done++
 				}
 				for _, ms := range op.remove {
 					if err := runWithin(writeTimeout, func() error { return removeFromProject(op.host, ms.ProjectID, ms.ItemID) }); err != nil {
 						return fmt.Errorf("removing from %s: %w", ms.Title, err)
 					}
+					done++
 				}
 				return nil
 			})
+			if err != nil && done > 0 {
+				err = fmt.Errorf("%d of %d changes made, then: %w", done, total, err)
+			}
 			text := "updated the Projects of " + op.label
 			if err == nil && len(op.add) > 0 {
 				text += "; set the Status of a new card from its board"
 			}
 			if errors.Is(err, ghcli.ErrNeedsProjectScope) {
-				err = errors.New(ghcli.WriteScopeHint(op.host))
+				hint := ghcli.WriteScopeHint(op.host)
+				if done > 0 {
+					hint = fmt.Sprintf("%d of %d changes made, then: %s", done, total, hint)
+				}
+				err = errors.New(hint)
 			}
 			return projDoneMsg{op, text, err}
 		}
@@ -136,6 +147,10 @@ func init() {
 func (m model) startProjectAssign(number string) (model, tea.Cmd) {
 	if m.projOp != nil && m.projOp.confirming {
 		m.status = styDim.Render("answer the question first")
+		return m, nil
+	}
+	if m.projBusy {
+		m.status = styDim.Render("still working on the last change")
 		return m, nil
 	}
 	n, err := strconv.Atoi(number)
@@ -215,11 +230,25 @@ func (m model) onProjLoaded(msg projLoadedMsg) (model, tea.Cmd) {
 	}
 	slices.SortStableFunc(cs, func(a, b choice) int { return strings.Compare(strings.ToLower(a.label), strings.ToLower(b.label)) })
 	m.status = ""
-	return m.withDialog(newChoiceDialog("proj.assign", "Projects of "+op.label+" — "+op.content.Title, cs, true, checked)), nil
+	title := "Projects of " + op.label + " — " + op.content.Title
+	if len(op.content.Memberships) >= 50 || len(msg.cands) >= 50 {
+		title += " (the list may be incomplete)"
+	}
+	return m.withDialog(newChoiceDialog("proj.assign", title, cs, true, checked)), nil
 }
 
 func (m model) onProjDone(msg projDoneMsg) (model, tea.Cmd) {
 	m.projBusy = false
+	if st, ok := m.screenData(viewBoard).(boardState); ok && st.data.ID != "" { // a board of a Project that was changed is read again
+		changed := slices.Contains(msg.op.add, st.data.ID)
+		for _, ms := range msg.op.remove {
+			changed = changed || ms.ProjectID == st.data.ID
+		}
+		if changed {
+			st.force = true
+			m = m.withScreenData(viewBoard, st)
+		}
+	}
 	if msg.err != nil {
 		m.status = styErr.Render("✗ " + ghcli.CleanText(msg.err.Error()) + " (open the Project to see what it looks like now)")
 	} else {
