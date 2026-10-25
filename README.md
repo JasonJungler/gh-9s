@@ -5,6 +5,7 @@ A [k9s](https://k9scli.io)-style terminal UI for GitHub, as a `gh` extension.
 - **Actions:** trigger workflows, watch runs as a live job graph, keep favorite workflows one keypress away.
 - **Pull requests:** list and filter, see checks (and jump into the Actions run behind a check), read the diff, comment, review and merge.
 - **Issues:** list and filter, read, comment, close and reopen, manage labels and assignees.
+- **Discussions:** list by category, read with the replies under each comment, comment and reply.
 - **Projects:** a board per Status column, move cards, mark several and change them at once, undo (every change asks first).
 - **Repos:** an interactive picker to move between any repo you can reach.
 
@@ -50,6 +51,7 @@ Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release
 | `2` / `:wf` | workflows; your favorites are pinned on top with a ★ |
 | `3` / `:pr` | open pull requests (`*` marks the current branch); `enter` opens one |
 | `4` / `:issues` | issues; `enter` opens one |
+| `5` / `:discussions` | discussions, newest activity first (`c` narrows by category); `enter` opens one with its replies, `C` comments, `r` replies to the selected comment (`n`/`N` move over comments) |
 | `P` / `:cpr` | checks of the current branch's PR |
 | `:fav` | favorites in three tabs (`tab`/`shift+tab`/`h`/`l`): **Workflows** from every repo with the latest run's status, pinned **Repos** (`enter` switches to one), pinned **Projects** |
 | `:fav repo [OWNER/NAME]` | pin the current (or the given) repo |

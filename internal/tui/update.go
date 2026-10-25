@@ -90,7 +90,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runActDoneMsg:
 		return m.runActDone(msg)
 	case prActionDoneMsg:
-		m.sendingKey = ""
+		m.sendingKey, m.discBusy = "", false
 		if msg.err != nil {
 			m.status = styErr.Render("✗ " + msg.err.Error())
 			return m, nil

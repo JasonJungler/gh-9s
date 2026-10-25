@@ -81,6 +81,10 @@ def graphql():
             out({"data": {"addProjectV2DraftIssue": {"projectItem": {"id": iid}}}})
         save(s)
         out({"data": {"ok": {}}})
+    if "discussionCategories" in query:
+        out(fx.discussion_list(vars_.get("cat") or next((a[4:] for a in args if a.startswith("cat=")), "")))
+    if "discussion(number" in query:
+        out(fx.discussion())
     if "reviewThreads" in query:
         out(fx.review_threads())
     out({"data": {}})

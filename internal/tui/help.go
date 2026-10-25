@@ -48,6 +48,11 @@ func (m model) helpGroups() []helpGroup {
 		gs = append(gs, helpGroup{"Pull requests", []helpKey{{"j k", "move"}, {"enter", "open the PR"}, {"u", "only mine"}, {"e", "review requested from me"}, {"a", "all"}, {"M", "add to / remove from Projects (asks first)"}, {"f", "pin / unpin this repo"}, {"o", "open in the browser"}}})
 	case viewIssues:
 		gs = append(gs, helpGroup{"Issues", []helpKey{{"j k", "move"}, {"enter", "open the issue"}, {"O C A", "open / closed / all"}, {"u", "assigned to me"}, {"m", "opened by me"}, {"M", "add to / remove from Projects (asks first)"}, {"f", "pin / unpin this repo"}, {"o", "open in the browser"}}})
+	case viewDiscussions:
+		gs = append(gs, helpGroup{"Discussions", []helpKey{{"j k", "move"}, {"enter", "open the discussion"}, {"c", "narrow the list to a category (or all)"}, {"o", "open in the browser"}}})
+	case viewDiscussion:
+		gs = append(gs, helpGroup{"Discussion", []helpKey{{"n N", "select the next / previous comment or reply"}, {"C", "comment (asks first)"}, {"r", "reply in the selected comment's thread (asks first)"}, {"o", "open in the browser"}}})
+		gs = append(gs, helpGroup{"Scroll", helpScroll})
 	case viewBoard:
 		gs = append(gs, helpGroup{"Project board", []helpKey{{"tab l →", "next column (Status)"}, {"shift+tab h ←", "previous column"}, {"j k", "move"}, {"enter", "open the issue or PR (in its own repo)"}, {"s", "change the card's Status (asks first)"}, {"H L", "in columns: move the card to the previous / next column"}, {"a", "change assignees of an issue or PR card"}, {"n", "add an issue or PR to the Project"}, {"x X", "remove the card from the Project / archive it"}, {"space", "mark the card; s x X a and H L then act on all marked cards (esc clears the marks)"}, {"ctrl+up ctrl+down alt+up alt+down", "move the card one place up / down (not in a sorted view)"}, {"u", "undo the last Status or field change, added card or new draft"}, {"N", "new draft card (gets the Status of the column you are in)"}, {"e", "edit a draft card's title and text"}, {"v", "change another field of the card (single select, iteration, text, number, date)"}, {"b", "columns (all Status columns side by side) / list"}, {"h j k l", "in columns: change column / card"}, {"] [", "next / previous saved view of the Project"}, {"f", "pin / unpin this Project"}, {"o", "open in the browser (a draft opens the Project)"}, {"R", "refresh (at most once in a while)"}}})
 	case viewInbox:
@@ -82,7 +87,7 @@ func (m model) helpGroups() []helpGroup {
 	if m.previewShown() {
 		gs = append(gs, helpGroup{"Preview pane", []helpKey{{"J K", "scroll the pane"}, {"p", "hide / show it for this run"}}})
 	}
-	gs = append(gs, helpGroup{"Everywhere", []helpKey{{"1 2 3 4 0", "runs / workflows / pulls / issues / inbox"}, {":", "command bar (runs, pulls, issues, inbox, repo, set, settings, fav, cpr, icons, quit)"},
+	gs = append(gs, helpGroup{"Everywhere", []helpKey{{"1 2 3 4 5 0", "runs / workflows / pulls / issues / discussions / inbox"}, {":", "command bar (runs, pulls, issues, discussions, inbox, repo, set, settings, fav, cpr, icons, quit)"},
 		{"/", "filter the list"}, {"P", "the PR of the current branch"}, {"R", "refresh"}, {"esc", "back"}, {"?", "this help"}, {"q ctrl+c", "quit"}}})
 	return gs
 }

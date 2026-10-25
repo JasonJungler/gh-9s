@@ -9,7 +9,7 @@ Press `?` on any screen to see its keys inside gh-9s. This page lists them all.
 
 | Key | Action |
 |---|---|
-| `1` `2` `3` `4` `0` | Runs, workflows, pulls, issues, inbox |
+| `1` `2` `3` `4` `5` `0` | Runs, workflows, pulls, issues, discussions, inbox |
 | `:` | Command bar |
 | `/` | Filter the list |
 | `P` | The PR of the current branch |
@@ -168,6 +168,23 @@ In the file tree:
 | `s` | Assignees |
 | `tab` / `enter` | Select an image / show it |
 | `o` | Open |
+
+## Discussions (list)
+
+| Key | Action |
+|---|---|
+| `enter` | Open the discussion |
+| `c` | Narrow to a category (or all) |
+| `o` | Open in the browser |
+
+## Discussion (detail)
+
+| Key | Action |
+|---|---|
+| `n` / `N` | Select the next / previous comment or reply |
+| `C` | Comment (asks first) |
+| `r` | Reply in the selected comment's thread (asks first) |
+| `o` | Open in the browser |
 
 ## Inbox
 

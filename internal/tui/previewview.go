@@ -152,6 +152,9 @@ func (m model) previewPaneLines(width int) []string {
 	if lines, ok := m.draftLines(width); ok {
 		return lines
 	}
+	if lines, ok := m.discPreviewLines(width); ok {
+		return lines
+	}
 	st := m.preview
 	if st == nil || !st.has {
 		return nil
@@ -230,6 +233,13 @@ func (m model) draftLines(width int) ([]string, bool) {
 
 // draftCardID is the id of the selected card when it is a draft on a board, else "".
 func (m model) draftCardID() string {
+	if m.view == viewDiscussions && m.previewShown() { // a discussion's pane has no fetch either
+		if _, ok := m.discPreviewLines(10); ok {
+			r, _ := m.selected()
+			return "discussion " + r.id
+		}
+		return ""
+	}
 	if m.view != viewBoard || !m.previewShown() {
 		return ""
 	}

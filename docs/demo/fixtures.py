@@ -312,3 +312,40 @@ def job_log():
         "Error: Process completed with exit code 1.",
     ]
     return "".join("test\tRun go test\t" + ts % (14, i * 3) + " " + l + "\n" for i, l in enumerate(lines))
+
+
+# ---- Discussions -------------------------------------------------------------------------------------------------
+
+CATS = [("DIC_qa", "Q&A", True), ("DIC_ideas", "Ideas", False), ("DIC_general", "General", False)]
+DISCUSSIONS = [
+    (42, "How do I retry a failed sync?", "Q&A", "ann", True, False, False, 3, dict(hours=2), "I run `acme sync` and it stops on the first timeout.\n\nIs there a way to retry?"),
+    (41, "Dark theme for the settings page", "Ideas", "leo", False, False, False, 5, dict(hours=9), "It would be easier on the eyes at night."),
+    (39, "Release notes for 2.4", "General", "mira", False, True, False, 0, dict(days=2), "Draft notes are in the wiki."),
+    (37, "Sync worker memory use", "Q&A", "noor", False, False, False, 2, dict(days=3), "Memory grows by 5 MB per hour. Anyone seen this?"),
+]
+
+
+def discussion_list(cat_id):
+    nodes = []
+    for (n, t, c, a, ans, closed, locked, cm, when, body) in DISCUSSIONS:
+        if cat_id and dict((i, nm) for i, nm, _ in CATS).get(cat_id) != c:
+            continue
+        nodes.append({"id": "D_%d" % n, "number": n, "title": t, "body": body, "url": URL + "/discussions/%d" % n, "updatedAt": ago(**when),
+                      "closed": closed, "locked": locked, "isAnswered": ans, "author": user(a), "category": {"name": c}, "comments": {"totalCount": cm}})
+    return {"data": {"repository": {"hasDiscussionsEnabled": True,
+                                    "discussionCategories": {"nodes": [{"id": i, "name": n, "isAnswerable": q} for i, n, q in CATS]},
+                                    "discussions": {"totalCount": len(nodes), "nodes": nodes}}}}
+
+
+def discussion():
+    d = DISCUSSIONS[0]
+    return {"data": {"repository": {"hasDiscussionsEnabled": True, "discussion": {
+        "id": "D_42", "number": 42, "title": d[1], "body": d[9], "url": URL + "/discussions/42", "closed": False, "locked": False, "isAnswered": True,
+        "createdAt": ago(hours=5), "author": user("ann"), "category": {"name": "Q&A"},
+        "comments": {"totalCount": 2, "nodes": [
+            {"id": "K1", "body": "Wrap the call in a loop with a backoff, see #233.", "createdAt": ago(hours=4), "isAnswer": True, "author": user("mira"),
+             "replies": {"totalCount": 2, "nodes": [
+                 {"id": "R1", "body": "That worked, thank you!", "createdAt": ago(hours=3), "author": user("ann")},
+                 {"id": "R2", "body": "Glad it did. The fix ships in 2.5.", "createdAt": ago(hours=2), "author": user("mira")}]}},
+            {"id": "K2", "body": "You can also set `SYNC_RETRIES=5`.", "createdAt": ago(hours=1), "isAnswer": False, "author": user("noor"),
+             "replies": {"totalCount": 0, "nodes": []}}]}}}}}

@@ -35,6 +35,8 @@ const (
 	viewInbox
 	viewSettings
 	viewBoard
+	viewDiscussions
+	viewDiscussion
 )
 
 var viewNames = map[viewKind]string{
@@ -71,6 +73,10 @@ type model struct {
 	pr           string            // the PR shown (checks, detail); "" = the current branch's PR
 	issueFilter  ghcli.IssueFilter // issue list filter (zero value = open issues)
 	issue        string            // the issue shown
+	discCat      string            // the discussion category the list is narrowed to ("" = all): its id
+	discCatName  string            // and its name, for the title
+	disc         string            // the discussion shown
+	discBusy     bool              // a discussion comment is on its way; one at a time
 	prFilter     ghcli.PRFilter    // PR list filter
 
 	mode                          inputMode

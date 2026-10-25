@@ -48,7 +48,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen, m.helpTop = true, 0
 		return m, nil
 	}
-	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox || m.view == viewBoard) {
+	if k.String() == "p" && (m.view == viewPRs || m.view == viewIssues || m.view == viewInbox || m.view == viewBoard || m.view == viewDiscussions) {
 		if m.view == viewBoard && m.boardSt().colsActive(m) {
 			m.status = styDim.Render("the preview pane is not shown in columns; b goes back to the list")
 			return m, nil
@@ -127,6 +127,8 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.goTop(viewPRs)
 	case "4":
 		return m.goTop(viewIssues)
+	case "5":
+		return m.goTop(viewDiscussions)
 	case "P":
 		return m.currentPR()
 	case "R", "ctrl+r":
@@ -331,6 +333,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m.goTop(viewPRs)
 	case "issues", "issue", "is":
 		return m.goTop(viewIssues)
+	case "discussions", "discussion", "disc":
+		return m.goTop(viewDiscussions)
 	case "inbox", "in":
 		return m.goTop(viewInbox)
 	case "icons":

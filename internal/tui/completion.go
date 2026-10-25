@@ -107,7 +107,7 @@ func (m model) resolveCommand(c string) string {
 func (m model) knownCommand(c string) bool {
 	switch strings.ToLower(strings.TrimSpace(c)) {
 	case "runs", "run", "r", "workflows", "workflow", "wf", "w", "pulls", "pull", "prs", "pr",
-		"issues", "issue", "is", "inbox", "in", "icons", "settings", "set", "fav", "favs", "favorites", "cpr", "checks", "q", "quit", "exit", "repo":
+		"issues", "issue", "is", "discussions", "discussion", "disc", "inbox", "in", "icons", "settings", "set", "fav", "favs", "favorites", "cpr", "checks", "q", "quit", "exit", "repo":
 		return true
 	}
 	if m.favs != nil {

@@ -313,7 +313,7 @@ func TestParseContentRef(t *testing.T) {
 }
 
 func TestWritesLiveOnlyInWriteFiles(t *testing.T) {
-	for _, f := range []string{"board.go", "favprojects.go", "favtabs.go", "../ghcli/project.go"} {
+	for _, f := range []string{"board.go", "favprojects.go", "favtabs.go", "discussions.go", "../ghcli/project.go", "../ghcli/discussions.go"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
