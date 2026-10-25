@@ -105,7 +105,14 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return h(m, msg)
 		}
 		return m, nil
+	case wikiOpenedMsg:
+		return m.wikiOpened(msg)
+	case wikiDoneMsg:
+		return m.wikiDone(msg)
 	case editedMsg:
+		if m.wikiEdit != nil && m.dlg == nil { // the editor a wiki page was opened in
+			return m.wikiEdited(msg)
+		}
 		if m.dlg != nil && m.dlg.kind == dialogText {
 			d := *m.dlg
 			if msg.err != nil {

@@ -12,6 +12,7 @@ Type `:` to open the command bar. Commands can be typed in full or with any of t
 | `:pulls` | `:pr`, `:prs` | Open pull requests |
 | `:issues` | `:is` | Issues |
 | `:discussions` | `:disc` | Discussions |
+| `:wiki` | | The repository's wiki pages |
 | `:inbox` | `:in` | The inbox |
 | `:cpr` | `:checks` | Checks of the current branch's PR |
 | `:fav` | `:favs`, `:favorites` | Favorites (Workflows, Repos and Projects tabs) |

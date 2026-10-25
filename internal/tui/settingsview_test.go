@@ -212,7 +212,7 @@ func TestSettingsScrollAndFitANarrowTerminal(t *testing.T) {
 }
 
 func TestReservedWordsCannotBeFavoriteAliases(t *testing.T) {
-	for _, w := range []string{"set", "settings", "inbox", "in"} {
+	for _, w := range []string{"set", "settings", "inbox", "in", "wiki", "disc", "discussions"} {
 		if !favorites.IsReserved(w) {
 			t.Errorf("%q must be reserved: it is a command", w)
 		}

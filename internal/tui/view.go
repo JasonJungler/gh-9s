@@ -108,6 +108,9 @@ func (m model) View() string {
 	if m.view == viewDiscussion {
 		title += " discussion=#" + m.disc
 	}
+	if m.view == viewWikiPage {
+		title += " page=" + ghcli.WikiTitle(m.wikiPage)
+	}
 	if m.view == viewBoard {
 		title = " gh9s  <board>  " + m.boardTitle()
 	}

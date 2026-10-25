@@ -59,13 +59,14 @@ func (m *model) switchRepo(ref ghcli.RepoRef) tea.Cmd {
 	m.base, m.target = ref, ref
 	m.back, m.wfID, m.wfName, m.pr = nil, "", "", ""
 	m.discCat, m.discCatName, m.disc = "", "", "" // a category id belongs to its repo
+	m.wikiPage, m.wikiTrail, m.wikiSel = "", nil, ""
 	m.runID, m.graph, m.gsel, m.expanded, m.runStatus, m.runMeta = "", graph.Graph{}, 0, nil, "", ghcli.RunMeta{}
 	v := m.view
 	if v == viewFavs && m.favTab != favTabWorkflows {
 		v = viewRuns // pinned repos and Projects are not about the repo just chosen
 	}
 	switch v {
-	case viewRuns, viewWorkflows, viewPRs, viewFavs, viewIssues, viewDiscussions:
+	case viewRuns, viewWorkflows, viewPRs, viewFavs, viewIssues, viewDiscussions, viewWiki:
 	default:
 		v = viewRuns
 	}

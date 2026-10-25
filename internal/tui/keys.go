@@ -129,6 +129,8 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.goTop(viewIssues)
 	case "5":
 		return m.goTop(viewDiscussions)
+	case "6":
+		return m.goTop(viewWiki)
 	case "P":
 		return m.currentPR()
 	case "R", "ctrl+r":
@@ -335,6 +337,8 @@ func (m model) command(c string) (tea.Model, tea.Cmd) {
 		return m.goTop(viewIssues)
 	case "discussions", "discussion", "disc":
 		return m.goTop(viewDiscussions)
+	case "wiki":
+		return m.goTop(viewWiki)
 	case "inbox", "in":
 		return m.goTop(viewInbox)
 	case "icons":
