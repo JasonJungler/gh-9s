@@ -103,14 +103,18 @@ func init() {
 		m.projBusy = true
 		m.status = styDim.Render("working…")
 		return m, func() tea.Msg {
-			err := runWithin(writeTimeout*time.Duration(len(op.add)+len(op.remove)+1), func() error {
+			// each call has its own timeout, so the run stops at the first one that does not answer
+			err := runWithin(writeTimeout*time.Duration(len(op.add)+len(op.remove)+2), func() error {
 				for _, id := range op.add {
-					if _, err := addProjectItem(op.host, id, op.content.ID); err != nil {
+					if err := runWithin(writeTimeout, func() error {
+						_, err := addProjectItem(op.host, id, op.content.ID)
+						return err
+					}); err != nil {
 						return fmt.Errorf("adding to %s: %w", op.names[id], err)
 					}
 				}
 				for _, ms := range op.remove {
-					if err := removeFromProject(op.host, ms.ProjectID, ms.ItemID); err != nil {
+					if err := runWithin(writeTimeout, func() error { return removeFromProject(op.host, ms.ProjectID, ms.ItemID) }); err != nil {
 						return fmt.Errorf("removing from %s: %w", ms.Title, err)
 					}
 				}
@@ -140,7 +144,7 @@ func (m model) startProjectAssign(number string) (model, tea.Cmd) {
 		m.status = styDim.Render("no issue or pull request selected")
 		return m, nil
 	}
-	host := repo.Host
+	host := hostOrDefault(repo.Host) // one named host for every call, so the ids all come from the same server
 	op := &projOp{host: host, repo: repo, label: displayRef(repo) + "#" + number}
 	m.projOp = op
 	m.status = styDim.Render("loading Projects…")
@@ -150,7 +154,7 @@ func (m model) startProjectAssign(number string) (model, tea.Cmd) {
 			return projLoadedMsg{op: op, err: cerr}
 		}
 		op.content = c
-		cands, lerr := listProjects(hostOrDefault(host))
+		cands, lerr := listProjects(host)
 		return projLoadedMsg{op: op, cands: cands, err: lerr}
 	}
 }

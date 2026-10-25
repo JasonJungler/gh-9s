@@ -3,7 +3,9 @@ package tui
 import (
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -205,4 +207,49 @@ func TestProjectAssignRefusesASecondWriteWhileOneRuns(t *testing.T) {
 	if len(f.added) != 0 || !strings.Contains(ansi.Strip(m.status), "still working") {
 		t.Fatalf("added %v status %q", f.added, m.status)
 	}
+}
+
+func TestProjectAssignUsesOneNamedHostForEveryCall(t *testing.T) {
+	f := installAssign(t)
+	var hosts []string
+	resolveContent = func(h, o, n string, num int) (ghcli.Content, error) {
+		hosts = append(hosts, "resolve:"+h)
+		return f.content, nil
+	}
+	listProjects = func(h string) ([]ghcli.ProjectRef, error) { hosts = append(hosts, "list:"+h); return f.cands, nil }
+	addProjectItem = func(h, p, c string) (string, error) { hosts = append(hosts, "add:"+h); return "x", nil }
+	removeFromProject = func(h, p, it string) error { hosts = append(hosts, "remove:"+h); return nil }
+	m := assignModel() // the repo carries no host
+	m, cmd := m.startProjectAssign("7")
+	m = runCmd(m, cmd)
+	m.dlg = nil
+	m, _ = answer(m, "proj.assign", true, "", "PB")
+	m, cmd = answer(m, "proj.assign.ok", true, "")
+	runCmd(m, cmd)
+	want := "resolve:github.com list:github.com add:github.com remove:github.com"
+	if got := strings.Join(hosts, " "); got != want {
+		t.Errorf("hosts %q, want %q", got, want)
+	}
+}
+
+func TestProjectAssignStopsAtTheCallThatDoesNotAnswer(t *testing.T) {
+	old := writeTimeout
+	writeTimeout = 30 * 1e6
+	t.Cleanup(func() { writeTimeout = old })
+	f := installAssign(t)
+	var removed atomic.Int32
+	addProjectItem = func(h, p, c string) (string, error) { time.Sleep(80 * time.Millisecond); return "x", nil } // slower than one call may take
+	removeFromProject = func(h, p, it string) error { removed.Add(1); return nil }
+	m := assignModel()
+	m, cmd := m.startProjectAssign("7")
+	m = runCmd(m, cmd)
+	m.dlg = nil
+	m, _ = answer(m, "proj.assign", true, "", "PB") // add PB, remove PA
+	m, cmd = answer(m, "proj.assign.ok", true, "")
+	m = runCmd(m, cmd)
+	time.Sleep(200 * time.Millisecond) // a run that went on would have removed by now
+	if removed.Load() != 0 || !strings.Contains(ansi.Strip(m.status), "no answer") || m.projBusy {
+		t.Fatalf("removed %d status %q busy %v", removed.Load(), m.status, m.projBusy)
+	}
+	_ = f
 }
