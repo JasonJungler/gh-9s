@@ -93,6 +93,19 @@ func TestCleanContextKeepsTheLineBreaksOfWindowsEditors(t *testing.T) {
 	}
 }
 
+func TestCleanContextDropsTheByteOrderMarkOfWindowsEditors(t *testing.T) {
+	for in, want := range map[string]string{
+		"\ufeffFix it\r\nnow": "Fix it\nnow",
+		"\ufeff\ufeff- fix":   "- fix",
+		"a\ufeffb":            "a\ufeffb", // only a leading mark is an encoding signature
+		"\ufeff \n":           "",
+	} {
+		if got := CleanContext(in); got != want {
+			t.Errorf("CleanContext(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestCleanContextTrimsTrailingWhitespaceOnly(t *testing.T) {
 	if got, want := CleanContext("  indented\n\nbody \t\n\n  \n"), "  indented\n\nbody"; got != want {
 		t.Errorf("got %q, want %q", got, want)

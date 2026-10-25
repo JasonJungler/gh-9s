@@ -496,3 +496,15 @@ func TestEditorExecReportsAFailureToPrepareTheFile(t *testing.T) {
 		t.Errorf("msg = %#v; want the failure in the caller's message", msg)
 	}
 }
+
+func TestAByteOrderMarkFromTheEditorIsNotAnEdit(t *testing.T) {
+	d := onPrompt(t, newLaunchDialog(promptInput()))
+	d = d.promptEdited("\ufeff"+promptInput().Context, nil)
+	if d.promptDone || d.info != "prompt unchanged" {
+		t.Errorf("promptDone = %v, info = %q; want the prompt unchanged", d.promptDone, d.info)
+	}
+	d = d.promptEdited("\ufeffFix it", nil)
+	if got := d.prompt(); got != "Fix it" {
+		t.Errorf("prompt() = %q; want the mark dropped", got)
+	}
+}
