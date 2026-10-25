@@ -3,6 +3,7 @@ package launch
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 )
@@ -69,5 +70,56 @@ func TestBuildContextStripsControlCharacters(t *testing.T) {
 		if !strings.Contains(got, keep) {
 			t.Errorf("context lost %q: %q", keep, got)
 		}
+	}
+}
+
+func TestCleanContextRemovesWhatBuildContextRemoves(t *testing.T) {
+	for in, want := range map[string]string{
+		"a\x1b[201~b":       "a[201~b", // the end of a bracketed paste cannot survive
+		"a\x00b\x7fc\u0085": "abc",
+		"keep\ttabs":        "keep\ttabs",
+		"a\rb":              "ab", // a lone CR would submit in Claude Code
+		"x\x1b[200~y":       "x[200~y",
+	} {
+		if got := CleanContext(in); got != want {
+			t.Errorf("CleanContext(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCleanContextKeepsTheLineBreaksOfWindowsEditors(t *testing.T) {
+	if got, want := CleanContext("one\r\ntwo\r\n\r\nthree\r\n"), "one\ntwo\n\nthree"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestCleanContextTrimsTrailingWhitespaceOnly(t *testing.T) {
+	if got, want := CleanContext("  indented\n\nbody \t\n\n  \n"), "  indented\n\nbody"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	for _, empty := range []string{"", " \n\t\r\n", "\x1b\x00\r"} {
+		if got := CleanContext(empty); got != "" {
+			t.Errorf("CleanContext(%q) = %q, want empty", empty, got)
+		}
+	}
+}
+
+func TestCleanContextTreatsInvalidUTF8LikeBuildContext(t *testing.T) {
+	bad := "caf\xe9 ok"
+	d := ghcli.IssueDetail{Number: 1, Title: "T", URL: "u", Body: bad}
+	if !strings.Contains(BuildContext(d), "caf� ok") {
+		t.Fatalf("BuildContext no longer replaces invalid UTF-8: %q", BuildContext(d))
+	}
+	got := CleanContext(bad)
+	if got != "caf� ok" || !utf8.ValidString(got) {
+		t.Errorf("CleanContext(%q) = %q, want the replacement character", bad, got)
+	}
+}
+
+func TestCleanContextIsIdempotentOnAGeneratedPrompt(t *testing.T) {
+	d := ghcli.IssueDetail{Number: 7, Title: "T\x1b", URL: "u", Body: "b\r\nc", Comments: []ghcli.Comment{{Author: "a", Body: "x"}}}
+	gen := BuildContext(d)
+	if got := CleanContext(gen); got != strings.TrimRight(gen, "\n") {
+		t.Errorf("CleanContext(generated) = %q, want the generated text without its final newline", got)
 	}
 }

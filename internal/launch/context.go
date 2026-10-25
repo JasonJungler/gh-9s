@@ -3,6 +3,7 @@ package launch
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 )
@@ -40,6 +41,16 @@ func BuildContext(d ghcli.IssueDetail) string {
 		}
 	}
 	return stripControl(b.String())
+}
+
+// CleanContext makes text that did not come from BuildContext (a prompt the user edited) as safe to send as
+// generated text: CRLF becomes LF first, so an editor that writes Windows line breaks keeps its lines, then
+// control characters other than newline and tab are removed (stripControl: a lone CR, ESC and so the end of a
+// bracketed paste can never reach the agent's terminal), invalid UTF-8 becomes the replacement character, and
+// trailing whitespace and newlines are trimmed. A result of "" means there is nothing to send.
+func CleanContext(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.TrimRightFunc(stripControl(s), unicode.IsSpace)
 }
 
 // stripControl removes control characters except newline and tab: runes below

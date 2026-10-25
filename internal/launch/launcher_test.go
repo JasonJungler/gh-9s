@@ -486,3 +486,24 @@ func TestArgvSize(t *testing.T) {
 		}
 	}
 }
+
+// An edited prompt is an ordinary Request.Context: the same ceiling refuses it before anything runs.
+func TestLauncherRefusesAnEditedPromptOverTheCeiling(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	withGOOS(t, "linux")
+	max := argvCeiling("linux")
+	for _, target := range []Target{TargetOrca, TargetHerdr} {
+		rec := &recorder{reply: herdrReply}
+		r := orcaReq()
+		r.Target, r.Agent, r.Place = target, claude, PlacePane
+		r.Context = CleanContext(strings.Repeat("edited line\r\n", max/5)) // what comes back from the editor
+		if len(r.Context) <= max {
+			t.Fatalf("test text is %d bytes, want more than %d", len(r.Context), max)
+		}
+		_, err := (Launcher{Run: rec.run, Getenv: herdrEnv, Fetch: func(_, b string) (string, string, error) { return b, "", nil }}).Do(r)
+		var se *StepError
+		if !errors.As(err, &se) || se.Step != StepCreate || len(rec.calls) != 0 {
+			t.Errorf("%s: err = %v, calls = %+v; want a refusal at create before any call", target, err, rec.calls)
+		}
+	}
+}
