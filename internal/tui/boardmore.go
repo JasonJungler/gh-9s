@@ -27,6 +27,33 @@ func (st boardState) marked() []ghcli.ProjectItem {
 	return out
 }
 
+// markedHere are the marked cards the user can see now: those of the list or tab on screen, or of any column.
+// Cards marked on another tab are not acted on.
+func (m model) markedHere() []ghcli.ProjectItem {
+	st := m.boardSt()
+	shown := map[string]bool{}
+	if st.colsActive(m) {
+		for _, c := range m.boardColumns(st) {
+			for _, i := range c.cards {
+				shown[st.data.Items[i].ID] = true
+			}
+		}
+	} else {
+		for _, r := range m.visible() {
+			if it, ok := boardItem(st.data, r.id); ok {
+				shown[it.ID] = true
+			}
+		}
+	}
+	var out []ghcli.ProjectItem
+	for _, it := range st.marked() {
+		if shown[it.ID] {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // withMarks returns st with the mark of id switched; the map is copied, never changed in place.
 func (st boardState) withMarks(id string, on bool) boardState {
 	marks := make(map[string]bool, len(st.marks)+1)
@@ -96,7 +123,7 @@ func cards(n int) string {
 func bulkRun(items []ghcli.ProjectItem, do func(it ghcli.ProjectItem) error) func() error {
 	return func() error {
 		for i, it := range items {
-			if err := do(it); err != nil {
+			if err := runWithin(writeTimeout, func() error { return do(it) }); err != nil {
 				return fmt.Errorf("stopped after %d of %d cards: %w", i, len(items), err)
 			}
 		}

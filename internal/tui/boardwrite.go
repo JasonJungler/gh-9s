@@ -92,7 +92,7 @@ func init() {
 			return m, nil
 		}
 		if len(op.bulk) > 0 {
-			return m.startWrite("moved "+cards(len(op.bulk))+" to "+op.optionName, bulkRun(op.bulk, func(it ghcli.ProjectItem) error {
+			return m.startWriteN(len(op.bulk)+1, "moved "+cards(len(op.bulk))+" to "+op.optionName, bulkRun(op.bulk, func(it ghcli.ProjectItem) error {
 				return setProjectStatus(op.host, op.projectID, it.ID, op.statusFld, op.optionID)
 			}))
 		}
@@ -146,7 +146,7 @@ func init() {
 			return m, nil
 		}
 		if len(op.bulk) > 0 {
-			return m.startWrite("assigned "+strings.Join(op.add, ", ")+" on "+cards(len(op.bulk)), bulkAssignRun(op))
+			return m.startWriteN(len(op.bulk)+1, "assigned "+strings.Join(op.add, ", ")+" on "+cards(len(op.bulk)), bulkAssignRun(op))
 		}
 		return m.startWrite("updated assignees on "+displayRef(op.target)+"#"+op.number, func() error {
 			if op.isPR {
@@ -215,6 +215,12 @@ func (m model) dropOp(op *boardOp) model {
 
 // startWrite runs a write unless one is already running.
 func (m model) startWrite(done string, fn func() error) (model, tea.Cmd) {
+	return m.startWriteN(1, done, fn)
+}
+
+// startWriteN is startWrite for a run over n cards: each card has its own timeout inside the run (bulkRun), so
+// the run ends at the first card that does not answer and no write goes on after the screen stopped waiting.
+func (m model) startWriteN(n int, done string, fn func() error) (model, tea.Cmd) {
 	if m.boardBusy {
 		m.undoNext = nil
 		m.status = styDim.Render("still working on the last change")
@@ -224,7 +230,7 @@ func (m model) startWrite(done string, fn func() error) (model, tea.Cmd) {
 	m.status = styDim.Render("working…")
 	key := projectKey(m.board)
 	return m, func() tea.Msg {
-		err := runWithin(writeTimeout, fn)
+		err := runWithin(writeTimeout*time.Duration(n+1), fn)
 		if errors.Is(err, ghcli.ErrNeedsProjectScope) {
 			err = errors.New(ghcli.WriteScopeHint(hostOfKey(key)))
 		}
@@ -305,7 +311,7 @@ func (m model) startStatus() (model, tea.Cmd) {
 		return m, nil
 	}
 	st := m.boardSt()
-	if marked := st.marked(); len(marked) > 0 {
+	if marked := m.markedHere(); len(marked) > 0 {
 		return m.startBulkStatus(marked)
 	}
 	it, ok := m.selectedCard()
@@ -377,7 +383,7 @@ func (m model) moveCardSideways(delta int) (model, tea.Cmd) {
 	}
 	op := m.newOp()
 	op.itemID, op.title, op.card = it.ID, it.Title, &it
-	if marked := st.marked(); len(marked) > 0 {
+	if marked := m.markedHere(); len(marked) > 0 {
 		op.bulk = marked
 	}
 	return m.askStatus(op, name)
@@ -389,7 +395,7 @@ func (m model) startAssign() (model, tea.Cmd) {
 		m.status = styDim.Render("answer the question first")
 		return m, nil
 	}
-	if marked := m.boardSt().marked(); len(marked) > 0 {
+	if marked := m.markedHere(); len(marked) > 0 {
 		return m.startBulkAssign(marked)
 	}
 	it, ok := m.selectedCard()

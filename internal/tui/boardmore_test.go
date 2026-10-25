@@ -305,3 +305,41 @@ func TestRefreshDropsMarksOfCardsThatAreGone(t *testing.T) {
 		t.Errorf("marks %v", marks)
 	}
 }
+
+func TestBulkActsOnlyOnMarkedCardsOfTheTabOnScreen(t *testing.T) {
+	m, cf, _ := cardsBoard(t)
+	m = keyAll(m, " ")          // Fix login marked on All
+	m = keyAll(m, "tab", "tab") // In Progress tab: Add retry only
+	m = keyAll(m, "x")
+	if m.dlg == nil || !strings.Contains(m.dlg.title, "Add retry") || strings.Contains(m.dlg.title, "cards") {
+		t.Fatalf("acted on a card that is not on screen: %+v", m.dlg)
+	}
+	m, cmd := answer(m, "board.remove.ok", true, "")
+	runCmd(m, cmd)
+	if len(cf.log) != 1 || cf.log[0] != "remove it1" {
+		t.Fatalf("log %v", cf.log)
+	}
+}
+
+func TestBulkRunEndsAtTheCardThatDoesNotAnswer(t *testing.T) {
+	old := writeTimeout
+	writeTimeout = 30 * 1e6 // 30ms
+	t.Cleanup(func() { writeTimeout = old })
+	m, _, wf := cardsBoard(t)
+	calls := 0
+	setProjectStatus = func(h, p, it, f, o string) error {
+		calls++
+		wf.status = append(wf.status, it)
+		if calls == 1 {
+			select {} // never answers
+		}
+		return nil
+	}
+	m = keyAll(m, " ", "j", " ", "j", " ", "s")
+	m, _ = answer(m, "board.status", true, "", "Done")
+	m, cmd := answer(m, "board.status.ok", true, "")
+	m = runCmd(m, cmd)
+	if len(wf.status) != 1 || !strings.Contains(ansi.Strip(m.status), "stopped after 0 of 3") {
+		t.Fatalf("writes %v status %q", wf.status, m.status)
+	}
+}

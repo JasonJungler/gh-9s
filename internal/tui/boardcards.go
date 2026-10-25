@@ -27,7 +27,7 @@ func init() {
 			return m, nil
 		}
 		if len(op.bulk) > 0 {
-			return m.startWrite("removed "+cards(len(op.bulk)), bulkRun(op.bulk, func(it ghcli.ProjectItem) error { return removeItem(op.host, op.projectID, it.ID) }))
+			return m.startWriteN(len(op.bulk)+1, "removed "+cards(len(op.bulk)), bulkRun(op.bulk, func(it ghcli.ProjectItem) error { return removeItem(op.host, op.projectID, it.ID) }))
 		}
 		return m.startWrite("removed "+op.title, func() error { return removeItem(op.host, op.projectID, op.itemID) })
 	}
@@ -37,7 +37,7 @@ func init() {
 			return m, nil
 		}
 		if len(op.bulk) > 0 {
-			return m.startWrite("archived "+cards(len(op.bulk)), bulkRun(op.bulk, func(it ghcli.ProjectItem) error { return archiveItem(op.host, op.projectID, it.ID) }))
+			return m.startWriteN(len(op.bulk)+1, "archived "+cards(len(op.bulk)), bulkRun(op.bulk, func(it ghcli.ProjectItem) error { return archiveItem(op.host, op.projectID, it.ID) }))
 		}
 		return m.startWrite("archived "+op.title, func() error { return archiveItem(op.host, op.projectID, op.itemID) })
 	}
@@ -240,7 +240,7 @@ func (m model) startRemoval(archive bool) (model, tea.Cmd) {
 		m.status = styDim.Render("answer the question first")
 		return m, nil
 	}
-	if marked := m.boardSt().marked(); len(marked) > 0 {
+	if marked := m.markedHere(); len(marked) > 0 {
 		return m.startBulkRemoval(marked, archive)
 	}
 	op, it, ok := m.cardOp()
