@@ -38,6 +38,7 @@ export default defineConfig({
 						{ label: 'Reviewing a PR', slug: 'guides/reviewing-prs' },
 						{ label: 'Issues', slug: 'guides/issues' },
 						{ label: 'Discussions', slug: 'guides/discussions' },
+						{ label: 'Wiki', slug: 'guides/wiki' },
 						{ label: 'Inbox', slug: 'guides/inbox' },
 						{ label: 'Repositories', slug: 'guides/repos' },
 						{ label: 'Project boards', slug: 'guides/projects' },

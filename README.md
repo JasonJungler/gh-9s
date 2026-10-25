@@ -6,6 +6,7 @@ A [k9s](https://k9scli.io)-style terminal UI for GitHub, as a `gh` extension.
 - **Pull requests:** list and filter, see checks (and jump into the Actions run behind a check), read the diff, comment, review and merge.
 - **Issues:** list and filter, read, comment, close and reopen, manage labels and assignees.
 - **Discussions:** list by category, read with the replies under each comment, comment and reply.
+- **Wiki:** read pages and follow their links, edit in your `$EDITOR`, add and delete pages (a wiki is a git repo, so each change is a commit).
 - **Projects:** a board per Status column, move cards, mark several and change them at once, undo (every change asks first).
 - **Repos:** an interactive picker to move between any repo you can reach.
 
@@ -47,6 +48,7 @@ You need the [GitHub CLI](https://cli.github.com/) (`gh`), logged in. All GitHub
 | `3` / `:pr` | pull requests; `enter` opens one, `d` the diff, `r` reviews, `m` merges |
 | `4` / `:issues` | issues; `enter` opens one, `C` comments |
 | `5` / `:discussions` | discussions; `c` picks a category, `r` replies to a comment |
+| `6` / `:wiki` | wiki pages; `enter` reads, `e` edits, `n` adds a page, `x` deletes |
 | `0` / `:inbox` | what needs you across all repos and hosts |
 | `:fav` | favorites: workflows, pinned repos and pinned Projects (`enter` opens a board) |
 | `:repo` | repo picker; `:repo OWNER/REPO` switches every view |
@@ -58,7 +60,7 @@ Everywhere: `j`/`k` move, `/` filter, `:` command bar, `esc` back, `R` refresh, 
 
 Full guides and the key reference: **https://murabitob.github.io/gh-9s/**
 
-[Runs and logs](https://murabitob.github.io/gh-9s/guides/runs-and-logs/) · [Job graph](https://murabitob.github.io/gh-9s/guides/job-graph/) · [Pull requests](https://murabitob.github.io/gh-9s/guides/pull-requests/) · [Reviewing a PR](https://murabitob.github.io/gh-9s/guides/reviewing-prs/) · [Issues](https://murabitob.github.io/gh-9s/guides/issues/) · [Discussions](https://murabitob.github.io/gh-9s/guides/discussions/) · [Project boards](https://murabitob.github.io/gh-9s/guides/projects/) · [Inbox](https://murabitob.github.io/gh-9s/guides/inbox/) · [Workflows and favorites](https://murabitob.github.io/gh-9s/guides/workflows/) · [Settings](https://murabitob.github.io/gh-9s/guides/settings/) · [All keys](https://murabitob.github.io/gh-9s/reference/keys/)
+[Runs and logs](https://murabitob.github.io/gh-9s/guides/runs-and-logs/) · [Job graph](https://murabitob.github.io/gh-9s/guides/job-graph/) · [Pull requests](https://murabitob.github.io/gh-9s/guides/pull-requests/) · [Reviewing a PR](https://murabitob.github.io/gh-9s/guides/reviewing-prs/) · [Issues](https://murabitob.github.io/gh-9s/guides/issues/) · [Discussions](https://murabitob.github.io/gh-9s/guides/discussions/) · [Wiki](https://murabitob.github.io/gh-9s/guides/wiki/) · [Project boards](https://murabitob.github.io/gh-9s/guides/projects/) · [Inbox](https://murabitob.github.io/gh-9s/guides/inbox/) · [Workflows and favorites](https://murabitob.github.io/gh-9s/guides/workflows/) · [Settings](https://murabitob.github.io/gh-9s/guides/settings/) · [All keys](https://murabitob.github.io/gh-9s/reference/keys/)
 
 ## Develop
 
@@ -74,7 +76,7 @@ Pushing a `v*` tag publishes precompiled binaries via `.github/workflows/release
 ```
 main.go                 entry point (calls tui.Run)
 internal/
-  ghcli/                the only code that runs `gh` (runs, PRs, issues, discussions, Projects, repos, search)
+  ghcli/                the only code that runs `gh` and `git` (runs, PRs, issues, discussions, wikis, Projects, repos, search)
   tui/                  Bubble Tea model, keys, screens (registered in screen.go), dialogs, and the glue
   workflow/, graph/     workflow YAML and the job dependency graph (pure, no network)
   diff/, markdown/, highlight/, termimg/   diff parser, Markdown renderer, syntax colours, inline images

@@ -9,7 +9,7 @@ Press `?` on any screen to see its keys inside gh-9s. This page lists them all.
 
 | Key | Action |
 |---|---|
-| `1` `2` `3` `4` `5` `0` | Runs, workflows, pulls, issues, discussions, inbox |
+| `1` `2` `3` `4` `5` `6` `0` | Runs, workflows, pulls, issues, discussions, wiki, inbox |
 | `:` | Command bar |
 | `/` | Filter the list |
 | `P` | The PR of the current branch |
@@ -185,6 +185,30 @@ In the file tree:
 | `C` | Comment (asks first) |
 | `r` | Reply in the selected comment's thread (asks first) |
 | `o` | Open in the browser |
+
+## Wiki (list)
+
+| Key | Action |
+|---|---|
+| `enter` | Read the page |
+| `e` | Edit the page in `$EDITOR`, then ask for a commit message |
+| `n` | New page (asks for the title, then opens the editor) |
+| `x` | Delete the page (asks first) |
+| `/` | Filter by title |
+| `o` | Open the page, or the wiki, in the browser |
+| `R` | Update from GitHub |
+
+## Wiki page
+
+| Key | Action |
+|---|---|
+| `tab` / `shift+tab` | Select the next / previous link to another page |
+| `enter` | Follow the selected link |
+| `esc` | Back along the links followed, then to the list |
+| `e` | Edit in `$EDITOR`, then ask for a commit message |
+| `x` | Delete the page (asks first) |
+| `o` | Open in the browser |
+| `R` | Update from GitHub |
 
 ## Inbox
 

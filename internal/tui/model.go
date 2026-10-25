@@ -37,6 +37,8 @@ const (
 	viewBoard
 	viewDiscussions
 	viewDiscussion
+	viewWiki
+	viewWikiPage
 )
 
 var viewNames = map[viewKind]string{
@@ -77,6 +79,11 @@ type model struct {
 	discCatName  string            // and its name, for the title
 	disc         string            // the discussion shown
 	discBusy     bool              // a discussion comment is on its way; one at a time
+	wikiPage     string            // the wiki page file shown
+	wikiTrail    []string          // pages left by following a link, to go back along
+	wikiSel      string            // the page the list stands on again after reading one
+	wikiBusy     bool              // a wiki change is being made (reading, editing, asking, sending); one at a time
+	wikiEdit     *wikiEdit         // the change in progress
 	prFilter     ghcli.PRFilter    // PR list filter
 
 	mode                          inputMode
@@ -268,7 +275,11 @@ func (m model) visible() []row {
 	f := strings.ToLower(m.filter)
 	var out []row
 	for _, r := range m.tbl.rows {
-		if strings.Contains(strings.ToLower(strings.Join(r.cells, " ")), f) {
+		hay := strings.Join(r.cells, " ")
+		if m.view == viewWiki && len(r.cells) > 0 {
+			hay = r.cells[0] // the wiki list filters on titles only
+		}
+		if strings.Contains(strings.ToLower(hay), f) {
 			out = append(out, r)
 		}
 	}
