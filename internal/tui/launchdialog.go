@@ -292,6 +292,11 @@ func (d launchDialog) invalid() string {
 			return "branch is required"
 		}
 	}
+	// orca takes the prompt as an argument to --prompt, and herdr's `agent prompt` as a bare argument; either
+	// could read a leading "-" as an option. herdr paste-only sends text that starts with ESC.
+	if (d.orca() || (d.in.Target == launch.TargetHerdr && !d.in.PasteOnly)) && strings.HasPrefix(d.prompt(), "-") {
+		return "the prompt starts with \"-\", which orca/herdr would read as an option; start it with a word"
+	}
 	return ""
 }
 
@@ -591,9 +596,14 @@ func (d launchDialog) view(width int) string {
 		b.WriteString("\n " + styRun.Render("launching…") + "\n")
 	case d.failure != "":
 		b.WriteString("\n" + styErr.Render(wrapLines(d.failure, width)) + "\n")
-		again := "enter to try again"
+		// on the Prompt row enter opens the editor, so the hint says where enter launches
+		enter := "enter"
+		if d.expanded && d.focus == fPrompt {
+			enter = "move to another row, then enter"
+		}
+		again := enter + " to try again"
 		if d.retryID != "" {
-			again = "enter retries the same launch (it may already be running)"
+			again = enter + " retries the same launch (it may already be running)"
 		}
 		b.WriteString(styDim.Render(wrapLines(again, width)) + "\n")
 	}
@@ -677,12 +687,17 @@ func (d launchDialog) formRows(b *strings.Builder, width int) {
 		case fSplit:
 			val = "‹ " + string(d.in.Split) + " ›"
 		case fPrompt:
-			val = d.promptRow()
+			val = clipTail(d.promptRow(), room)
 			switch {
 			case focused && d.promptDone:
 				note = "enter edits it again in $EDITOR, r restores the generated prompt"
 			case focused:
 				note = "enter edits the whole prompt in $EDITOR (this launch only)"
+			}
+			// the note stays on the row or is left out (the key line below says the same), so it never
+			// wraps back under the labels
+			if room > 0 && ansi.StringWidth(val)+2+ansi.StringWidth(note) > room {
+				note = ""
 			}
 		}
 		fmt.Fprintf(b, "%s%-8s %s", mark, launchFieldName[f], val)

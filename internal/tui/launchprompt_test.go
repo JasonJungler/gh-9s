@@ -508,3 +508,120 @@ func TestAByteOrderMarkFromTheEditorIsNotAnEdit(t *testing.T) {
 		t.Errorf("prompt() = %q; want the mark dropped", got)
 	}
 }
+
+// The Prompt row is one line in its own column: its value is clipped to the room after the label, and the
+// note is left out when it would not fit, so nothing wraps to column 0 under the labels.
+func TestPromptRowStaysOnOneLineInItsColumn(t *testing.T) {
+	cjk := strings.Repeat("修正登入", 30)
+	for _, width := range []int{20, 30, 40, 70, 100, 200} {
+		for name, d := range map[string]launchDialog{
+			"focused": onPrompt(t, newLaunchDialog(promptInput())),
+			"edited":  onPrompt(t, newLaunchDialog(promptInput())).promptEdited(cjk, nil),
+		} {
+			lines := strings.Split(ansi.Strip(d.view(width)), "\n")
+			row := -1
+			for i, l := range lines {
+				if strings.HasPrefix(l, "▸ Prompt") {
+					row = i
+				}
+			}
+			if row < 0 {
+				t.Fatalf("%s/%d: no Prompt row:\n%s", name, width, strings.Join(lines, "\n"))
+			}
+			if w := ansi.StringWidth(lines[row]); w > width {
+				t.Errorf("%s/%d: the row is %d columns: %q", name, width, w, lines[row])
+			}
+			if lines[row+1] != "" {
+				t.Errorf("%s/%d: the row wrapped onto %q", name, width, lines[row+1])
+			}
+		}
+	}
+	// room enough: the note is still shown
+	d := onPrompt(t, newLaunchDialog(promptInput()))
+	if v := ansi.Strip(d.view(200)); !strings.Contains(v, "enter edits the whole prompt in $EDITOR (this launch only)") {
+		t.Errorf("a wide dialog lost the note:\n%s", v)
+	}
+}
+
+// With the focus on the Prompt row, enter opens the editor, so a failed launch must not say that enter
+// tries again.
+func TestFailedLaunchHintDoesNotPromiseEnterRetriesOnThePromptRow(t *testing.T) {
+	failed := &launch.StepError{Step: launch.StepCreate, Err: errors.New("repo_not_found")}
+	d := onPrompt(t, newLaunchDialog(promptInput()).start().failed(failed))
+	v := ansi.Strip(d.view(200))
+	if strings.Contains(v, "\n enter to try again") {
+		t.Errorf("the Prompt row still says enter tries again:\n%s", v)
+	}
+	if !strings.Contains(v, "another row") || !strings.Contains(v, "try again") {
+		t.Errorf("no hint on how to try again from the Prompt row:\n%s", v)
+	}
+	// on another row, or compact, the hint is unchanged
+	other := newLaunchDialog(promptInput()).start().failed(failed)
+	if v := ansi.Strip(other.view(200)); !strings.Contains(v, "enter to try again") {
+		t.Errorf("compact view lost the hint:\n%s", v)
+	}
+	// a lost reply
+	const id = "1700000000000-0123456789abcdef0123456789abcdef"
+	lost := &launch.StepError{Step: launch.StepCreate, Err: &launch.LostReplyError{OperationID: id, Cause: "no reply"}}
+	d = onPrompt(t, newLaunchDialog(promptInput()).start().failed(lost))
+	v = ansi.Strip(d.view(200))
+	if strings.Contains(v, "\n enter retries the same launch") || !strings.Contains(v, "another row") || !strings.Contains(v, "retries the same launch") {
+		t.Errorf("lost reply on the Prompt row:\n%s", v)
+	}
+	other = newLaunchDialog(promptInput()).start().failed(lost)
+	if v := ansi.Strip(other.view(200)); !strings.Contains(v, "enter retries the same launch") {
+		t.Errorf("compact lost-reply view lost the hint:\n%s", v)
+	}
+}
+
+// A prompt that starts with "-" would be read as an option by orca, and by herdr when it is submitted
+// (herdr agent prompt has no "--"). The dialog says so before anything is created.
+func TestDialogRefusesADashPromptWhereTheBackendWould(t *testing.T) {
+	herdr := promptInput()
+	herdr.Target = launch.TargetHerdr
+	herdrPaste := herdr
+	herdrPaste.PasteOnly = true
+	for name, tc := range map[string]struct {
+		in      launchInput
+		refused bool
+	}{
+		"orca":        {orcaInput(), true},
+		"herdr":       {herdr, true},
+		"herdr paste": {herdrPaste, false},
+		"tmux":        {promptInput(), false},
+	} {
+		for _, text := range []string{"- fix X", "--help"} {
+			d := newLaunchDialog(tc.in).promptEdited(text, nil)
+			if !d.promptDone {
+				t.Fatalf("%s: the edit was not taken", name)
+			}
+			d, act := launchKeys(d, "enter")
+			msg := d.invalid()
+			if tc.refused {
+				if act != actNone || !strings.Contains(msg, `the prompt starts with "-"`) || !strings.Contains(d.err, `the prompt starts with "-"`) {
+					t.Errorf("%s %q: act = %v, invalid = %q, err = %q; want a refusal that names the prompt", name, text, act, msg, d.err)
+				}
+				if v := ansi.Strip(d.view(100)); !strings.Contains(v, "start it with a word") {
+					t.Errorf("%s %q: the dialog does not show it:\n%s", name, text, v)
+				}
+			} else if act != actSubmit || msg != "" {
+				t.Errorf("%s %q: act = %v, invalid = %q; want it launched", name, text, act, msg)
+			}
+		}
+	}
+	// a prompt that does not start with "-" is fine anywhere, also with a dash inside
+	d, act := launchKeys(newLaunchDialog(orcaInput()).promptEdited("Fix X\n- and Y", nil), "enter")
+	if act != actSubmit {
+		t.Errorf("act = %v (err %q); want a launch", act, d.err)
+	}
+	// the Where row can bring the target to orca after the edit: it is checked when enter is pressed
+	d = newLaunchDialog(promptInput()).promptEdited("- fix X", nil)
+	if d.invalid() != "" {
+		t.Errorf("tmux: invalid = %q", d.invalid())
+	}
+	d.in.Target = launch.TargetOrca
+	d.in.Base, d.in.Name = "origin/main", "issue-42"
+	if !strings.Contains(d.invalid(), `the prompt starts with "-"`) {
+		t.Errorf("after switching to orca: invalid = %q", d.invalid())
+	}
+}
