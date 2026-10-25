@@ -6,9 +6,9 @@ Enter
 Sleep 2500ms
 
 # the workflows of the repo
-Type "2"
+Type "4"
 Sleep 2s
-Type "1"
+Type "3"
 Sleep 1500ms
 
 # a failed run as a live job graph

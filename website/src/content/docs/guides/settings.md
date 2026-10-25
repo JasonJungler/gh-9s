@@ -32,6 +32,7 @@ If an environment variable overrides a setting, the screen says when your change
 | `preview_width` | `40` | 25 to 60 | Percent of the screen the preview pane takes |
 | `preview_min_columns` | `120` | 80 to 400 | The narrowest terminal that shows the preview pane |
 | `mouse` | `true` | on / off | Scroll with the mouse wheel. See [Interface basics](/gh-9s/guides/interface/#mouse). |
+| `start_view` | `pulls` | `pulls`, `issues`, `runs`, `workflows`, `discussions`, `wiki`, `inbox` | The view `gh 9s` opens on. Outside a git repository with a GitHub remote it opens the inbox instead, whatever this is. |
 | `delete_branch_after_merge` | `false` | on / off | Starting value of the "delete branch?" checkbox in the merge dialog |
 | `launch_target` | `auto` | `auto`, `orca`, `herdr`, `tmux` | Where `a` starts a coding agent for an issue. `auto` uses the environment gh-9s is running in. See [Send an issue to an agent](/gh-9s/guides/send-to-agent/). |
 | `launch_agent` | `claude` | `claude`, `devin` | The coding agent to start. A launch remembers the one it used. |

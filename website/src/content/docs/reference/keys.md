@@ -9,7 +9,7 @@ Press `?` on any screen to see its keys inside gh-9s. This page lists them all.
 
 | Key | Action |
 |---|---|
-| `1` `2` `3` `4` `5` `6` `0` | Runs, workflows, pulls, issues, discussions, wiki, inbox |
+| `1` `2` `3` `4` `5` `6` `0` | Pulls, issues, runs, workflows, discussions, wiki, inbox |
 | `:` | Command bar |
 | `/` | Filter the list |
 | `P` | The PR of the current branch |

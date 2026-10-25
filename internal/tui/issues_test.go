@@ -60,11 +60,11 @@ func issuesLoaded(t *testing.T) model {
 	return pump(m, m.fetch())
 }
 
-func TestFourKeyAndTheIssuesCommandOpenTheList(t *testing.T) {
+func TestTwoKeyAndTheIssuesCommandOpenTheList(t *testing.T) {
 	installIssues(t, fixtureIssue())
 	m := model{view: viewRuns, width: 130, height: 30}
-	if m = keyAll(m, "4"); m.view != viewIssues {
-		t.Errorf("4 -> view %v; want the issue list", m.view)
+	if m = keyAll(m, "2"); m.view != viewIssues {
+		t.Errorf("2 -> view %v; want the issue list", m.view)
 	}
 	m = model{view: viewRuns, width: 130, height: 30}
 	installRepoChecker(t, nil)

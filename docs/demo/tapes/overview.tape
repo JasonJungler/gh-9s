@@ -6,7 +6,7 @@ Enter
 Sleep 2500ms
 
 # the repo's issues, filtered
-Type "4"
+Type "2"
 Sleep 2s
 Type "/"
 Sleep 500ms
@@ -24,7 +24,7 @@ Escape
 Sleep 800ms
 
 # pull requests
-Type "3"
+Type "1"
 Sleep 2500ms
 
 # the keys of this screen

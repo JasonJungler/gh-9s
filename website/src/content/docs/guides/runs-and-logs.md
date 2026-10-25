@@ -3,7 +3,7 @@ title: Runs and logs
 description: Watch, re-run, cancel and read the logs of workflow runs.
 ---
 
-The runs view (`1` or `:runs`) lists workflow runs and refreshes every 5 seconds. Press `enter` on a run to open its [job graph](/gh-9s/guides/job-graph/).
+The runs view (`3` or `:runs`) lists workflow runs and refreshes every 5 seconds. Press `enter` on a run to open its [job graph](/gh-9s/guides/job-graph/).
 
 ## Run actions
 

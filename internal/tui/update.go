@@ -41,6 +41,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case infoMsg:
 		m.repo, m.branch, m.curRepo = msg.repo, msg.branch, msg.cur
+		if m.startPending && msg.cur == (ghcli.RepoRef{}) {
+			cmd := m.switchTo(viewInbox)
+			m.note = "not in a repo with a GitHub remote: showing the inbox. :repo OWNER/REPO picks a repo"
+			return m, cmd
+		}
+		m.startPending = false
 	case triggeredMsg:
 		switch {
 		case msg.runID != "":

@@ -44,10 +44,10 @@ You need the [GitHub CLI](https://cli.github.com/) (`gh`), logged in. All GitHub
 
 | key / command | view |
 |---|---|
-| `1` / `:runs` | workflow runs; `enter` is the job graph, `l` the log |
-| `2` / `:wf` | workflows; `t` triggers one with a form |
-| `3` / `:pr` | pull requests; `enter` opens one, `d` the diff, `r` reviews, `m` merges |
-| `4` / `:issues` | issues; `enter` opens one, `C` comments |
+| `1` / `:pr` | pull requests (where `gh 9s` starts); `enter` opens one, `d` the diff, `r` reviews, `m` merges |
+| `2` / `:issues` | issues; `enter` opens one, `C` comments |
+| `3` / `:runs` | workflow runs; `enter` is the job graph, `l` the log |
+| `4` / `:wf` | workflows; `t` triggers one with a form |
 | `5` / `:discussions` | discussions; `c` picks a category, `r` replies to a comment |
 | `6` / `:wiki` | wiki pages; `enter` reads, `e` edits, `n` adds a page, `x` deletes |
 | `0` / `:inbox` | what needs you across all repos and hosts |
