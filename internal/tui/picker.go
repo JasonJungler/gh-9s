@@ -61,12 +61,14 @@ type pickerRow struct {
 // picker is the repo picker overlay (opened by ":repo" with no argument).
 type picker struct {
 	query   string
-	global  bool // false: repos I have access to; true: all of GitHub
+	global  bool     // false: repos I have access to; true: all of GitHub
+	host    string   // the host listed and searched; "" is gh's own choice
+	hosts   []string // the logged-in hosts shift+tab cycles through
 	sel     int
-	seq     int // bumped on every query change; only the newest search's results are shown
+	seq     int // bumped on every query or host change; only the newest search's results are shown
 	loading bool
 	err     string
-	cache   []ghcli.RepoInfo // repos I have access to, loaded once when the picker opens
+	cache   []ghcli.RepoInfo // repos I have access to, loaded once per host
 	results []ghcli.RepoInfo // results of the newest global search
 	note    string           // e.g. which organisations could not be listed
 }
@@ -76,7 +78,10 @@ type pickerLoadedMsg struct {
 	cache   []ghcli.RepoInfo
 	skipped []string
 	err     error
+	hosts   []string // the logged-in hosts, when they were asked for
 }
+
+type pickerHostsMsg struct{ hosts []string }
 
 type pickerDebounceMsg struct{ seq int }
 
@@ -129,18 +134,76 @@ func (m model) recentList() []ghcli.RepoRef {
 	return m.recents.List()
 }
 
-// openPicker shows the picker and starts loading the repos the user can access.
+// openPicker shows the picker and starts loading the repos the user can access. It opens on the
+// host picked earlier in this session, else on the current repo's host (outside a repo, gh's default).
 func (m *model) openPicker() tea.Cmd {
 	host := m.curTarget().Host
-	if e, ok := m.repoCache[host]; ok && clock().Sub(e.at) < repoCacheTTL {
-		m.picker = &picker{cache: e.list, note: e.note} // fetched recently: no new round of API calls
-		return nil
+	if m.pickerHostSet {
+		host = m.pickerHost
 	}
-	m.picker = &picker{loading: true}
+	if e, ok := m.repoCache[host]; ok && clock().Sub(e.at) < repoCacheTTL {
+		m.picker = &picker{host: host, cache: e.list, note: e.note} // fetched recently: no new round of API calls
+		return loadHostsCmd()
+	}
+	m.picker = &picker{host: host, loading: true}
+	return listCmd(host, true)
+}
+
+// listCmd lists the repos host's user can access; withHosts also asks gh which hosts are logged in
+// (one command, so the picker opens with a single request).
+func listCmd(host string, withHosts bool) tea.Cmd {
 	return func() tea.Msg {
 		l, skipped, err := listRepos(host)
-		return pickerLoadedMsg{host, l, skipped, err}
+		msg := pickerLoadedMsg{host: host, cache: l, skipped: skipped, err: err}
+		if withHosts {
+			msg.hosts = loggedInHosts()
+		}
+		return msg
 	}
+}
+
+func loadHostsCmd() tea.Cmd {
+	return func() tea.Msg { return pickerHostsMsg{loggedInHosts()} }
+}
+
+// loggedInHosts asks gh which hosts are logged in; nil if it cannot say, and shift+tab then has nothing to cycle.
+func loggedInHosts() []string {
+	hosts, err := inboxHosts()
+	if err != nil {
+		return nil
+	}
+	return hosts
+}
+
+// hostName names the host the picker queries; "" is gh's own choice (GH_HOST, else github.com).
+func hostName(h string) string {
+	if h == "" {
+		return "default"
+	}
+	return h
+}
+
+// nextHost is the host after cur in hosts, wrapping around. hosts must not be empty.
+func nextHost(cur string, hosts []string) string {
+	for i, h := range hosts {
+		if normHost(h) == normHost(cur) {
+			return hosts[(i+1)%len(hosts)]
+		}
+	}
+	return hosts[0]
+}
+
+// pickerSwitchHost empties the picker's lists for p.host and loads them: from the repo cache when
+// it is fresh, else from gh. A global query is searched again on the new host.
+func (m model) pickerSwitchHost(p *picker) tea.Cmd {
+	p.cache, p.err, p.note = nil, "", ""
+	search := p.queryChanged()
+	if e, ok := m.repoCache[p.host]; ok && clock().Sub(e.at) < repoCacheTTL {
+		p.cache, p.note, p.loading = e.list, e.note, false
+		return search
+	}
+	p.loading = true
+	return tea.Batch(search, listCmd(p.host, len(p.hosts) == 0))
 }
 
 // queryChanged resets the selection and, for a global search, schedules the debounced request.
@@ -195,6 +258,13 @@ func (m model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p.global = !p.global
 		p.err = ""
 		cmd = p.queryChanged()
+	case tea.KeyShiftTab:
+		if len(p.hosts) < 2 {
+			return m, nil
+		}
+		p.host = nextHost(p.host, p.hosts)
+		m.pickerHost, m.pickerHostSet = p.host, true // remembered for the rest of the session
+		cmd = m.pickerSwitchHost(&p)
 	case tea.KeyBackspace:
 		if _, sz := utf8.DecodeLastRuneInString(p.query); sz > 0 {
 			p.query = p.query[:len(p.query)-sz]
@@ -219,20 +289,31 @@ func (m model) pickerMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p := *m.picker
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case pickerHostsMsg:
+		p.hosts = msg.hosts
 	case pickerLoadedMsg:
+		if msg.err == nil {
+			m.repoCache = withRepoCache(m.repoCache, msg.host, msg.cache, skippedNote(msg.skipped))
+		}
+		if msg.hosts != nil {
+			p.hosts = msg.hosts
+		}
+		if msg.host != p.host {
+			m.picker = &p
+			return m, nil // the user moved to another host meanwhile: cached above, not shown
+		}
 		p.loading = false
 		if msg.err != nil {
-			p.err = msg.err.Error()
+			p.err = hostName(msg.host) + ": " + msg.err.Error()
 		} else {
 			p.cache, p.note = msg.cache, skippedNote(msg.skipped)
-			m.repoCache = withRepoCache(m.repoCache, msg.host, msg.cache, p.note)
 		}
 	case pickerDebounceMsg:
 		if msg.seq != p.seq {
 			return m, nil // typed since: a newer search is coming
 		}
 		p.loading, p.err = true, ""
-		host, q, seq := m.curTarget().Host, strings.TrimSpace(p.query), p.seq
+		host, q, seq := p.host, strings.TrimSpace(p.query), p.seq
 		cmd = func() tea.Msg {
 			items, err := searchRepos(host, q, searchLimit)
 			return pickerResultMsg{seq, items, err}
@@ -243,7 +324,7 @@ func (m model) pickerMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		p.loading = false
 		if msg.err != nil {
-			p.err = msg.err.Error()
+			p.err = hostName(p.host) + ": " + msg.err.Error()
 		} else {
 			p.results, p.err = msg.items, ""
 		}
@@ -259,7 +340,7 @@ func (m model) pickerView() string {
 		scope = "○my access   ▸global"
 	}
 	var b strings.Builder
-	b.WriteString(ui.Cols.Render(" Switch repo") + "    scope: " + scope + ui.Dim.Render("   (tab)") + "\n")
+	b.WriteString(ui.Cols.Render(" Switch repo") + "    host: " + hostName(p.host) + "    scope: " + scope + ui.Dim.Render("   (tab)") + "\n")
 	b.WriteString(" > " + p.query + "█\n")
 	switch {
 	case p.err != "":
@@ -289,7 +370,11 @@ func (m model) pickerView() string {
 			b.WriteString("   " + line + "\n")
 		}
 	}
-	b.WriteString("\n" + ui.Dim.Render(" ↑↓ select   enter switch   ctrl+f pin ★   tab scope   esc cancel") + "\n")
+	keys := " ↑↓ select   enter switch   ctrl+f pin ★   tab scope   esc cancel"
+	if len(p.hosts) > 1 {
+		keys = " ↑↓ select   enter switch   ctrl+f pin ★   tab scope   shift+tab host   esc cancel"
+	}
+	b.WriteString("\n" + ui.Dim.Render(keys) + "\n")
 	return b.String()
 }
 

@@ -139,7 +139,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dlg = &d
 		}
 		return m, nil
-	case pickerLoadedMsg, pickerDebounceMsg, pickerResultMsg:
+	case pickerLoadedMsg, pickerDebounceMsg, pickerResultMsg, pickerHostsMsg:
 		return m.pickerMsg(msg)
 	case screenMsg:
 		if msg.view != m.view {

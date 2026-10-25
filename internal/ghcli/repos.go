@@ -16,7 +16,7 @@ type RepoInfo struct {
 }
 
 // ParseRepoInfos reads the JSON of `gh repo list` or `gh search repos`. host is put on every
-// Ref ("" for gh's default). Entries whose name is malformed are skipped.
+// Ref, as "" for github.com (the form ParseRepoRef gives). Entries whose name is malformed are skipped.
 func ParseRepoInfos(b []byte, host string) ([]RepoInfo, error) {
 	var raw []struct {
 		// gh repo list
@@ -46,7 +46,9 @@ func ParseRepoInfos(b []byte, host string) ([]RepoInfo, error) {
 		if err != nil || ref.Host != "" {
 			continue
 		}
-		ref.Host = host
+		if host != "github.com" {
+			ref.Host = host
+		}
 		info := RepoInfo{Ref: ref, Language: CleanText(r.Language), Stars: max(r.StargazerCount, r.StargazersCount), UpdatedAt: r.UpdatedAt}
 		if r.PrimaryLanguage != nil {
 			info.Language = CleanText(r.PrimaryLanguage.Name)

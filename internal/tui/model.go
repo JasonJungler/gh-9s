@@ -121,6 +121,8 @@ type model struct {
 	dlg              *dialog                   // a question being asked (text, choice or yes/no)
 	repoCache        map[string]repoCacheEntry // the repos I can access, per host, reused for a while
 	picker           *picker                   // the repo picker overlay, when open
+	pickerHost       string                    // the host the picker last switched to (see pickerHostSet)
+	pickerHostSet    bool                      // the picker has been switched to a host this session
 	recents          *recent.Store             // repos chosen before; nil if the file could not be read
 	sdata            map[viewKind]any          // per-screen data, see screen.go
 	graph            graph.Graph

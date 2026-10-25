@@ -19,6 +19,7 @@ gh-9s always works on one repository at a time. You can change it at any moment.
 - `tab` switches between two lists:
   - **My access**: your own repositories and those of your organizations.
   - **Global**: all of GitHub. It needs at least two characters and waits a moment after you stop typing.
+- `shift+tab` moves to the next host you are logged in to (see `gh auth status`), and the list is for that host. The title line names the host. The host you pick stays for the rest of the session. Outside a repo the picker starts on gh's default host.
 - `enter` switches to the selected repository.
 - The first row is the repository of your current directory.
 - With nothing typed, the repositories you used recently are listed.
