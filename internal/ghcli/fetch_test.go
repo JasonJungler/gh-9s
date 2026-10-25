@@ -117,3 +117,53 @@ func TestFetchBaseFailure(t *testing.T) {
 		t.Errorf("error %q does not carry git's message", err)
 	}
 }
+
+func TestFetchBaseUnmatchedRemoteNoOrigin(t *testing.T) {
+	r := newFetchRepos(t)
+	gitIn(t, r.dir, "remote", "rename", "origin", "upstream")
+	gitIn(t, r.dir, "remote", "add", "fork", r.bare)
+	before := gitIn(t, r.dir, "rev-parse", "upstream/main")
+	r.pushNew(t)
+	for _, base := range []string{"main", "origin/main"} {
+		note, err := FetchBase(r.dir, base)
+		if err == nil {
+			t.Fatalf("base %q: want an error, got note %q", base, note)
+		}
+		if note != "" {
+			t.Errorf("base %q: note = %q, want none", base, note)
+		}
+		for _, want := range []string{base, "upstream", "fork"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("base %q: error %q does not mention %q", base, err, want)
+			}
+		}
+	}
+	if got := gitIn(t, r.dir, "rev-parse", "upstream/main"); got != before {
+		t.Error("upstream was fetched although the base named no remote")
+	}
+	if out := gitIn(t, r.dir, "branch", "-r"); strings.Contains(out, "fork/") {
+		t.Errorf("fork was fetched: %s", out)
+	}
+}
+
+func TestFetchBaseBranchWithSlashes(t *testing.T) {
+	r := newFetchRepos(t)
+	want := r.pushNew(t)
+	if _, err := FetchBase(r.dir, "origin/feature/x"); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitIn(t, r.dir, "rev-parse", "origin/main"); got != want {
+		t.Errorf("origin/main = %s, want %s", got, want)
+	}
+}
+
+func TestFetchBaseBareNameThatLooksLikeARemote(t *testing.T) {
+	r := newFetchRepos(t)
+	want := r.pushNew(t)
+	if _, err := FetchBase(r.dir, "fork"); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitIn(t, r.dir, "rev-parse", "origin/main"); got != want {
+		t.Errorf("origin/main = %s, want %s", got, want)
+	}
+}
