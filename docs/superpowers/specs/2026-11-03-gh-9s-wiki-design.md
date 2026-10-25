@@ -82,6 +82,29 @@ appear is extended to it. Keys appear in `?` help, the footers, the README and t
 - **Keys and names:** `6` and `:wiki`, `e`, `n`, `x`, `tab`/`shift+tab` for links, `o`, `R`. List columns as in goal 1.
 - **Limits:** 500 pages listed, 1 MB per page; a title of at most 100 characters.
 
+## More calls, settled after the builder check (please check)
+
+- **The editor never touches the clone.** `e` copies the page to a temp file, opens that, and the clone is only changed by the
+  commit step. So `R`, re-entering the screen or a repo switch cannot wipe the user's text. While an editor is open or a
+  save is running (`wikiBusy`), `R`, `e`, `n`, `x` are refused with a status line; a result for another repo or page is dropped by identity.
+- **`e` fetches first.** Pressing `e` (and `x`) refreshes the clone, then takes the page's blob id (`git rev-parse
+  HEAD:<file>`) as "the version opened" and puts that text in the temp file. The conflict check after the editor closes
+  compares against that id, so a stale read view never silently loses anything.
+- **Unchanged / empty:** line endings are compared as they are (an editor adding only a final newline counts as unchanged;
+  CRLF files keep CRLF). Whitespace-only text for a new page = "nothing written". Editing an existing page down to
+  nothing is refused ("use x to delete the page").
+- **Branch:** the remote's default branch from `git symbolic-ref refs/remotes/origin/HEAD` after clone (fallback `master`,
+  then `main`); push is `HEAD:<that branch>`, no force. The test remote is a bare repo with the same layout.
+- **Credentials:** `gh auth git-credential` is `gh`'s own helper and handles Enterprise hosts it is logged in to. If it
+  yields nothing, the error says "run `gh auth login --hostname HOST`"; no token in URLs or headers, no other fallback.
+- **Page files:** `.md .markdown .mdown .mkdn` (rendered) and `.txt .textile .asciidoc .adoc .rst .org .creole .mediawiki
+  .wiki .pod .rdoc` (plain text). No extension, dotfiles and `_Sidebar`/`_Footer` are not listed. If two files have the same
+  title, the Markdown one wins and the other is not listed; the new-page duplicate check compares titles, ignoring case.
+- **Titles:** a literal `-` in a new title is refused ("use a space"), so title and file always round-trip. List order: `Home`
+  first if present, then alphabetical (case-insensitive); the 500 cap is applied after sorting.
+- **Deleting the last page** leaves a wiki with no pages: the list says "no pages"; `n` still works (the repo exists).
+- Key `6` is free (checked).
+
 ## Left to the builder
 
 File and function names; list column widths; how the editor seam works for a page (a variant of `editorCmd` that returns
