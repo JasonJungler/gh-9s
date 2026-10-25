@@ -158,7 +158,7 @@ func TestOrcaCreateArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main",
-		"--issue", "42", "--agent", "claude", "--prompt", "fix it\nplease", "--json"}
+		"--issue", "42", "--no-parent", "--agent", "claude", "--prompt", "fix it\nplease", "--json"}
 	if len(rec.calls) != 1 || rec.calls[0].name != "orca" || !equalArgs(rec.calls[0].args, want) {
 		t.Fatalf("calls = %+v, want one orca %q", rec.calls, want)
 	}
@@ -172,7 +172,7 @@ func TestOrcaCreateArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main",
-		"--issue", "42", "--agent", "claude", "--model", "opus", "--prompt", "fix it\nplease", "--json"}
+		"--issue", "42", "--no-parent", "--agent", "claude", "--model", "opus", "--prompt", "fix it\nplease", "--json"}
 	if !equalArgs(rec.calls[0].args, want) {
 		t.Errorf("args with a model = %q, want %q", rec.calls[0].args, want)
 	}
@@ -222,7 +222,7 @@ func TestOrcaLargeContextFallsBack(t *testing.T) {
 	if len(rec.calls) != 4 {
 		t.Fatalf("calls = %d, want 4 (create, launch, wait, send): %+v", len(rec.calls), rec.calls)
 	}
-	create := []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main", "--issue", "42", "--json"}
+	create := []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main", "--issue", "42", "--no-parent", "--json"}
 	if !equalArgs(rec.calls[0].args, create) {
 		t.Errorf("create = %q, want %q (no --agent, no --prompt)", rec.calls[0].args, create)
 	}
@@ -735,7 +735,7 @@ func TestOrcaPasteOnlyUsesLongPathWithoutEnter(t *testing.T) {
 	if len(rec.calls) != 4 {
 		t.Fatalf("calls = %d, want 4 (create, launch, wait, send): %+v", len(rec.calls), rec.calls)
 	}
-	if !equalArgs(rec.calls[0].args, []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main", "--issue", "42", "--json"}) {
+	if !equalArgs(rec.calls[0].args, []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main", "--issue", "42", "--no-parent", "--json"}) {
 		t.Errorf("create = %q (no --agent, no --prompt)", rec.calls[0].args)
 	}
 	if !equalArgs(rec.calls[1].args, []string{"agent", "launch", "--agent", "claude", "--worktree", "id:" + orcaWorktreeID, "--model", "opus", "--json"}) {
@@ -861,5 +861,97 @@ func TestOrcaSubmitKeepsTheOneCallPath(t *testing.T) {
 	}
 	if len(rec.calls) != 1 || !strings.Contains(strings.Join(rec.calls[0].args, " "), "--prompt") {
 		t.Errorf("calls = %+v", rec.calls)
+	}
+}
+
+func countArg(args []string, a string) int {
+	n := 0
+	for _, x := range args {
+		if x == a {
+			n++
+		}
+	}
+	return n
+}
+
+// The workspace is independent unless Request.Nested asks for Orca's inferred parent, on both the
+// one-call path and the bare create of the longer path.
+func TestOrcaNoParentUnlessNested(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		for _, long := range []bool{false, true} {
+			r := orcaReq()
+			r.Nested = nested
+			r.PasteOnly = long // paste only always takes the longer path, whatever the platform's ceiling
+			rec := &recorder{reply: fallbackReply(orcaSendOkOut)}
+			if !long {
+				rec.reply = func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }
+			}
+			if _, err := (orcaBackend{run: rec.run}).launch(r); err != nil {
+				t.Fatalf("nested=%v long=%v: %v", nested, long, err)
+			}
+			args := rec.calls[0].args
+			if args[0] != "worktree" || args[1] != "create" {
+				t.Fatalf("nested=%v long=%v: first call = %q, want worktree create", nested, long, args)
+			}
+			want := 1
+			if nested {
+				want = 0
+			}
+			if got := countArg(args, "--no-parent"); got != want {
+				t.Errorf("nested=%v long=%v: --no-parent appears %d times in %q, want %d", nested, long, got, args, want)
+			}
+			if nested && countArg(args, "--parent-worktree") != 0 {
+				t.Errorf("nested=%v long=%v: --parent-worktree passed; Orca's inferred parent is meant: %q", nested, long, args)
+			}
+			for _, c := range rec.calls[1:] {
+				if countArg(c.args, "--no-parent") != 0 {
+					t.Errorf("nested=%v long=%v: --no-parent passed to %q, which does not take it", nested, long, c.args)
+				}
+			}
+		}
+	}
+}
+
+// Orca says to re-issue the exact same command with --retry-launch, so the retry carries the same
+// parent decision as the call whose reply was lost.
+func TestOrcaRetryKeepsTheParentDecision(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		r := orcaReq()
+		r.Nested = nested
+		rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaLostOut), errors.New("exit status 1") }}
+		if _, err := (orcaBackend{run: rec.run}).launch(r); err == nil {
+			t.Fatalf("nested=%v: want the lost reply", nested)
+		}
+		first := rec.calls[0].args
+
+		r.RetryID = orcaOp
+		rec = &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
+		if _, err := (orcaBackend{run: rec.run}).launch(r); err != nil {
+			t.Fatal(err)
+		}
+		want := append(append([]string{}, first...), "--retry-launch", orcaOp)
+		if !equalArgs(rec.calls[0].args, want) {
+			t.Errorf("nested=%v: retry args = %q, want the first call %q plus --retry-launch", nested, rec.calls[0].args, want)
+		}
+		if got := countArg(rec.calls[0].args, "--no-parent"); (got == 1) == nested {
+			t.Errorf("nested=%v: retry has %d --no-parent in %q", nested, got, rec.calls[0].args)
+		}
+	}
+}
+
+// Through Launcher.Do, which a retry also goes through (Resolve instead of Fetch).
+func TestLauncherRetryKeepsTheParentDecision(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
+		l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: failFetch(t),
+			Resolve: func(_, b string) (string, string, error) { return b, "", nil }}
+		r := orcaReq()
+		r.Nested, r.RetryID = nested, orcaOp
+		if _, err := l.Do(r); err != nil {
+			t.Fatal(err)
+		}
+		if got := countArg(rec.calls[0].args, "--no-parent"); (got == 1) == nested {
+			t.Errorf("nested=%v: Do's retry has %d --no-parent in %q", nested, got, rec.calls[0].args)
+		}
 	}
 }

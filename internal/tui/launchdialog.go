@@ -28,6 +28,9 @@ type launchInput struct {
 	// PasteOnly says the text is only placed in the agent's input box (the launch_submit setting is off);
 	// the user presses Enter there. The zero value submits.
 	PasteOnly bool
+	// Nested makes an Orca workspace a child of the one gh-9s runs in (the launch_orca_nested setting). The
+	// zero value is independent.
+	Nested bool
 	// Context is the generated prompt: what the Prompt row summarises, opens in the editor and restores. It
 	// may be empty in tests that only look at the sizes below.
 	Context    string
@@ -258,6 +261,7 @@ func (d launchDialog) request() launch.Request {
 		Base:    strings.TrimSpace(d.in.Base),
 		Name:    strings.TrimSpace(d.in.Name),
 		Issue:   d.in.Issue.Number,
+		Nested:  d.in.Nested,
 		RetryID: d.retryID,
 
 		PasteOnly: d.in.PasteOnly,
@@ -513,6 +517,9 @@ func (d launchDialog) summary() string {
 			base = "finding base…"
 		}
 		parts = append(parts, base+" → "+d.in.Name)
+		if d.in.Nested {
+			parts = append(parts, "child of current")
+		}
 	}
 	if d.in.PasteOnly {
 		parts = append(parts, "paste only")

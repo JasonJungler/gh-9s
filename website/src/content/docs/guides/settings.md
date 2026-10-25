@@ -38,6 +38,7 @@ If an environment variable overrides a setting, the screen says when your change
 | `launch_tmux_place` | `pane` | `pane`, `window` | Open the agent in a pane or a window. herdr uses this too (its window is a tab). |
 | `launch_split` | `horizontal` | `horizontal`, `vertical` | Which way a new pane splits. herdr uses this too. |
 | `launch_submit` | `true` | on / off | `on` sends the issue to the agent at once. `off` only puts it in the agent's input box and you press `Enter` there; Orca then uses its longer path. See [Paste only](/gh-9s/guides/send-to-agent/#paste-only-instead-of-submitting). |
+| `launch_orca_nested` | `false` | on / off | Orca only. `off` makes the new workspace independent (`--no-parent`). `on` makes it a child of the workspace gh-9s runs in. See [What Orca does differently](/gh-9s/guides/send-to-agent/#what-orca-does-differently). |
 
 Examples:
 

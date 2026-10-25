@@ -894,6 +894,27 @@ func TestLaunchSubmitOffReachesOrcaToo(t *testing.T) {
 	}
 }
 
+func TestLaunchOrcaNestedSetting(t *testing.T) {
+	for _, tc := range []struct {
+		kv     []string
+		nested bool
+	}{{nil, false}, {[]string{"launch_orca_nested", "on"}, true}} {
+		f := installLaunch(t, map[string]string{"ORCA_WORKTREE_ID": "x"})
+		f.results = []launch.Result{{Where: "issue-42-fix-login-crash", Branch: "me/issue-42-fix-login-crash"}}
+		m := pressLaunch(issueOnScreen(t, tc.kv...), "a")
+		if m.launchDlg == nil {
+			t.Fatalf("no dialog: %q", ansi.Strip(m.status))
+		}
+		if v := ansi.Strip(m.View()); strings.Contains(v, "child of current") != tc.nested {
+			t.Errorf("settings %v: the dialog shows child of current = %v, want %v:\n%s", tc.kv, !tc.nested, tc.nested, v)
+		}
+		pressLaunch(m, "enter")
+		if len(f.reqs) != 1 || f.reqs[0].Nested != tc.nested {
+			t.Errorf("settings %v: requests = %+v; want one with Nested = %v", tc.kv, f.reqs, tc.nested)
+		}
+	}
+}
+
 // A result for a dialog that is gone still says the text waits for Enter.
 func TestLaunchDoneAfterClosedDialogStillSaysPressEnter(t *testing.T) {
 	m := issueOnScreen(t)

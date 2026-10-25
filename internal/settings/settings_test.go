@@ -407,3 +407,26 @@ func TestLaunchSubmitDescIsAsShortAsTheOthers(t *testing.T) {
 		t.Errorf("launch_submit Desc is %d bytes, longer than any other (%d): %q", len(d.Desc), longest, d.Desc)
 	}
 }
+
+// Orca workspaces are independent unless the user asks for children.
+func TestLaunchOrcaNestedDefaultsToOff(t *testing.T) {
+	d, ok := Lookup("launch_orca_nested")
+	if !ok {
+		t.Fatal("launch_orca_nested is not in the registry")
+	}
+	if d.Kind != Bool || d.Default != false {
+		t.Errorf("launch_orca_nested = kind %v default %v, want a Bool that defaults to false", d.Kind, d.Default)
+	}
+	if Memory().Bool("launch_orca_nested") {
+		t.Error("launch_orca_nested is on by default")
+	}
+	longest := 0
+	for _, o := range Registry {
+		if o.Key != "launch_orca_nested" {
+			longest = max(longest, len(o.Desc))
+		}
+	}
+	if len(d.Desc) > longest {
+		t.Errorf("Desc is %d bytes, longer than any other (%d): %q", len(d.Desc), longest, d.Desc)
+	}
+}
