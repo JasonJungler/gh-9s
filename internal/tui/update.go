@@ -2,7 +2,6 @@ package tui
 
 import (
 	"strings"
-	"time"
 
 	"github.com/MurabitoB/gh-9s/internal/ghcli"
 	"github.com/MurabitoB/gh-9s/internal/graph"
@@ -18,6 +17,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var pc tea.Cmd
 		nm, pc = nm.previewSync()
 		next, cmd = nm, tea.Batch(cmd, pc)
+		if _, frame := msg.(fxTickMsg); !frame && nm.motionOn() && !nm.mo.ticking {
+			nm.mo.ticking = true // frames run while a motion needs them (motion.go)
+			cmd = tea.Batch(cmd, fxTick())
+		}
 	}
 	return next, cmd
 }
@@ -139,9 +142,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case fxTickMsg:
-		if m.fx.active(time.Now()) {
+		if m.mo.busy(m, motionNow()) {
 			return m, fxTick()
 		}
+		m.mo.ticking = false
 		return m, nil
 	case tickMsg:
 		cmds := []tea.Cmd{tick()}

@@ -10,6 +10,14 @@ A [k9s](https://k9scli.io)-style terminal UI for GitHub, as a `gh` extension.
 - **Projects:** a board per Status column, move cards, mark several and change them at once, undo (every change asks first).
 - **Repos:** an interactive picker to move between any repo you can reach.
 
+## Motion
+
+Screens push and pop sideways, tabs slide (and the highlighted tab slides along the strip), the selected row or card fades in, dialogs rise into place. It is all transient, so the screens stay as dense as before. Fades need a truecolor terminal; `GH9S_MOTION=off` turns every animation off.
+
+![Screens push and pop, rows fade, a dialog rises](docs/demo/motion-screens.gif)
+
+![Favorites tabs and Project board: tabs and views slide, rows and cards fade](docs/demo/board-motion.gif)
+
 ## Demo
 
 **Actions** — workflows, a failed run as a live job graph, its log, re-run the failed jobs:

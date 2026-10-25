@@ -73,8 +73,8 @@ func (m model) widths() []int {
 	}
 }
 
-// View renders the header, the current view, and the footer.
-func (m model) View() string {
+// plainView renders the header, the current view, and the footer, without motion.
+func (m model) plainView() string {
 	if m.askIcons {
 		return m.iconAskView()
 	}
@@ -151,7 +151,7 @@ func (m model) View() string {
 		title += "  /" + m.filter
 	}
 	if m.loading {
-		title += "  loading…"
+		title += "  " + m.spin() + "loading…"
 	}
 	b.WriteString(styHeader.Render(strings.TrimSpace(title)) + "\n")
 	b.WriteString(styDim.Render("<1>runs <2>workflows <3>pulls <4>issues <0>inbox <:fav>favorites <:repo> switch repo <P>current-PR <:>cmd </>filter") + "\n")
@@ -288,16 +288,21 @@ func (m model) tableBody() string {
 	for i := m.top; i < end; i++ {
 		r := vis[i]
 		var line strings.Builder
+		lv := m.rowLevel(r, i)
 		for j, c := range r.cells {
 			s := trunc(ghcli.CleanText(c), w[j]) + "  "
-			if j == statusCol(m.view) && i != m.cursor {
+			if lv > 0 && lv < 1 || i == m.cursor {
+				// the row is lit or fading: plain text, so the tint covers it whole
+			} else if j == statusCol(m.view) {
 				s = stateStyle(r.state).Render(s)
 			} else if i != m.cursor && j < len(r.tint) && r.tint[j] != "" {
 				s = lipgloss.NewStyle().Foreground(lipgloss.Color(r.tint[j])).Render(s)
 			}
 			line.WriteString(s)
 		}
-		if i == m.cursor {
+		if lv > 0 {
+			b.WriteString(fluentTint(padTo(line.String(), m.width), lv, termBackground()) + "\n")
+		} else if i == m.cursor {
 			if m.paneList {
 				b.WriteString(stySel.Render(padTo(line.String(), m.width)) + "\n")
 				lines++

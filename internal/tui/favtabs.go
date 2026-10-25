@@ -99,7 +99,7 @@ func (m model) favTabBar() string {
 			parts = append(parts, styDim.Render(label))
 		}
 	}
-	return fitTabs(parts, m.favTab, m.width, styDim.Render("|"))
+	return m.tabs("favs", parts, m.favTab, styDim.Render("|"))
 }
 
 // fitTabs joins tab labels on one line no wider than width, dropping tabs from the left (shown as ‹)
@@ -112,10 +112,7 @@ func fitTabs(labels []string, sel, width int, sep ...string) string {
 	if width <= 0 || len(labels) == 0 {
 		return strings.Join(labels, s)
 	}
-	start := 0
-	for start < sel && ansi.StringWidth(strings.Join(labels[start:sel+1], s))+2 > width {
-		start++
-	}
+	start := tabStart(labels, sel, width, s)
 	line := strings.Join(labels[start:], s)
 	if start > 0 {
 		line = "‹ " + line
@@ -309,4 +306,13 @@ func (m model) toggleCurrentRepoPin() (tea.Model, tea.Cmd) {
 		return m.togglePinnedRepo(repo)
 	}
 	return m.pinRepoChecked(repo)
+}
+
+// tabStart is the first label drawn: tabs drop off the left until the selected one fits.
+func tabStart(labels []string, sel, width int, sep string) int {
+	start := 0
+	for start < sel && ansi.StringWidth(strings.Join(labels[start:sel+1], sep))+2 > width {
+		start++
+	}
+	return start
 }

@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -168,7 +167,7 @@ func boardColumnsBody(m model, st boardState) string {
 	cols := m.boardColumns(st)
 	var b strings.Builder
 	if st.hasViews() {
-		b.WriteString(fitTabs(st.viewLabels(), st.view, m.width) + "\n")
+		b.WriteString(m.tabs("board.view", st.viewLabels(), st.view) + "\n")
 	}
 	if len(cols) == 0 {
 		return b.String() + "\n"
@@ -199,8 +198,8 @@ func boardColumnsBody(m model, st boardState) string {
 			id := st.data.Items[col.cards[ci]].ID
 			sel := c == st.col && ci == st.curs[c]
 			var fx *float64
-			if motionOn() {
-				lv := m.fx.level(id, sel, time.Now())
+			if m.motionColor() {
+				lv := m.mo.level("card", id, sel, motionNow())
 				fx = &lv
 			}
 			lines = append(lines, cardLines(st.data, col.cards[ci], w, sel, st.marks[id], fx)...)
@@ -299,22 +298,19 @@ func boardTabsFor(st boardState) []boardTab {
 // boardColsKey handles the movement keys of the columns layout.
 func boardColsKey(m model, st boardState, k tea.KeyMsg) (model, tea.Cmd, bool) {
 	cols := m.boardColumns(st)
-	before := selCardID(st, cols)
 	moveCol := func(d int) (model, tea.Cmd, bool) {
 		if len(cols) > 0 {
 			st.col = (st.col + d + len(cols)) % len(cols)
 		}
 		m = m.withScreenData(viewBoard, m.colFit(st, cols))
-		m, cmd := m.fadeFrom(before, selCardID(st, cols))
-		return m, cmd, true
+		return m, nil, true
 	}
 	moveCard := func(d int) (model, tea.Cmd, bool) {
 		if len(cols) > 0 && st.col < len(cols) {
 			st.curs = setIdx(st.curs, st.col, min(max(st.curs[st.col]+d, 0), max(len(cols[st.col].cards)-1, 0)))
 		}
 		m = m.withScreenData(viewBoard, m.colFit(st, cols))
-		m, cmd := m.fadeFrom(before, selCardID(st, cols))
-		return m, cmd, true
+		return m, nil, true
 	}
 	switch k.String() {
 	case "l", "right", "tab":

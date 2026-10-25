@@ -57,7 +57,7 @@ const (
 )
 
 type model struct {
-	fx            cardFx // the Project board's card fade (boardfx.go)
+	mo            *motionState // the animations (motion.go); nil switches them all off, as in tests
 	repo, branch  string
 	view          viewKind
 	back          []viewKind
@@ -209,7 +209,7 @@ type gotoMsg struct {
 
 // Run starts the TUI and blocks until the user quits.
 func Run() error {
-	m := model{loading: true}
+	m := model{loading: true, mo: newMotion()}
 	if fs, err := favorites.Load(favorites.DefaultPath()); err != nil {
 		m.banner = "favorites disabled: " + err.Error()
 	} else {
@@ -233,6 +233,9 @@ func Run() error {
 		m.recents = rs
 	}
 	m = m.startIcons()
+	if m.motionColor() {
+		termBackground() // ask the terminal now, not in the middle of the first frame
+	}
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	if m.cfg().Bool("mouse") {
 		opts = append(opts, tea.WithMouseCellMotion())

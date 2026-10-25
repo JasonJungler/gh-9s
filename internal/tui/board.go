@@ -365,9 +365,9 @@ func boardBody(m model) string {
 		}
 	}
 	if st.hasViews() {
-		b.WriteString(fitTabs(st.viewLabels(), st.view, m.width) + "\n")
+		b.WriteString(m.tabs("board.view", st.viewLabels(), st.view) + "\n")
 	}
-	b.WriteString(fitTabs(labels, st.tab, m.width) + "\n")
+	b.WriteString(m.tabs("board.tab", labels, st.tab) + "\n")
 	b.WriteString(m.tableBody())
 	note := st.fullNote()
 	if st.cols && st.loaded && m.width >= colsMinScreen && m.bodyHeight() < colsMinBody {

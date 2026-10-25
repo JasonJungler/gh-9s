@@ -1,7 +1,8 @@
-# The Fluent-motion experiment on the Project board: the selected card fades as the cursor moves (truecolor).
+# Fluent motion on the Project board: tabs slide, views slide, rows and cards fade (truecolor).
 Output board-motion.gif
+Output board-motion.mp4
 Source tapes/common.tape
-Set Framerate 50
+Set Framerate 30
 
 Type "COLORTERM=truecolor gh-9s"
 Enter
@@ -10,26 +11,42 @@ Type ":"
 Sleep 300ms
 Type "fav"
 Enter
-Sleep 2s
-Type "l"
-Sleep 400ms
-Type "l"
 Sleep 1500ms
+# the Favorites tabs slide
+Type "l"
+Sleep 900ms
+Type "l"
+Sleep 1200ms
 Enter
-Sleep 3s
-Type "b"
 Sleep 2500ms
 
-# the selection fades from card to card
+# the board as a list: rows fade, Status tabs slide
 Type "j"
-Sleep 900ms
+Sleep 800ms
 Type "j"
-Sleep 900ms
-Type "k"
-Sleep 900ms
+Sleep 800ms
 Type "l"
 Sleep 1100ms
-Type "j"
-Sleep 900ms
+Type "l"
+Sleep 1100ms
 Type "h"
+Sleep 1100ms
+# views slide
+Type "]"
+Sleep 1200ms
+Type "["
+Sleep 1200ms
+
+# the board as columns: cards fade
+Type "b"
+Sleep 1500ms
+Type "j"
+Sleep 800ms
+Type "l"
+Sleep 900ms
+Type "j"
+Sleep 800ms
+Type "h"
+Sleep 800ms
+Type "k"
 Sleep 1500ms
