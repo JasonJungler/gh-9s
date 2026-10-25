@@ -50,3 +50,21 @@ func TestBranchName(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildContextStripsControlCharacters(t *testing.T) {
+	d := ghcli.IssueDetail{
+		Number: 1, Title: "t\x1b[2Jitle", URL: "u", Body: "line\ttab\r\nnext 中文 🚀 é",
+		Comments: []ghcli.Comment{{Author: "a\x07", Body: "evil\x1b[201~ rm -rf \x03 \x7f \u0085 \u009b end"}},
+	}
+	got := BuildContext(d)
+	for _, bad := range []string{"\x1b", "\x03", "\x07", "\r", "\x7f", "\u0085", "\u009b"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("context still contains %q: %q", bad, got)
+		}
+	}
+	for _, keep := range []string{"line\ttab\nnext 中文 🚀 é", "evil[201~ rm -rf", "\n"} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("context lost %q: %q", keep, got)
+		}
+	}
+}

@@ -14,7 +14,9 @@ const WarnChars = 100000
 const maxBranchLen = 50
 
 // BuildContext renders an issue (title, body and all comments) as the prompt
-// text handed to the agent.
+// text handed to the agent. Control characters other than newline and tab are
+// removed, so issue text cannot inject terminal escape sequences (such as the
+// end of a bracketed paste) into the agent's terminal.
 func BuildContext(d ghcli.IssueDetail) string {
 	var b strings.Builder
 	b.WriteString("請解決這個 issue\n\n")
@@ -37,7 +39,18 @@ func BuildContext(d ghcli.IssueDetail) string {
 			fmt.Fprintf(&b, "### %s (%d/%d)\n%s\n", author, i+1, len(d.Comments), strings.TrimRight(c.Body, "\n"))
 		}
 	}
-	return b.String()
+	return stripControl(b.String())
+}
+
+// stripControl removes control characters except newline and tab: runes below
+// 0x20, DEL (0x7f) and the C1 range (0x80-0x9f).
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // BranchName returns "issue-<number>-<slug>" where the slug is the title in

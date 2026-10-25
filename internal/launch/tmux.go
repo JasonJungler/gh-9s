@@ -1,17 +1,26 @@
 package launch
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
-// readyPollInterval is how often a pane's output is checked for the agent's
-// ready marker. It is a variable so tests can shorten it.
+// readyPollInterval is how often a pane is checked for the agent's ready
+// marker. It is a variable so tests can shorten it.
 var readyPollInterval = 500 * time.Millisecond
 
-// shellQuote wraps s in single quotes for a POSIX shell, escaping an embedded
-// single quote as '\”. The result is always one literal word.
+// settleTimeout caps how long start waits for a new pane's screen to stop
+// changing before it takes the baseline. It is a variable so tests can shorten
+// it.
+var settleTimeout = 3 * time.Second
+
+// shellQuote wraps s in single quotes for a POSIX shell. An embedded single
+// quote is written as quote, backslash, quote, quote (close the string, add an
+// escaped quote, reopen it). The result is always one literal word.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -25,16 +34,45 @@ func startCommand(a Agent, model string) string {
 	return a.TmuxCommand + " " + a.ModelFlag + " " + shellQuote(model)
 }
 
-type tmuxSpace struct{ run RunFunc }
+// paneIDPattern matches the pane id tmux prints for -F #{pane_id}.
+var paneIDPattern = regexp.MustCompile(`^%[0-9]+$`)
 
-// newTmux returns the space that drives the tmux server the user is in.
-func newTmux(run RunFunc) space { return tmuxSpace{run} }
+// shells are the pane commands that mean the agent is not running (yet).
+var shells = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "fish": true, "dash": true,
+	"ksh": true, "tcsh": true, "nu": true, "pwsh": true,
+}
 
-func (t tmuxSpace) tmux(stdin []byte, args ...string) ([]byte, error) {
+// hasControl reports whether s has a character that must never be typed into
+// a terminal: anything below 0x20, or DEL.
+func hasControl(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+type tmuxSpace struct {
+	run    RunFunc
+	getenv func(string) string
+
+	mu        sync.Mutex
+	baselines map[string]int // pane id -> ready-marker count before the agent started
+}
+
+// newTmux returns the space that drives the tmux server the user is in. New
+// panes and windows are created relative to $TMUX_PANE when it is set.
+func newTmux(run RunFunc, getenv func(string) string) space {
+	return &tmuxSpace{run: run, getenv: getenv, baselines: map[string]int{}}
+}
+
+func (t *tmuxSpace) tmux(stdin []byte, args ...string) ([]byte, error) {
 	return t.run("", stdin, "tmux", args...)
 }
 
-func (t tmuxSpace) open(r Request) (string, error) {
+func (t *tmuxSpace) open(r Request) (string, error) {
 	var args []string
 	if r.Place == PlaceWindow {
 		args = []string{"new-window"}
@@ -45,21 +83,65 @@ func (t tmuxSpace) open(r Request) (string, error) {
 		}
 		args = []string{"split-window", flag}
 	}
-	args = append(args, "-P", "-F", "#{pane_id}", "-c", r.Dir)
+	args = append(args, "-P", "-F", "#{pane_id}")
+	if p := t.getenv("TMUX_PANE"); p != "" {
+		args = append(args, "-t", p)
+	}
+	args = append(args, "-c", r.Dir)
 	out, err := t.tmux(nil, args...)
 	if err != nil {
 		return "", err
 	}
 	pane := strings.TrimSpace(string(out))
-	if pane == "" {
-		return "", fmt.Errorf("tmux did not report the new pane")
+	if !paneIDPattern.MatchString(pane) {
+		return "", fmt.Errorf("tmux printed %q instead of a pane id", pane)
 	}
 	return pane, nil
 }
 
-// start types the start command into the pane. The command is quoted by
-// startCommand, so nothing in the model name is run by the shell.
-func (t tmuxSpace) start(pane string, r Request) error {
+// settle waits until the pane shows some text that is the same on two
+// consecutive checks (the new shell has drawn its prompt), or settleTimeout
+// passes, and returns that screen. A baseline taken before the shell has drawn
+// its prompt would let the prompt itself look like a new marker.
+func (t *tmuxSpace) settle(pane string) (string, error) {
+	deadline := time.Now().Add(settleTimeout)
+	prev := ""
+	for {
+		b, err := t.tmux(nil, "capture-pane", "-p", "-t", pane)
+		if err != nil {
+			return "", err
+		}
+		out := string(b)
+		if strings.TrimSpace(out) != "" && out == prev {
+			return out, nil
+		}
+		prev = out
+		if !time.Now().Add(readyPollInterval).Before(deadline) {
+			return out, nil
+		}
+		time.Sleep(readyPollInterval)
+	}
+}
+
+// start records how often the ready marker is already on screen (the shell's
+// prompt may contain it), then types the start command into the pane. The
+// command is quoted by startCommand, so nothing in the model name is run by
+// the shell.
+func (t *tmuxSpace) start(pane string, r Request) error {
+	if hasControl(r.Model) || hasControl(r.Agent.TmuxCommand) {
+		return errors.New("model or command contains a control character")
+	}
+	base := 0
+	if r.Agent.ReadyMarker != "" {
+		out, err := t.settle(pane)
+		if err != nil {
+			return err
+		}
+		base = strings.Count(out, r.Agent.ReadyMarker)
+	}
+	t.mu.Lock()
+	t.baselines[pane] = base
+	t.mu.Unlock()
 	if _, err := t.tmux(nil, "send-keys", "-t", pane, "-l", startCommand(r.Agent, r.Model)); err != nil {
 		return err
 	}
@@ -67,20 +149,38 @@ func (t tmuxSpace) start(pane string, r Request) error {
 	return err
 }
 
-// ready polls the pane's output until it contains the agent's ready marker.
+// ready polls the pane until the agent is up. That needs both: the ready
+// marker appears more often than it did before start (so a prompt or the typed
+// command cannot satisfy it), and the pane's foreground command is not a shell.
 // The pane is checked at least once.
-func (t tmuxSpace) ready(pane string, r Request, timeout time.Duration) error {
+func (t *tmuxSpace) ready(pane string, r Request, timeout time.Duration) error {
+	marker := r.Agent.ReadyMarker
+	if marker == "" {
+		return fmt.Errorf("%s has no ready marker, so readiness cannot be detected", r.Agent.Label)
+	}
+	t.mu.Lock()
+	base := t.baselines[pane]
+	t.mu.Unlock()
 	deadline := time.Now().Add(timeout)
 	for {
 		out, err := t.tmux(nil, "capture-pane", "-p", "-t", pane)
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(out), r.Agent.ReadyMarker) {
-			return nil
+		if strings.Count(string(out), marker) > base {
+			cmd, err := t.tmux(nil, "display-message", "-p", "-t", pane, "#{pane_current_command}")
+			if err != nil {
+				return err
+			}
+			if !shells[strings.TrimPrefix(strings.TrimSpace(string(cmd)), "-")] {
+				t.mu.Lock()
+				delete(t.baselines, pane)
+				t.mu.Unlock()
+				return nil
+			}
 		}
 		if !time.Now().Add(readyPollInterval).Before(deadline) {
-			return fmt.Errorf("%s did not show %q within %s", r.Agent.Label, r.Agent.ReadyMarker, timeout)
+			return fmt.Errorf("%s did not show %q within %s", r.Agent.Label, marker, timeout)
 		}
 		time.Sleep(readyPollInterval)
 	}
@@ -88,12 +188,13 @@ func (t tmuxSpace) ready(pane string, r Request, timeout time.Duration) error {
 
 // paste sends text to the pane as a bracketed paste through a named tmux
 // buffer, then presses Enter. The text never goes through the shell.
-func (t tmuxSpace) paste(pane, text string) error {
+func (t *tmuxSpace) paste(pane, text string) error {
 	buf := "gh9s-" + strings.TrimPrefix(pane, "%")
 	if _, err := t.tmux([]byte(text), "load-buffer", "-b", buf, "-"); err != nil {
 		return err
 	}
 	if _, err := t.tmux(nil, "paste-buffer", "-p", "-d", "-b", buf, "-t", pane); err != nil {
+		t.tmux(nil, "delete-buffer", "-b", buf) // best effort: do not leave the text in tmux
 		return err
 	}
 	_, err := t.tmux(nil, "send-keys", "-t", pane, "Enter")

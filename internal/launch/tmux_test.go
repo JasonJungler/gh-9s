@@ -2,6 +2,7 @@ package launch
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -32,12 +33,24 @@ func (r *recorder) run(dir string, stdin []byte, name string, args ...string) ([
 	return nil, nil
 }
 
+func (r *recorder) count(sub string) int {
+	n := 0
+	for _, c := range r.calls {
+		if c.args[0] == sub {
+			n++
+		}
+	}
+	return n
+}
+
 func paneReply(c call) ([]byte, error) {
 	if len(c.args) > 0 && (c.args[0] == "split-window" || c.args[0] == "new-window") {
 		return []byte("%7\n"), nil
 	}
 	return nil, nil
 }
+
+func noEnv(string) string { return "" }
 
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
@@ -67,7 +80,7 @@ func TestTmuxOpenPaneHorizontal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := &recorder{reply: paneReply}
-			pane, err := newTmux(rec.run).open(tc.r)
+			pane, err := newTmux(rec.run, noEnv).open(tc.r)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,14 +94,74 @@ func TestTmuxOpenPaneHorizontal(t *testing.T) {
 	}
 }
 
+func TestTmuxOpenTargetsTmuxPane(t *testing.T) {
+	env := func(k string) string {
+		if k == "TMUX_PANE" {
+			return "%3"
+		}
+		return ""
+	}
+	cases := []struct {
+		name string
+		r    Request
+		want []string
+	}{
+		{"pane", Request{Place: PlacePane, Split: SplitHorizontal, Dir: "/work"},
+			[]string{"split-window", "-h", "-P", "-F", "#{pane_id}", "-t", "%3", "-c", "/work"}},
+		{"window", Request{Place: PlaceWindow, Dir: "/work"},
+			[]string{"new-window", "-P", "-F", "#{pane_id}", "-t", "%3", "-c", "/work"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recorder{reply: paneReply}
+			if _, err := newTmux(rec.run, env).open(tc.r); err != nil {
+				t.Fatal(err)
+			}
+			if len(rec.calls) != 1 || !equalArgs(rec.calls[0].args, tc.want) {
+				t.Errorf("calls = %+v, want %v", rec.calls, tc.want)
+			}
+		})
+	}
+}
+
+func TestTmuxOpenRejectsOddPaneID(t *testing.T) {
+	for _, out := range []string{"", "7", "%7 extra", "no server running", "%7\n%8"} {
+		rec := &recorder{reply: func(call) ([]byte, error) { return []byte(out), nil }}
+		_, err := newTmux(rec.run, noEnv).open(Request{Place: PlaceWindow})
+		if err == nil {
+			t.Errorf("output %q accepted as a pane id", out)
+			continue
+		}
+		if !strings.Contains(err.Error(), "instead of a pane id") {
+			t.Errorf("err = %v", err)
+		}
+	}
+	rec := &recorder{reply: func(call) ([]byte, error) { return []byte("junk"), nil }}
+	err := runSequence(newTmux(rec.run, noEnv), Request{Place: PlaceWindow}, time.Millisecond)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepOpen || !strings.Contains(err.Error(), `"junk"`) {
+		t.Errorf("err = %v, want StepOpen quoting the output", err)
+	}
+}
+
 func TestTmuxEveryLaterCommandNamesThePane(t *testing.T) {
-	rec := &recorder{reply: func(c call) ([]byte, error) {
-		if c.args[0] == "capture-pane" {
-			return []byte("Claude Code v1"), nil
+	rec := &recorder{}
+	sp := newTmux(rec.run, noEnv)
+	// The marker is already on screen once at start, so ready needs a second.
+	n := 0
+	rec.reply = func(c call) ([]byte, error) {
+		switch c.args[0] {
+		case "capture-pane":
+			n++
+			if n <= 2 { // start's two settle checks
+				return []byte("Claude Code v1"), nil
+			}
+			return []byte("Claude Code v1\nClaude Code v1"), nil
+		case "display-message":
+			return []byte("claude\n"), nil
 		}
 		return paneReply(c)
-	}}
-	sp := newTmux(rec.run)
+	}
 	r := Request{Agent: Agent{TmuxCommand: "claude", ReadyMarker: "Claude Code v"}, Place: PlaceWindow, Dir: "/w"}
 	pane, err := sp.open(r)
 	if err != nil {
@@ -126,7 +199,7 @@ func TestTmuxEveryLaterCommandNamesThePane(t *testing.T) {
 
 func TestTmuxOpenFailureRunsNothingElse(t *testing.T) {
 	rec := &recorder{reply: func(c call) ([]byte, error) { return nil, errors.New("no server") }}
-	f := newTmux(rec.run)
+	f := newTmux(rec.run, noEnv)
 	err := runSequence(f, Request{Place: PlacePane, Split: SplitHorizontal, Context: "x"}, time.Millisecond)
 	var se *StepError
 	if !errors.As(err, &se) || se.Step != StepOpen {
@@ -151,12 +224,14 @@ func TestTmuxStartTypesQuotedCommand(t *testing.T) {
 		}
 	}
 
-	rec := &recorder{}
+	rec := &recorder{reply: func(call) ([]byte, error) { return []byte("$ "), nil }}
 	r := Request{Agent: claude, Model: "opus"}
-	if err := newTmux(rec.run).start("%7", r); err != nil {
+	if err := newTmux(rec.run, noEnv).start("%7", r); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
+		{"capture-pane", "-p", "-t", "%7"},
+		{"capture-pane", "-p", "-t", "%7"},
 		{"send-keys", "-t", "%7", "-l", "claude --model 'opus'"},
 		{"send-keys", "-t", "%7", "Enter"},
 	}
@@ -167,6 +242,35 @@ func TestTmuxStartTypesQuotedCommand(t *testing.T) {
 		if rec.calls[i].name != "tmux" || !equalArgs(rec.calls[i].args, w) {
 			t.Errorf("call %d = %q, want tmux %v", i, rec.calls[i].line(), w)
 		}
+	}
+}
+
+func TestTmuxStartRejectsControlCharacters(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	for _, model := range []string{"a\nb", "a\rb", "a\x1bb", "a\x00b", "a\x7fb", "a\tb"} {
+		rec := &recorder{}
+		err := newTmux(rec.run, noEnv).start("%7", Request{Agent: claude, Model: model})
+		if err == nil {
+			t.Errorf("model %q accepted", model)
+		}
+		if len(rec.calls) != 0 {
+			t.Errorf("model %q: typed %d commands before rejecting", model, len(rec.calls))
+		}
+	}
+	bad := claude
+	bad.TmuxCommand = "claude\n; rm -rf ~"
+	rec := &recorder{}
+	if err := newTmux(rec.run, noEnv).start("%7", Request{Agent: bad}); err == nil || len(rec.calls) != 0 {
+		t.Errorf("command with newline: err = %v, calls = %d", err, len(rec.calls))
+	}
+	rec = &recorder{reply: paneReply}
+	err := runSequence(newTmux(rec.run, noEnv), Request{Agent: claude, Model: "a\nb", Place: PlaceWindow}, time.Millisecond)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepStart {
+		t.Errorf("err = %v, want StepStart", err)
+	}
+	if rec.count("send-keys") != 0 {
+		t.Error("send-keys ran for a rejected model")
 	}
 }
 
@@ -185,41 +289,158 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-func TestTmuxReadyPollsCaptureUntilMarker(t *testing.T) {
-	old := readyPollInterval
-	readyPollInterval = time.Millisecond
-	defer func() { readyPollInterval = old }()
+// readyScript plays a pane for the ready tests: capture-pane answers come from
+// captures in order (the last repeats) and display-message answers with cmd.
+type readyScript struct {
+	captures []string
+	cmd      string
+	n        int
+}
 
-	n := 0
-	rec := &recorder{reply: func(c call) ([]byte, error) {
-		n++
-		if n < 3 {
-			return []byte("loading..."), nil
+func (s *readyScript) reply(c call) ([]byte, error) {
+	switch c.args[0] {
+	case "capture-pane":
+		i := s.n
+		if i >= len(s.captures) {
+			i = len(s.captures) - 1
 		}
-		return []byte("Claude Code v2"), nil
+		s.n++
+		return []byte(s.captures[i]), nil
+	case "display-message":
+		return []byte(s.cmd + "\n"), nil
+	}
+	return nil, nil
+}
+
+func TestMain(m *testing.M) {
+	readyPollInterval = time.Millisecond
+	settleTimeout = 20 * time.Millisecond
+	os.Exit(m.Run())
+}
+
+// runReady starts then waits on a scripted pane and reports whether the
+// sequence got as far as pasting.
+func runReady(t *testing.T, s *readyScript, marker string, timeout time.Duration) (error, bool, *recorder) {
+	t.Helper()
+	rec := &recorder{reply: func(c call) ([]byte, error) {
+		if c.args[0] == "split-window" || c.args[0] == "new-window" {
+			return []byte("%7\n"), nil
+		}
+		return s.reply(c)
 	}}
-	r := Request{Agent: Agent{ReadyMarker: "Claude Code v"}}
-	if err := newTmux(rec.run).ready("%7", r, 5*time.Second); err != nil {
+	r := Request{Agent: Agent{Label: "Agent", TmuxCommand: "agent", ReadyMarker: marker}, Place: PlaceWindow, Context: "secret"}
+	err := runSequence(newTmux(rec.run, noEnv), r, timeout)
+	return err, rec.count("paste-buffer") > 0, rec
+}
+
+func TestTmuxReadyPollsCaptureUntilMarker(t *testing.T) {
+	s := &readyScript{captures: []string{"$ ", "$ ", "$ agent", "loading...", "$ agent\nAgent v1"}, cmd: "agent"}
+	err, pasted, rec := runReady(t, s, "Agent v", 5*time.Second)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rec.calls) != 3 {
-		t.Fatalf("%d capture-pane calls, want 3", len(rec.calls))
+	if !pasted {
+		t.Error("never pasted")
 	}
-	for _, c := range rec.calls {
-		if c.name != "tmux" || !equalArgs(c.args, []string{"capture-pane", "-p", "-t", "%7"}) {
-			t.Errorf("call = %q, want tmux capture-pane -p -t %%7", c.line())
+	// start's two settle checks, then three polls.
+	if got := rec.count("capture-pane"); got != 5 {
+		t.Errorf("%d capture-pane calls, want 5", got)
+	}
+}
+
+func TestTmuxReadyPromptContainingMarkerIsNotReady(t *testing.T) {
+	// The shell prompt itself contains the marker, before and after the agent
+	// would start, and the typed command shows it too.
+	s := &readyScript{captures: []string{"❯ ", "❯ ", "❯ agent"}, cmd: "zsh"}
+	err, pasted, _ := runReady(t, s, "❯", 30*time.Millisecond)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepReady {
+		t.Fatalf("err = %v, want StepReady", err)
+	}
+	if pasted {
+		t.Error("pasted into the shell")
+	}
+}
+
+func TestTmuxReadyMarkerOnlyInBaselineIsNotReady(t *testing.T) {
+	s := &readyScript{captures: []string{"Agent v1 (old screen)"}, cmd: "agent"}
+	err, pasted, _ := runReady(t, s, "Agent v", 30*time.Millisecond)
+	if err == nil || pasted {
+		t.Errorf("err = %v, pasted = %v; want not ready", err, pasted)
+	}
+}
+
+func TestTmuxReadySlowShellPromptIsInTheBaseline(t *testing.T) {
+	// The shell has not drawn its prompt when start is called; the baseline
+	// must wait for it, or the prompt would look like a new marker while the
+	// agent is already the foreground command but has printed nothing yet.
+	s := &readyScript{captures: []string{"", "", "❯ ", "❯ ", "❯ agent"}, cmd: "node"}
+	err, pasted, _ := runReady(t, s, "❯", 30*time.Millisecond)
+	if err == nil || pasted {
+		t.Errorf("err = %v, pasted = %v; want not ready", err, pasted)
+	}
+}
+
+func TestTmuxReadyNewMarkerButPaneStillShellIsNotReady(t *testing.T) {
+	for _, cmd := range []string{"zsh", "-zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "nu", "pwsh"} {
+		s := &readyScript{captures: []string{"$ ", "$ ", "$ agent\nAgent v1"}, cmd: cmd}
+		err, pasted, _ := runReady(t, s, "Agent v", 30*time.Millisecond)
+		if err == nil || pasted {
+			t.Errorf("pane command %q: err = %v, pasted = %v; want not ready", cmd, err, pasted)
 		}
 	}
 }
 
-func TestTmuxReadyTimesOut(t *testing.T) {
-	old := readyPollInterval
-	readyPollInterval = time.Millisecond
-	defer func() { readyPollInterval = old }()
+func TestTmuxReadyNewMarkerAndAgentInForeground(t *testing.T) {
+	s := &readyScript{captures: []string{"❯ ", "❯ ", "❯ agent\n❯ ask me"}, cmd: "node"}
+	err, pasted, rec := runReady(t, s, "❯", time.Second)
+	if err != nil || !pasted {
+		t.Fatalf("err = %v, pasted = %v; want ready and pasted", err, pasted)
+	}
+	last := rec.calls[len(rec.calls)-1]
+	if !equalArgs(last.args, []string{"send-keys", "-t", "%7", "Enter"}) {
+		t.Errorf("last call = %q", last.line())
+	}
+}
 
+func TestTmuxReadyFailuresAreHard(t *testing.T) {
+	r := Request{Agent: Agent{ReadyMarker: "Agent v"}}
+	rec := &recorder{reply: func(c call) ([]byte, error) { return nil, errors.New("can't find pane") }}
+	if err := newTmux(rec.run, noEnv).ready("%7", r, time.Second); err == nil || !strings.Contains(err.Error(), "can't find pane") {
+		t.Errorf("capture-pane failure: err = %v", err)
+	}
+	rec = &recorder{reply: func(c call) ([]byte, error) {
+		if c.args[0] == "display-message" {
+			return nil, errors.New("display failed")
+		}
+		return []byte("Agent v1"), nil
+	}}
+	if err := newTmux(rec.run, noEnv).ready("%7", r, time.Second); err == nil || !strings.Contains(err.Error(), "display failed") {
+		t.Errorf("display-message failure: err = %v", err)
+	}
+}
+
+func TestTmuxReadyEmptyMarkerIsAnError(t *testing.T) {
+	rec := &recorder{reply: func(c call) ([]byte, error) { return []byte("anything"), nil }}
+	err := newTmux(rec.run, noEnv).ready("%7", Request{Agent: Agent{Label: "Agent"}}, time.Second)
+	if err == nil {
+		t.Fatal("empty marker treated as ready")
+	}
+	if len(rec.calls) != 0 {
+		t.Errorf("ran %d commands for an empty marker", len(rec.calls))
+	}
+	s := &readyScript{captures: []string{"x"}, cmd: "agent"}
+	err, pasted, _ := runReady(t, s, "", time.Second)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepReady || pasted {
+		t.Errorf("sequence: err = %v, pasted = %v", err, pasted)
+	}
+}
+
+func TestTmuxReadyTimesOut(t *testing.T) {
 	rec := &recorder{reply: func(c call) ([]byte, error) { return []byte("nothing"), nil }}
 	r := Request{Agent: Agent{ReadyMarker: "Claude Code v"}}
-	if err := newTmux(rec.run).ready("%7", r, 20*time.Millisecond); err == nil {
+	if err := newTmux(rec.run, noEnv).ready("%7", r, 20*time.Millisecond); err == nil {
 		t.Fatal("ready returned nil without the marker")
 	}
 }
@@ -227,7 +448,7 @@ func TestTmuxReadyTimesOut(t *testing.T) {
 func TestTmuxPasteUsesBuffer(t *testing.T) {
 	rec := &recorder{}
 	text := "line one\n'quoted' $(x) `y`; 中文\n"
-	if err := newTmux(rec.run).paste("%7", text); err != nil {
+	if err := newTmux(rec.run, noEnv).paste("%7", text); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.calls) != 3 {
@@ -246,5 +467,28 @@ func TestTmuxPasteUsesBuffer(t *testing.T) {
 	}
 	if !equalArgs(enter.args, []string{"send-keys", "-t", "%7", "Enter"}) {
 		t.Errorf("enter = %q", enter.line())
+	}
+}
+
+func TestTmuxPasteBufferFailureDeletesBuffer(t *testing.T) {
+	rec := &recorder{reply: func(c call) ([]byte, error) {
+		switch c.args[0] {
+		case "paste-buffer":
+			return nil, errors.New("pane gone")
+		case "delete-buffer":
+			return nil, errors.New("ignored")
+		}
+		return nil, nil
+	}}
+	err := newTmux(rec.run, noEnv).paste("%7", "text")
+	if err == nil || err.Error() != "pane gone" {
+		t.Fatalf("err = %v, want the paste-buffer error", err)
+	}
+	if len(rec.calls) != 3 {
+		t.Fatalf("calls = %+v, want load, paste, delete", rec.calls)
+	}
+	name := rec.calls[0].args[2]
+	if !equalArgs(rec.calls[2].args, []string{"delete-buffer", "-b", name}) {
+		t.Errorf("third call = %q", rec.calls[2].line())
 	}
 }
