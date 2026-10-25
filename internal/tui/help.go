@@ -45,18 +45,18 @@ func (m model) helpGroups() []helpGroup {
 		gs = append(gs, helpGroup{"Workflows / favorites", []helpKey{{"j k", "move"}, {"enter", "its runs"}, {"t", "trigger (form)"}, {"f", "favorite / unfavorite"},
 			{"a", "set an alias"}, {"e", "enable / disable (workflows)"}, {"o", "open in the browser"}}})
 	case viewPRs:
-		gs = append(gs, helpGroup{"Pull requests", []helpKey{{"j k", "move"}, {"enter", "open the PR"}, {"u", "only mine"}, {"e", "review requested from me"}, {"a", "all"}, {"f", "pin / unpin this repo"}, {"o", "open in the browser"}}})
+		gs = append(gs, helpGroup{"Pull requests", []helpKey{{"j k", "move"}, {"enter", "open the PR"}, {"u", "only mine"}, {"e", "review requested from me"}, {"a", "all"}, {"M", "add to / remove from Projects (asks first)"}, {"f", "pin / unpin this repo"}, {"o", "open in the browser"}}})
 	case viewIssues:
-		gs = append(gs, helpGroup{"Issues", []helpKey{{"j k", "move"}, {"enter", "open the issue"}, {"O C A", "open / closed / all"}, {"u", "assigned to me"}, {"m", "opened by me"}, {"f", "pin / unpin this repo"}, {"o", "open in the browser"}}})
+		gs = append(gs, helpGroup{"Issues", []helpKey{{"j k", "move"}, {"enter", "open the issue"}, {"O C A", "open / closed / all"}, {"u", "assigned to me"}, {"m", "opened by me"}, {"M", "add to / remove from Projects (asks first)"}, {"f", "pin / unpin this repo"}, {"o", "open in the browser"}}})
 	case viewBoard:
 		gs = append(gs, helpGroup{"Project board", []helpKey{{"tab l →", "next column (Status)"}, {"shift+tab h ←", "previous column"}, {"j k", "move"}, {"enter", "open the issue or PR (in its own repo)"}, {"s", "change the card's Status (asks first)"}, {"H L", "in columns: move the card to the previous / next column"}, {"a", "change assignees of an issue or PR card"}, {"n", "add an issue or PR to the Project"}, {"x X", "remove the card from the Project / archive it"}, {"space", "mark the card; s x X a and H L then act on all marked cards (esc clears the marks)"}, {"ctrl+up ctrl+down", "move the card one place up / down (not in a sorted view)"}, {"u", "undo the last Status or field change, added card or new draft"}, {"N", "new draft card (gets the Status of the column you are in)"}, {"e", "edit a draft card's title and text"}, {"v", "change another field of the card (single select, iteration, text, number, date)"}, {"b", "columns (all Status columns side by side) / list"}, {"h j k l", "in columns: change column / card"}, {"] [", "next / previous saved view of the Project"}, {"f", "pin / unpin this Project"}, {"o", "open in the browser (a draft opens the Project)"}, {"R", "refresh (at most once in a while)"}}})
 	case viewInbox:
 		gs = append(gs, helpGroup{"Inbox", []helpKey{{"tab l →", "next tab"}, {"shift+tab h ←", "previous tab"}, {"j k", "move"}, {"enter", "open the item (in its own repo)"}, {"o", "open in the browser"}, {"R", "refresh (at most once in a while)"}}})
 	case viewPRDetail:
-		gs = append(gs, helpGroup{"Pull request", []helpKey{{"c", "checks"}, {"d", "diff / code review"}, {"C", "comment"}, {"r", "review: approve / request changes / comment"}, {"m", "merge"}, {"tab", "select an image"}, {"enter", "show the selected image"}, {"o", "open (the image, else the PR)"}}})
+		gs = append(gs, helpGroup{"Pull request", []helpKey{{"c", "checks"}, {"d", "diff / code review"}, {"C", "comment"}, {"r", "review: approve / request changes / comment"}, {"m", "merge"}, {"M", "add to / remove from Projects (asks first)"}, {"tab", "select an image"}, {"enter", "show the selected image"}, {"o", "open (the image, else the PR)"}}})
 		gs = append(gs, helpGroup{"Scroll", helpScroll})
 	case viewIssue:
-		gs = append(gs, helpGroup{"Issue", []helpKey{{"C", "comment"}, {"x", "close"}, {"X", "reopen"}, {"l", "labels"}, {"s", "assignees"}, {"tab", "select an image"}, {"enter", "show the selected image"}, {"o", "open"}}})
+		gs = append(gs, helpGroup{"Issue", []helpKey{{"C", "comment"}, {"x", "close"}, {"X", "reopen"}, {"l", "labels"}, {"s", "assignees"}, {"M", "add to / remove from Projects (asks first)"}, {"tab", "select an image"}, {"enter", "show the selected image"}, {"o", "open"}}})
 		gs = append(gs, helpGroup{"Scroll", helpScroll})
 	case viewDiff:
 		gs = append(gs,

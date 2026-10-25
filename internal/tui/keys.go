@@ -535,6 +535,13 @@ func (m *model) reselect(id string) {
 // prListKey sets the PR list filter: u = opened by me, e = review requested from me, a = all.
 func (m model) prListKey(k tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	switch k.String() {
+	case "M":
+		r, ok := m.selected()
+		if !ok {
+			return m, nil, true
+		}
+		next, cmd := m.startProjectAssign(r.id)
+		return next, cmd, true
 	case "u":
 		m.prFilter = ghcli.PRFilter{Mine: true}
 	case "e":

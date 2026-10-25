@@ -51,7 +51,7 @@ func init() {
 		},
 		key:    issuesKey,
 		body:   func(m model) string { return m.tableBody() },
-		footer: "enter open  O/C/A open/closed/all  u assigned to me  m opened by me  f pin-repo  o browser",
+		footer: "enter open  O/C/A open/closed/all  u assigned to me  m opened by me  M projects  f pin-repo  o browser",
 		poll:   false,
 	})
 	register(viewIssue, screen{
@@ -70,7 +70,7 @@ func init() {
 		},
 		key:    issueKey,
 		body:   issueBody,
-		footer: "C comment  x close  X reopen  l labels  s assignees  o open  j/k scroll",
+		footer: "C comment  x close  X reopen  l labels  s assignees  M projects  o open  j/k scroll",
 	})
 	dialogHandlers["issue.close"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		p := m.pending
@@ -152,6 +152,13 @@ func issuesKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		m.issueFilter.State = "all"
 	case "u":
 		m.issueFilter.AssignedToMe = !m.issueFilter.AssignedToMe
+	case "M":
+		r, ok := m.selected()
+		if !ok {
+			return m, nil, true
+		}
+		next, cmd := m.startProjectAssign(r.id)
+		return next, cmd, true
 	case "m":
 		m.issueFilter.OpenedByMe = !m.issueFilter.OpenedByMe
 	case "enter":
@@ -200,6 +207,9 @@ func issueKey(m model, k tea.KeyMsg) (model, tea.Cmd, bool) {
 		st.scroll = 0
 	case "G", "end":
 		st.scroll = maxScroll
+	case "M":
+		next, cmd := m.startProjectAssign(m.issue)
+		return next, cmd, true
 	case "C":
 		m, p := m.startIssueAction(st)
 		return m.withDialog(newTextDialog("issue.comment", "Comment on "+p.label, "Your comment")), nil, true

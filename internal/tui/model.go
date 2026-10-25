@@ -126,6 +126,8 @@ type model struct {
 	boardColsOn    bool               // the columns layout is chosen, for the session
 	boardOp        *boardOp           // a write being collected through dialogs
 	boardBusy      bool               // a write is running
+	projOp         *projOp            // Projects of an issue or PR being changed through dialogs
+	projBusy       bool               // ... and being written
 	undo           *undoRec           // the last change that can be taken back
 	undoNext       *undoRec           // ... of the write now running
 	projectChoices []ghcli.ProjectRef // the Projects offered by the pin dialog
@@ -246,7 +248,7 @@ func (m *model) switchTo(v viewKind) tea.Cmd {
 	}
 	m.query, m.matches, m.mi = "", nil, 0
 	m.note = ""
-	m.boardOp = nil
+	m.boardOp, m.projOp = nil, nil
 	m.pending, m.pendingMerge = nil, nil // half-finished actions belong to the screen we are leaving
 	m.loading = true
 	return m.fetch()

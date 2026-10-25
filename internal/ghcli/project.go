@@ -438,16 +438,18 @@ func joinNote(a, b string) string {
 
 // ProjectRef is a Project found by ListProjects.
 type ProjectRef struct {
+	ID          string // the Project's node id
 	Host, Owner string
 	Number      int
 	Title, URL  string
 	Closed      bool
 }
 
-const listProjectsQuery = `{viewer{login projectsV2(first:50){nodes{number title closed url}} organizations(first:50){nodes{login projectsV2(first:50){nodes{number title closed url}}}}}}`
+const listProjectsQuery = `{viewer{login projectsV2(first:50){nodes{id number title closed url}} organizations(first:50){nodes{login projectsV2(first:50){nodes{id number title closed url}}}}}}`
 
 type projectNodes struct {
 	Nodes []struct {
+		ID     string `json:"id"`
 		Number int    `json:"number"`
 		Title  string `json:"title"`
 		Closed bool   `json:"closed"`
@@ -492,7 +494,7 @@ func ParseProjectList(host string, b []byte) ([]ProjectRef, error) {
 	add := func(owner string, n projectNodes) {
 		for _, p := range n.Nodes {
 			if p.Number > 0 && owner != "" {
-				out = append(out, ProjectRef{Host: host, Owner: CleanText(owner), Number: p.Number,
+				out = append(out, ProjectRef{ID: p.ID, Host: host, Owner: CleanText(owner), Number: p.Number,
 					Title: oneLine(CleanText(p.Title)), URL: CleanText(p.URL), Closed: p.Closed})
 			}
 		}

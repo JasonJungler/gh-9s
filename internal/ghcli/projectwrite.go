@@ -26,7 +26,7 @@ const setStatusMutation = `mutation($project:ID!,$item:ID!,$field:ID!,$option:St
 
 const addItemMutation = `mutation($project:ID!,$content:ID!){addProjectV2ItemById(input:{projectId:$project,contentId:$content}){item{id}}}`
 
-const contentQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on Issue{id title projectItems(first:50){nodes{project{id}}}} ... on PullRequest{id title projectItems(first:50){nodes{project{id}}}}}}}`
+const contentQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on Issue{id title projectItems(first:50){nodes{id project{id title}}}} ... on PullRequest{id title projectItems(first:50){nodes{id project{id title}}}}}}}`
 
 const deleteItemMutation = `mutation($project:ID!,$item:ID!){deleteProjectV2Item(input:{projectId:$project,itemId:$item}){deletedItemId}}`
 
@@ -93,9 +93,13 @@ func SetProjectStatus(host, projectID, itemID, fieldID, optionID string) error {
 }
 
 // Content is an issue or pull request that can be added to a Project.
+// Membership is a card of an issue or PR in a Project.
+type Membership struct{ ItemID, ProjectID, Title string }
+
 type Content struct {
 	ID, Title, Kind string   // Kind is "Issue" or "PullRequest"
 	OnProjects      []string // ids of the Projects it is already on
+	Memberships     []Membership
 }
 
 // ResolveContent finds an issue or PR by repo and number, to add it to a Project.
@@ -112,8 +116,10 @@ func ResolveContent(host, owner, name string, number int) (Content, error) {
 				Title string `json:"title"`
 				Items struct {
 					Nodes []struct {
+						ID      string `json:"id"`
 						Project struct {
-							ID string `json:"id"`
+							ID    string `json:"id"`
+							Title string `json:"title"`
 						} `json:"project"`
 					} `json:"nodes"`
 				} `json:"projectItems"`
@@ -130,6 +136,7 @@ func ResolveContent(host, owner, name string, number int) (Content, error) {
 	c := Content{ID: it.ID, Title: oneLine(CleanText(it.Title)), Kind: it.Type}
 	for _, n := range it.Items.Nodes {
 		c.OnProjects = append(c.OnProjects, n.Project.ID)
+		c.Memberships = append(c.Memberships, Membership{ItemID: n.ID, ProjectID: n.Project.ID, Title: oneLine(CleanText(n.Project.Title))})
 	}
 	return c, nil
 }
