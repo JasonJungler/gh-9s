@@ -653,27 +653,131 @@ func TestTmuxPasteBufferFailureDeletesBuffer(t *testing.T) {
 	}
 }
 
+// flagReply answers the bracketed-paste flag query with the next value of flags (the last one repeats) and
+// everything else with nothing.
+func flagReply(flags ...string) func(call) ([]byte, error) {
+	n := 0
+	return func(c call) ([]byte, error) {
+		if c.args[0] == "display-message" {
+			v := flags[min(n, len(flags)-1)]
+			n++
+			return []byte(v + "\n"), nil
+		}
+		return nil, nil
+	}
+}
+
+func fastBracketedPoll(t *testing.T) {
+	t.Helper()
+	oldT, oldI := bracketedPasteTimeout, bracketedPastePollInterval
+	bracketedPasteTimeout, bracketedPastePollInterval = 60*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { bracketedPasteTimeout, bracketedPastePollInterval = oldT, oldI })
+}
+
 // With submit false the text still goes in as one bracketed paste (paste-buffer -p), so multi-line text
-// stays in the agent's input box, but no Enter is pressed.
+// stays in the agent's input box, but no Enter is pressed. The pane's bracketed paste flag is checked first.
 func TestTmuxPasteOnlyPressesNoEnter(t *testing.T) {
-	rec := &recorder{}
+	fastBracketedPoll(t)
+	rec := &recorder{reply: flagReply("1")}
 	text := "line one\nline two\n"
 	if err := newTmux(rec.run, noEnv).paste("%7", text, false); err != nil {
 		t.Fatal(err)
 	}
-	if len(rec.calls) != 2 {
-		t.Fatalf("calls = %+v, want load-buffer and paste-buffer only", rec.calls)
+	if len(rec.calls) != 3 {
+		t.Fatalf("calls = %+v, want flag check, load-buffer and paste-buffer only", rec.calls)
 	}
-	name := rec.calls[0].args[2]
-	if rec.calls[0].args[0] != "load-buffer" || rec.calls[0].stdin != text {
-		t.Errorf("load = %q stdin %q", rec.calls[0].line(), rec.calls[0].stdin)
+	if !equalArgs(rec.calls[0].args, []string{"display-message", "-p", "-t", "%7", "#{bracket_paste_flag}"}) {
+		t.Errorf("flag check = %q", rec.calls[0].line())
 	}
-	if !equalArgs(rec.calls[1].args, []string{"paste-buffer", "-p", "-d", "-b", name, "-t", "%7"}) {
-		t.Errorf("paste = %q", rec.calls[1].line())
+	name := rec.calls[1].args[2]
+	if rec.calls[1].args[0] != "load-buffer" || rec.calls[1].stdin != text {
+		t.Errorf("load = %q stdin %q", rec.calls[1].line(), rec.calls[1].stdin)
+	}
+	if !equalArgs(rec.calls[2].args, []string{"paste-buffer", "-p", "-d", "-b", name, "-t", "%7"}) {
+		t.Errorf("paste = %q", rec.calls[2].line())
 	}
 	for _, c := range rec.calls {
 		if c.args[0] == "send-keys" {
 			t.Errorf("pasted without submitting, yet ran %q", c.line())
 		}
+	}
+}
+
+// Without bracketed paste tmux turns each LF into CR and adds no markers, so the first line would submit.
+// If the pane never turns the flag on, nothing is loaded, pasted or typed.
+func TestTmuxPasteOnlyRefusesWithoutBracketedPaste(t *testing.T) {
+	for _, flag := range []string{"0", "", "10", "1 ", "yes", "01"} {
+		fastBracketedPoll(t)
+		rec := &recorder{reply: flagReply(flag)}
+		err := newTmux(rec.run, noEnv).paste("%7", "a\nb", false)
+		if err == nil || !strings.Contains(err.Error(), "has not turned on bracketed paste") || !strings.Contains(err.Error(), "nothing was pasted") {
+			t.Errorf("flag %q: err = %v, want the bracketed paste refusal", flag, err)
+		}
+		for _, c := range rec.calls {
+			if c.args[0] != "display-message" {
+				t.Errorf("flag %q: ran %q, want only flag checks", flag, c.line())
+			}
+		}
+		if len(rec.calls) < 2 {
+			t.Errorf("flag %q: %d checks, want it polled", flag, len(rec.calls))
+		}
+	}
+}
+
+func TestTmuxPasteOnlyWaitsForBracketedPaste(t *testing.T) {
+	fastBracketedPoll(t)
+	rec := &recorder{reply: flagReply("0", "0", "1")}
+	if err := newTmux(rec.run, noEnv).paste("%7", "text", false); err != nil {
+		t.Fatal(err)
+	}
+	if rec.count("display-message") != 3 || rec.count("load-buffer") != 1 || rec.count("paste-buffer") != 1 || rec.count("send-keys") != 0 {
+		t.Errorf("calls = %+v, want 3 flag checks, then load and paste", rec.calls)
+	}
+	if rec.calls[3].args[0] != "load-buffer" {
+		t.Errorf("fourth call = %q, want load-buffer after the flag turned on", rec.calls[3].line())
+	}
+}
+
+func TestTmuxPasteOnlyFlagQueryFailure(t *testing.T) {
+	fastBracketedPoll(t)
+	rec := &recorder{reply: func(call) ([]byte, error) { return nil, errors.New("no such pane") }}
+	err := newTmux(rec.run, noEnv).paste("%7", "text", false)
+	if err == nil || !strings.Contains(err.Error(), "no such pane") || len(rec.calls) != 1 {
+		t.Errorf("err = %v, calls = %+v", err, rec.calls)
+	}
+}
+
+// Submit mode is unchanged: no flag check.
+func TestTmuxPasteSubmitDoesNotCheckBracketedPaste(t *testing.T) {
+	rec := &recorder{}
+	if err := newTmux(rec.run, noEnv).paste("%7", "text", true); err != nil {
+		t.Fatal(err)
+	}
+	if rec.count("display-message") != 0 {
+		t.Errorf("calls = %+v, want no flag check", rec.calls)
+	}
+}
+
+// The sequence reports the refusal as a paste failure, and the agent's text is never loaded or pasted.
+func TestTmuxSequencePasteOnlyRefusalIsPasteStep(t *testing.T) {
+	fastBracketedPoll(t)
+	s := &readyScript{captures: []string{"$ ", "$ ", "Agent v"}, cmd: "agent"}
+	rec := &recorder{reply: func(c call) ([]byte, error) {
+		if c.args[0] == "display-message" && c.args[len(c.args)-1] == "#{bracket_paste_flag}" {
+			return []byte("0\n"), nil
+		}
+		if c.args[0] == "split-window" || c.args[0] == "new-window" {
+			return []byte("%7\n"), nil
+		}
+		return s.reply(c)
+	}}
+	r := Request{Agent: Agent{Label: "Agent", TmuxCommand: "agent", ReadyMarker: "Agent v"}, Place: PlaceWindow, Context: "secret", PasteOnly: true}
+	err := runSequence(newTmux(rec.run, noEnv), r, time.Second)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepPaste {
+		t.Fatalf("err = %v, want a paste step error", err)
+	}
+	if rec.count("load-buffer")+rec.count("paste-buffer") != 0 {
+		t.Errorf("loaded or pasted: %+v", rec.calls)
 	}
 }

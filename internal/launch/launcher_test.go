@@ -415,6 +415,9 @@ func TestLauncherPasteOnlyReachesEveryTarget(t *testing.T) {
 				}
 				return []byte("$ \nClaude Code v1"), nil
 			case "display-message":
+				if c.args[len(c.args)-1] == "#{bracket_paste_flag}" {
+					return []byte("1\n"), nil
+				}
 				return []byte("claude\n"), nil
 			}
 			return nil, nil
