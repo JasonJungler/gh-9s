@@ -365,3 +365,37 @@ func TestLauncherRetryWithoutResolveStillNeverFetches(t *testing.T) {
 		t.Errorf("err = %v, calls = %d: with no way to resolve the base the retry must stop before orca", err, len(rec.calls))
 	}
 }
+
+func TestLauncherLocalRefAndItsNoteSurviveFetchAndRetry(t *testing.T) {
+	const note = "origin has no wip; using the local ref wip"
+	local := func(_, b string) (string, string, error) { return b, note, nil }
+	for _, retry := range []string{"", orcaOp} {
+		rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
+		l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: local, Resolve: local}
+		r := orcaReq()
+		r.Base = "wip"
+		r.RetryID = retry
+		res, err := l.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := rec.calls[0].args
+		got := ""
+		for i, a := range args {
+			if a == "--base-branch" {
+				got = args[i+1]
+			}
+		}
+		if got != "wip" || !strings.Contains(res.Note, note) {
+			t.Errorf("retry %q: base %q, note %q; want the local ref and its note", retry, got, res.Note)
+		}
+	}
+	// a base that is not found stops the launch at the fetch step, before orca
+	rec := &recorder{}
+	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(_, b string) (string, string, error) { return "", "", errors.New("base not found") }}
+	_, err := l.Do(orcaReq())
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepFetch || len(rec.calls) != 0 {
+		t.Errorf("err = %v, calls = %d; want a fetch step error and no orca call", err, len(rec.calls))
+	}
+}

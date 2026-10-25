@@ -159,9 +159,11 @@ func TestFetchBaseBranchWithSlashes(t *testing.T) {
 
 func TestFetchBaseBareNameThatLooksLikeARemote(t *testing.T) {
 	r := newFetchRepos(t)
+	gitIn(t, r.dir, "remote", "add", "fork", r.bare)
+	gitIn(t, r.other, "push", "-q", "origin", "main:fork") // a branch on origin that is called like a remote
 	want := r.pushNew(t)
-	if _, _, err := FetchBase(r.dir, "fork"); err != nil {
-		t.Fatal(err)
+	if ref, _, err := FetchBase(r.dir, "fork"); err != nil || ref != "origin/fork" {
+		t.Fatalf("FetchBase = %q, %v; want origin/fork", ref, err)
 	}
 	if got := gitIn(t, r.dir, "rev-parse", "origin/main"); got != want {
 		t.Errorf("origin/main = %s, want %s", got, want)
@@ -201,23 +203,67 @@ func TestDefaultBranchFallsBackToMain(t *testing.T) {
 func TestFetchBaseReturnsTheResolvedRef(t *testing.T) {
 	r := newFetchRepos(t)
 	gitIn(t, r.dir, "remote", "add", "upstream", r.bare)
-	gitIn(t, r.dir, "branch", "-q", "release", "main")
-	for base, want := range map[string]string{
-		"main":             "origin/main",
-		"release":          "origin/release",
-		"feature/x":        "origin/feature/x",
-		"origin/main":      "origin/main",
-		"upstream/main":    "upstream/main",
-		"origin/feature/x": "origin/feature/x",
+	gitIn(t, r.other, "push", "-q", "origin", "main:feature/x") // feature/x exists on origin, not locally
+	gitIn(t, r.dir, "branch", "-q", "release", "main")          // local only
+	gitIn(t, r.dir, "tag", "v1.2.0")
+	sha := gitIn(t, r.dir, "rev-parse", "HEAD")
+	local := func(base string) string { return "origin has no " + base + "; using the local ref " + base }
+	for _, tc := range []struct{ base, ref, note string }{
+		{"main", "origin/main", ""},
+		{"feature/x", "origin/feature/x", ""},
+		{"origin/main", "origin/main", ""},
+		{"upstream/main", "upstream/main", ""},
+		{"origin/feature/x", "origin/feature/x", ""},
+		{"release", "release", local("release")},
+		{"v1.2.0", "v1.2.0", local("v1.2.0")},
+		{sha, sha, local(sha)},
+		{"refs/heads/release", "refs/heads/release", ""},
+		{"refs/tags/v1.2.0", "refs/tags/v1.2.0", ""},
 	} {
-		ref, note, err := FetchBase(r.dir, base)
-		if err != nil || note != "" || ref != want {
-			t.Errorf("FetchBase(%q) = %q, %q, %v; want %q", base, ref, note, err, want)
+		// FetchBase first: it fetches, so feature/x is known afterwards, which Resolve then sees without the network
+		for name, fn := range map[string]func(string, string) (string, string, error){"FetchBase": FetchBase, "ResolveBase": ResolveBase} {
+			ref, note, err := fn(r.dir, tc.base)
+			if err != nil || note != tc.note || ref != tc.ref {
+				t.Errorf("%s(%q) = %q, %q, %v; want %q, %q", name, tc.base, ref, note, err, tc.ref, tc.note)
+			}
 		}
-		ref, note, err = ResolveBase(r.dir, base)
-		if err != nil || note != "" || ref != want {
-			t.Errorf("ResolveBase(%q) = %q, %q, %v; want %q", base, ref, note, err, want)
+	}
+}
+
+func TestFetchBaseNotFoundIsAnError(t *testing.T) {
+	r := newFetchRepos(t)
+	for _, base := range []string{"nope", "feature/none", "v9.9.9", "deadbeef", "-x", "--help"} {
+		for name, fn := range map[string]func(string, string) (string, string, error){"FetchBase": FetchBase, "ResolveBase": ResolveBase} {
+			ref, note, err := fn(r.dir, base)
+			if err == nil {
+				t.Errorf("%s(%q) = %q, %q; want an error", name, base, ref, note)
+				continue
+			}
+			if !strings.Contains(err.Error(), "not found") || !strings.Contains(err.Error(), base) {
+				t.Errorf("%s(%q): error %q does not say the base was not found", name, base, err)
+			}
 		}
+	}
+}
+
+func TestFetchBaseFindsABranchOnlyTheFetchBrings(t *testing.T) {
+	r := newFetchRepos(t)
+	gitIn(t, r.other, "push", "-q", "origin", "main:fresh")
+	if _, _, err := ResolveBase(r.dir, "fresh"); err == nil {
+		t.Error("ResolveBase does not fetch, so it cannot know a branch that is only on the remote")
+	}
+	ref, note, err := FetchBase(r.dir, "fresh")
+	if err != nil || ref != "origin/fresh" || note != "" {
+		t.Errorf("FetchBase = %q, %q, %v; want origin/fresh", ref, note, err)
+	}
+}
+
+func TestFetchBasePrefersTheRemoteOverAStaleLocalBranch(t *testing.T) {
+	r := newFetchRepos(t)
+	r.pushNew(t)
+	ref, note, err := FetchBase(r.dir, "main") // local main is behind origin/main
+	if err != nil || ref != "origin/main" || note != "" {
+		t.Errorf("FetchBase = %q, %q, %v", ref, note, err)
 	}
 }
 
