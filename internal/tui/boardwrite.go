@@ -58,6 +58,7 @@ type boardOp struct {
 
 // boardWriteDoneMsg is the outcome of a write.
 type boardWriteDoneMsg struct {
+	bulk bool // the run was over several marked cards
 	key  string
 	text string
 	err  error
@@ -234,7 +235,7 @@ func (m model) startWriteN(n int, done string, fn func() error) (model, tea.Cmd)
 		if errors.Is(err, ghcli.ErrNeedsProjectScope) {
 			err = errors.New(ghcli.WriteScopeHint(hostOfKey(key)))
 		}
-		return boardWriteDoneMsg{key: key, text: done, err: err}
+		return boardWriteDoneMsg{key: key, text: done, err: err, bulk: n > 1}
 	}
 }
 
@@ -266,11 +267,12 @@ func (m model) onBoardWriteDone(msg boardWriteDoneMsg) (model, tea.Cmd) {
 	m.undoNext = nil
 	if msg.err == nil {
 		m.undo = next // a change that can be taken back; anything else leaves the old record, which would now be stale
+		m.undoWhy, m.undoKey = "", ""
 		if next == nil {
-			m.undo = nil
+			m.undoWhy, m.undoKey = "“"+msg.text+"” cannot be undone from here", msg.key
 		}
-		if st, ok := m.screenData(viewBoard).(boardState); ok && st.key == msg.key {
-			st.marks = nil
+		if st, ok := m.screenData(viewBoard).(boardState); ok && st.key == msg.key && msg.bulk {
+			st.marks = nil // only a run over the marked cards uses them up
 			m = m.withScreenData(viewBoard, st)
 		}
 	}

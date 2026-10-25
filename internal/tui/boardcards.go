@@ -2,8 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -47,7 +49,7 @@ func init() {
 			m.boardOp = nil
 			return m, nil
 		}
-		op.title = strings.TrimSpace(r.text)
+		op.title = ghcli.CleanText(strings.TrimSpace(r.text))
 		op.confirming = true
 		q := "Create the draft “" + op.title + "”"
 		if op.inColumn != "" {
@@ -84,7 +86,7 @@ func init() {
 			m.boardOp = nil
 			return m, nil
 		}
-		op.newTitle = strings.TrimSpace(r.text)
+		op.newTitle = ghcli.CleanText(strings.TrimSpace(r.text))
 		d := newTextDialog("board.edit.body", "Text of the draft “"+op.title+"”", "the text (ctrl+e opens your editor; - makes it empty)")
 		d.text = op.oldBody
 		m.dlg = &d
@@ -115,7 +117,14 @@ func init() {
 		if !ok {
 			return m, nil
 		}
-		return m.startWrite("saved the draft "+op.newTitle, func() error { return editDraft(op.host, op.draftID, op.newTitle, op.newBody) })
+		var title, body *string // only what the user changed is sent, so the rest stays exactly as it is on GitHub
+		if op.newTitle != op.title {
+			title = &op.newTitle
+		}
+		if op.newBody != op.oldBody {
+			body = &op.newBody
+		}
+		return m.startWrite("saved the draft "+op.newTitle, func() error { return editDraft(op.host, op.draftID, title, body) })
 	}
 	dialogHandlers["board.field"] = func(m model, r dialogResultMsg) (model, tea.Cmd) {
 		op := m.boardOp
@@ -162,19 +171,27 @@ func init() {
 				v, shown = &ghcli.FieldValue{Option: r.values[0]}, name
 			}
 		default:
-			t := strings.TrimSpace(r.text)
+			t := ghcli.CleanText(strings.TrimSpace(r.text))
 			if t != "-" {
 				fv := ghcli.FieldValue{Text: t, Date: t}
-				if f.Type == "NUMBER" {
+				shown = t
+				switch f.Type {
+				case "NUMBER":
 					n, err := strconv.ParseFloat(t, 64)
-					if err != nil {
+					if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
 						m.boardOp = nil
-						m.status = styErr.Render("✗ " + ghcli.CleanText(t) + " is not a number")
+						m.status = styErr.Render("✗ " + t + " is not a number")
 						return m, nil
 					}
-					fv.Number = &n
+					fv.Number, shown = &n, strconv.FormatFloat(n, 'f', -1, 64)
+				case "DATE":
+					if _, err := time.Parse("2006-01-02", t); err != nil {
+						m.boardOp = nil
+						m.status = styErr.Render("✗ " + t + " is not a date; write YYYY-MM-DD")
+						return m, nil
+					}
 				}
-				v, shown = &fv, t
+				v = &fv
 			}
 		}
 		op.value, op.shown = v, shown
@@ -361,8 +378,8 @@ func (m model) askFieldValue(op *boardOp, f ghcli.ProjectField) (model, tea.Cmd)
 	}
 	prompt := map[string]string{"TEXT": "text", "NUMBER": "a number", "DATE": "a date, YYYY-MM-DD"}[f.Type] + " (- clears it)"
 	d := newTextDialog("board.field.val", title, prompt)
-	if it, ok := m.selectedCard(); ok {
-		d.text = it.Values[f.ID]
+	if op.card != nil { // the card the question is about, not wherever the cursor is now
+		d.text = op.card.Values[f.ID]
 	}
 	m.dlg = &d
 	return m, nil

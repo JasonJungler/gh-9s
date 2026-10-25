@@ -253,3 +253,54 @@ func TestProjectAssignStopsAtTheCallThatDoesNotAnswer(t *testing.T) {
 	}
 	_ = f
 }
+
+func TestProjectAssignRefusedWhileAChangeRuns(t *testing.T) {
+	installAssign(t)
+	m := assignModel()
+	m.projBusy = true
+	m, cmd := m.startProjectAssign("7")
+	if cmd != nil || m.dlg != nil || !strings.Contains(ansi.Strip(m.status), "still working") {
+		t.Fatalf("cmd %v dlg %v status %q", cmd != nil, m.dlg, m.status)
+	}
+}
+
+func TestProjectAssignPartialFailureSaysHowManyWereDone(t *testing.T) {
+	f := installAssign(t)
+	m := assignModel()
+	m, cmd := m.startProjectAssign("7")
+	m = runCmd(m, cmd)
+	m.dlg = nil
+	m, _ = answer(m, "proj.assign", true, "", "PB") // add Sprint, remove Roadmap
+	removeFromProject = func(h, p, it string) error { return errors.New("boom") }
+	m, cmd = answer(m, "proj.assign.ok", true, "")
+	m = runCmd(m, cmd)
+	if len(f.added) != 1 || !strings.Contains(ansi.Strip(m.status), "1 of 2 changes made") {
+		t.Fatalf("added %v status %q", f.added, m.status)
+	}
+}
+
+func TestProjectAssignChangingTheBoardsProjectForcesARefetch(t *testing.T) {
+	installAssign(t)
+	m := assignModel()
+	m = m.withScreenData(viewBoard, boardState{data: ghcli.Project{ID: "PB"}})
+	m, cmd := m.startProjectAssign("7")
+	m = runCmd(m, cmd)
+	m.dlg = nil
+	m, _ = answer(m, "proj.assign", true, "", "PA", "PB")
+	m, cmd = answer(m, "proj.assign.ok", true, "")
+	m = runCmd(m, cmd)
+	if st, _ := m.screenData(viewBoard).(boardState); !st.force {
+		t.Error("the board of a changed Project was not marked for a re-read")
+	}
+	// a change to another Project leaves it alone
+	m = assignModel().withScreenData(viewBoard, boardState{data: ghcli.Project{ID: "OTHER"}})
+	m, cmd = m.startProjectAssign("7")
+	m = runCmd(m, cmd)
+	m.dlg = nil
+	m, _ = answer(m, "proj.assign", true, "", "PA", "PB")
+	m, cmd = answer(m, "proj.assign.ok", true, "")
+	m = runCmd(m, cmd)
+	if st, _ := m.screenData(viewBoard).(boardState); st.force {
+		t.Error("an unrelated board was marked")
+	}
+}

@@ -50,7 +50,7 @@ gh-9s applies each view's filter and first sort to the loaded cards. The filters
 - `no:`
 - Plain words, and `-` to exclude
 
-Sorts are Title, Status, Assignees, Labels and Updated. Anything else is named in a note instead of guessed. A roadmap view is listed by its first date field (cards without a date last), with that date in the last column; there are no bars.
+Sorts are Title, Status, Assignees, Labels and Updated. Anything else is named in a note instead of guessed. A roadmap view is listed by the first date field it shows (the API does not say which one the view really uses; cards without a date last), with that date in the last column; there are no bars.
 
 ## Column board
 
@@ -76,7 +76,7 @@ Every change asks a question that says exactly what will change, and nothing cha
 | `N` | Create a draft card, with the Status of the column you are in |
 | `e` | Edit a draft's title and text |
 | `v` | Change another field: single select and iteration from a list; text, number (`1.5`) and date (`YYYY-MM-DD`) typed; `-` clears it |
-| `ctrl+↑` / `ctrl+↓` | Move the card one place in its list or column (not in a view with its own sort) |
+| `ctrl+↑` / `ctrl+↓` (or `alt+↑` / `alt+↓`) | Move the card one place in its list or column (not in a view with its own sort) |
 | `u` | Undo the last Status or field change, added card or new draft of this session |
 
 Only one change runs at a time. After a change, the board is read again.

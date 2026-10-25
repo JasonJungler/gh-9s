@@ -267,7 +267,7 @@ func TestMoreViewsThanReadAreSaid(t *testing.T) {
 	for i := 0; i < maxViews; i++ {
 		vs = append(vs, `{"name":"v","layout":"TABLE_LAYOUT"}`)
 	}
-	b := `{"data":{"repositoryOwner":{"projectV2":{"id":"P","title":"P","views":{"nodes":[` + strings.Join(vs, ",") + `]},"items":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}}`
+	b := `{"data":{"repositoryOwner":{"projectV2":{"id":"P","title":"P","views":{"pageInfo":{"hasNextPage":true},"nodes":[` + strings.Join(vs, ",") + `]},"items":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}}`
 	p, _, _, err := ParseProjectPage([]byte(b))
 	if err != nil || !strings.Contains(p.Note, "100 views") {
 		t.Fatalf("note %q err %v", p.Note, err)

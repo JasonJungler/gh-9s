@@ -25,7 +25,14 @@ func installCards(t *testing.T) *cardFakes {
 		f.log = append(f.log, "draft "+title)
 		return "newdraft", f.err
 	}
-	editDraft = func(h, d, title, body string) error {
+	editDraft = func(h, d string, t, b *string) error {
+		title, body := "<keep>", "<keep>"
+		if t != nil {
+			title = *t
+		}
+		if b != nil {
+			body = *b
+		}
 		f.log = append(f.log, "edit "+d+"|"+title+"|"+body)
 		return f.err
 	}

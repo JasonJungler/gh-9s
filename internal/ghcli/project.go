@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ProjectItem is one card of a GitHub Project (v2) board.
@@ -80,7 +81,18 @@ const (
 const itemFields = `number title state url updatedAt repository{nameWithOwner} assignees(first:20){nodes{login}} labels(first:20){nodes{name}}`
 
 // projectQuery only reads. Owner, number and cursor travel as variables, never inside the text.
-const projectQuery = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){id title closed url views(first:100){nodes{name layout filter fields(first:30){nodes{... on ProjectV2Field{name dataType}}} sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} fields(first:50){nodes{... on ProjectV2Field{id name dataType} ... on ProjectV2SingleSelectField{id name dataType options{id name}} ... on ProjectV2IterationField{id name dataType configuration{iterations{id title}}}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValues(first:30){nodes{__typename ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldNumberValue{number field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldIterationValue{title field{... on ProjectV2FieldCommon{id name}}}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{id title body}}}}}}}}`
+const projectOpen = `query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){... on ProjectV2Owner{projectV2(number:$number){`
+
+// projectHead is what only the first page needs: the Project itself, its views and its fields.
+const projectHead = `id title closed url views(first:100){pageInfo{hasNextPage} nodes{name layout filter fields(first:30){nodes{... on ProjectV2Field{name dataType}}} sortByFields(first:1){nodes{field{... on ProjectV2FieldCommon{name}} direction}}}} field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}} fields(first:50){nodes{... on ProjectV2Field{id name dataType} ... on ProjectV2SingleSelectField{id name dataType options{id name}} ... on ProjectV2IterationField{id name dataType configuration{iterations{id title}}}}} `
+
+// projectItemsPart is one page of cards.
+const projectItemsPart = `items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{id fieldValues(first:50){nodes{__typename ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldNumberValue{number field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2FieldCommon{id name}}} ... on ProjectV2ItemFieldIterationValue{title field{... on ProjectV2FieldCommon{id name}}}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{__typename ... on Issue{` + itemFields + `} ... on PullRequest{isDraft merged ` + itemFields + `} ... on DraftIssue{id title body}}}}}}}}`
+
+// projectQuery reads the first page; projectPageQuery the next ones, without the views and fields again.
+const projectQuery = projectOpen + projectHead + projectItemsPart
+
+const projectPageQuery = projectOpen + projectItemsPart
 
 type nameNodes struct {
 	Nodes []struct {
@@ -126,6 +138,9 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 					Closed bool   `json:"closed"`
 					URL    string `json:"url"`
 					Views  struct {
+						PageInfo struct {
+							HasNext bool `json:"hasNextPage"`
+						} `json:"pageInfo"`
 						Nodes []struct {
 							Name, Layout string
 							Filter       *string
@@ -270,7 +285,7 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 		}
 		p.Fields = append(p.Fields, pf)
 	}
-	if len(pr.Views.Nodes) >= maxViews {
+	if pr.Views.PageInfo.HasNext {
 		p.Note = fmt.Sprintf("only the first %d views are read", maxViews)
 	}
 	for _, v := range pr.Views.Nodes {
@@ -300,12 +315,12 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 			val := ""
 			switch v.Type {
 			case "ProjectV2ItemFieldDateValue":
-				if len(v.Date) >= 10 {
+				if d, ok := dayOf(v.Date); ok {
 					if it.Dates == nil {
 						it.Dates = map[string]string{}
 					}
-					it.Dates[oneLine(CleanText(v.Field.Name))] = CleanText(v.Date[:10])
-					val = CleanText(v.Date[:10])
+					it.Dates[oneLine(CleanText(v.Field.Name))] = d
+					val = d
 				}
 			case "ProjectV2ItemFieldTextValue":
 				val = oneLine(CleanText(v.Text))
@@ -356,17 +371,44 @@ func ParseProjectPage(b []byte) (p Project, hasNext bool, cursor string, err err
 	return p, pr.Items.PageInfo.HasNext, pr.Items.PageInfo.End, nil
 }
 
+// dayOf reads the day of a date value ("2026-11-05" or a time starting with it); anything else is not a date.
+func dayOf(s string) (string, bool) {
+	if len(s) < 10 {
+		return "", false
+	}
+	if _, err := time.Parse("2006-01-02", s[:10]); err != nil {
+		return "", false
+	}
+	return s[:10], true
+}
+
 func missingScope(msg string) bool {
 	s := strings.ToLower(msg)
+	// GitHub lists the scopes the token HAS after "but your token has only been granted": those say nothing
+	// about what is missing, so only the part about what the field requires is read.
+	if i := strings.Index(s, "requires one of the following scopes"); i >= 0 {
+		need := s[i:]
+		if j := strings.Index(need, "but your token"); j >= 0 {
+			need = need[:j]
+		}
+		return strings.Contains(need, "project")
+	}
 	return strings.Contains(s, "read:project") || (strings.Contains(s, "required scopes") && strings.Contains(s, "project"))
 }
 
 // projectRun is the seam for tests.
 var projectRun = RunWithTimeout
 
+func queryFor(after string) string {
+	if after == "" {
+		return projectQuery
+	}
+	return projectPageQuery
+}
+
 func projectArgs(host, owner string, number int, after string) []string {
 	args := graphqlArgs(host)
-	args = append(args, "-f", "query="+projectQuery, "-f", "owner="+owner, "-F", fmt.Sprintf("number=%d", number))
+	args = append(args, "-f", "query="+queryFor(after), "-f", "owner="+owner, "-F", fmt.Sprintf("number=%d", number))
 	if after != "" {
 		args = append(args, "-f", "after="+after)
 	}

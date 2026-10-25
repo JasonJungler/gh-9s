@@ -230,7 +230,7 @@ func TestRemoveAndArchiveCannotBeUndone(t *testing.T) {
 	m, cmd := answer(m, "board.remove.ok", true, "")
 	m = runCmd(m, cmd)
 	m = keyAll(m, "u")
-	if m.dlg != nil || !strings.Contains(ansi.Strip(m.status), "nothing to undo") {
+	if m.dlg != nil || !strings.Contains(ansi.Strip(m.status), "cannot be undone from here") {
 		t.Fatalf("dlg=%v status=%q", m.dlg, m.status)
 	}
 }
