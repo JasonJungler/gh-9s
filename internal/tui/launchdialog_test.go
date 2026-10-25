@@ -314,8 +314,32 @@ func TestWarnsWhenTheByteSizeNearsThePlatformCeiling(t *testing.T) {
 			t.Errorf("%s: summary %q lacks a %q byte warning with %d and %d", tc.name, s, tc.want, tc.bytes, lim)
 		}
 	}
-	// switching Where to tmux in the form drops the byte warning
+	// herdr paste-only adds the 12 bytes of paste markers to the argument, so they count against the limit
+	for _, tc := range []struct {
+		bytes int
+		want  string
+	}{{lim - 13, "near"}, {lim - 12, "near"}, {lim - 11, "over"}} {
+		in := orcaInput()
+		in.Target = launch.TargetHerdr
+		in.PasteOnly = true
+		in.ContextBytes = tc.bytes
+		s := newLaunchDialog(in).summary()
+		if !strings.Contains(s, tc.want) {
+			t.Errorf("herdr paste-only with %d bytes: summary %q lacks %q", tc.bytes, s, tc.want)
+		}
+		if tc.want == "over" && !strings.Contains(s, fmt.Sprint(tc.bytes+12)+" bytes") {
+			t.Errorf("summary %q should show %d, the size with the markers", s, tc.bytes+12)
+		}
+	}
+	// without paste-only the markers are not added
 	in := orcaInput()
+	in.Target = launch.TargetHerdr
+	in.ContextBytes = lim
+	if s := newLaunchDialog(in).summary(); strings.Contains(s, "over") {
+		t.Errorf("herdr submit at exactly the limit: %q", s)
+	}
+	// switching Where to tmux in the form drops the byte warning
+	in = orcaInput()
 	in.ContextBytes = lim + 1
 	d := newLaunchDialog(in)
 	d.in.Target = launch.TargetTmux

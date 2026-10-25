@@ -30,6 +30,16 @@ func argvCeiling(goos string) int {
 // issue text an Orca or herdr launch can carry.
 func ArgvLimit() int { return argvCeiling(goos) }
 
+// ArgvSize is how many bytes of program argument a context of n bytes needs for target. It is n, except for
+// herdr paste-only, where the text is wrapped in the bracketed paste markers inside the same argument. Compare
+// it with ArgvLimit.
+func ArgvSize(target Target, pasteOnly bool, n int) int {
+	if target == TargetHerdr && pasteOnly {
+		return n + len(bracketedPasteStart) + len(bracketedPasteEnd)
+	}
+	return n
+}
+
 // readyTimeout is how long a tmux agent gets to become ready. A variable so
 // tests can shorten it.
 var readyTimeout = 30 * time.Second
@@ -63,8 +73,8 @@ type Launcher struct {
 // created is left in place and nothing is retried.
 func (l Launcher) Do(r Request) (Result, error) {
 	if r.Target == TargetOrca || r.Target == TargetHerdr {
-		if max := argvCeiling(goos); len(r.Context) > max {
-			return Result{}, &StepError{StepCreate, fmt.Errorf("issue text is %d bytes; this platform can pass at most %d bytes to %s; trim the issue and try again", len(r.Context), max, r.Target)}
+		if max, size := argvCeiling(goos), ArgvSize(r.Target, r.PasteOnly, len(r.Context)); size > max {
+			return Result{}, &StepError{StepCreate, fmt.Errorf("issue text is %d bytes; this platform can pass at most %d bytes to %s; trim the issue and try again", size, max, r.Target)}
 		}
 	}
 	switch r.Target {

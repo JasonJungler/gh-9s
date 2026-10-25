@@ -411,11 +411,13 @@ func (d launchDialog) summary() string {
 	if d.in.ContextLen > launch.WarnChars {
 		s += fmt.Sprintf(" · ⚠ large issue, %d characters", d.in.ContextLen)
 	}
-	if lim := launch.ArgvLimit(); d.in.Target != launch.TargetTmux && d.in.ContextBytes*10 >= lim*9 {
-		if d.in.ContextBytes > lim {
-			s += fmt.Sprintf(" · ⚠ %d bytes is over the %d-byte limit, the launch will be refused", d.in.ContextBytes, lim)
+	// herdr paste-only sends the text with the paste markers around it, which count too.
+	size := launch.ArgvSize(d.in.Target, d.in.PasteOnly, d.in.ContextBytes)
+	if lim := launch.ArgvLimit(); d.in.Target != launch.TargetTmux && size*10 >= lim*9 {
+		if size > lim {
+			s += fmt.Sprintf(" · ⚠ %d bytes is over the %d-byte limit, the launch will be refused", size, lim)
 		} else {
-			s += fmt.Sprintf(" · ⚠ %d bytes is near the %d-byte limit", d.in.ContextBytes, lim)
+			s += fmt.Sprintf(" · ⚠ %d bytes is near the %d-byte limit", size, lim)
 		}
 	}
 	return s

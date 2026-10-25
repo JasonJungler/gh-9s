@@ -440,6 +440,26 @@ func TestLauncherPasteOnlyReachesEveryTarget(t *testing.T) {
 			t.Errorf("err = %v, calls = %+v", err, rec.calls)
 		}
 	})
+	// herdr paste-only sends the text between the 12 bytes of paste markers as one argument, so the markers
+	// count against the ceiling: the largest text that goes is the ceiling minus 12.
+	t.Run("herdr counts the paste markers", func(t *testing.T) {
+		claude, _ := LookupAgent("claude")
+		edge := argvCeiling(goos) - len(bracketedPasteStart) - len(bracketedPasteEnd)
+		for _, tc := range []struct {
+			n         int
+			pasteOnly bool
+			refused   bool
+		}{{edge, true, false}, {edge + 1, true, true}, {edge + 1, false, false}, {edge + 12, false, false}, {edge + 13, false, true}} {
+			rec := &recorder{reply: herdrReply}
+			r := Request{Target: TargetHerdr, Agent: claude, Dir: "/work", Place: PlacePane, Split: SplitHorizontal, Context: strings.Repeat("a", tc.n), PasteOnly: tc.pasteOnly}
+			_, err := (Launcher{Run: rec.run, Getenv: herdrEnv}).Do(r)
+			var se *StepError
+			refused := errors.As(err, &se) && se.Step == StepCreate
+			if refused != tc.refused || (refused && len(rec.calls) != 0) {
+				t.Errorf("n = edge%+d, pasteOnly = %v: refused = %v (err = %v, calls = %d), want %v", tc.n-edge, tc.pasteOnly, refused, err, len(rec.calls), tc.refused)
+			}
+		}
+	})
 	t.Run("orca keeps the byte ceiling", func(t *testing.T) {
 		rec := &recorder{}
 		r := orcaReq()
@@ -451,4 +471,16 @@ func TestLauncherPasteOnlyReachesEveryTarget(t *testing.T) {
 			t.Errorf("err = %v, calls = %+v", err, rec.calls)
 		}
 	})
+}
+
+func TestArgvSize(t *testing.T) {
+	for _, tc := range []struct {
+		target    Target
+		pasteOnly bool
+		want      int
+	}{{TargetHerdr, true, 112}, {TargetHerdr, false, 100}, {TargetOrca, true, 100}, {TargetTmux, true, 100}} {
+		if got := ArgvSize(tc.target, tc.pasteOnly, 100); got != tc.want {
+			t.Errorf("ArgvSize(%s, %v, 100) = %d, want %d", tc.target, tc.pasteOnly, got, tc.want)
+		}
+	}
 }
