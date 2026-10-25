@@ -32,10 +32,11 @@ type launchAct int
 
 // What a key press asks the caller to do.
 const (
-	actNone         launchAct = iota
-	actCancel                 // close the dialog
-	actSubmit                 // start the launch
-	actAgentChanged           // the agent changed: load its models and call withModels
+	actNone          launchAct = iota
+	actCancel                  // close the dialog
+	actSubmit                  // start the launch
+	actAgentChanged            // the agent changed: load its models and call withModels
+	actTargetChanged           // the target changed: for Orca, load the default base if not asked yet
 )
 
 // launchField is one row of the expanded dialog.
@@ -66,7 +67,9 @@ type launchDialog struct {
 	in         launchInput
 	models     []launch.Model
 	typing     bool // the model is free text, not a pick from models
-	baseEdited bool // the user changed the base, so withBase leaves it alone
+	baseEdited bool // the user changed the base (even back to empty), so withBase leaves it alone
+	baseAsked  bool // the default base was asked for (withBaseLoading); it is asked once per dialog
+	baseLoad   bool // ... and has not arrived yet
 	expanded   bool
 	focus      launchField
 	run        bool
@@ -128,8 +131,24 @@ func (d launchDialog) withModels(m []launch.Model) launchDialog {
 	return d
 }
 
-// withBase sets the base once it is known, unless the user already typed one.
+// withBaseLoading marks the default base as being looked up; withBase ends that.
+func (d launchDialog) withBaseLoading() launchDialog {
+	d.baseAsked, d.baseLoad = true, true
+	return d
+}
+
+// baseLoading reports whether the default base is still being looked up.
+func (d launchDialog) baseLoading() bool { return d.baseLoad }
+
+// findingBase reports whether there is no base yet only because it is still being looked up.
+func (d launchDialog) findingBase() bool {
+	return d.orca() && d.baseLoad && strings.TrimSpace(d.in.Base) == ""
+}
+
+// withBase sets the base once it is known, unless the user already typed one
+// (an edited field counts as typed even when it was cleared again).
 func (d launchDialog) withBase(b string) launchDialog {
+	d.baseLoad = false
 	if !d.baseEdited {
 		d.in.Base = b
 	}
@@ -202,6 +221,10 @@ func (d launchDialog) update(k tea.KeyMsg) (launchDialog, launchAct) {
 	case tea.KeyEsc:
 		return d, actCancel
 	case tea.KeyEnter:
+		if d.findingBase() {
+			d.err = "still finding the base branch…"
+			return d, actNone
+		}
 		if msg := d.invalid(); msg != "" {
 			if !d.expanded {
 				msg += ", press e to edit"
@@ -279,8 +302,14 @@ func (d *launchDialog) editText(f func(string) string) {
 func (d launchDialog) cycle(dir int) (launchDialog, launchAct) {
 	switch d.focus {
 	case fWhere:
-		d.in.Target = launch.Target(cycleChoice(launchTargets, string(d.in.Target), dir))
+		next := launch.Target(cycleChoice(launchTargets, string(d.in.Target), dir))
 		d.in.AutoTarget = false
+		d.retryID, d.err = "", "" // an edit: a lost-reply retry no longer describes the fields
+		if next == d.in.Target {
+			return d, actNone
+		}
+		d.in.Target = next
+		return d, actTargetChanged
 	case fAgent:
 		ids := make([]string, len(launch.Agents))
 		for i, a := range launch.Agents {
@@ -358,7 +387,11 @@ func (d launchDialog) summary() string {
 	}
 	parts := []string{string(d.in.Target) + mark + " " + where, d.in.Agent, model}
 	if d.orca() {
-		parts = append(parts, d.in.Base+" → "+d.in.Name)
+		base := d.in.Base
+		if d.findingBase() {
+			base = "finding base…"
+		}
+		parts = append(parts, base+" → "+d.in.Name)
 	}
 	s := strings.Join(parts, " · ")
 	if d.in.ContextLen > launch.WarnChars {
@@ -490,6 +523,9 @@ func (d launchDialog) formRows(b *strings.Builder, width int) {
 			}
 		case fBase:
 			val = textValue(d.in.Base, focused, room)
+			if d.findingBase() {
+				note = "finding base…"
+			}
 		case fName:
 			val = textValue(d.in.Name, focused, room)
 			note = "Orca's workspace name; Orca adds its own prefix"

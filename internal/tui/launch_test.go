@@ -26,7 +26,7 @@ type launchFakes struct {
 	fetched   []string // issue numbers fetched for the list's a
 }
 
-const launchWD = "/work/app"
+const fakeWorkDir = "/work/app"
 
 // installLaunch replaces every outside call of the launch with a fake. Nothing is run and no real
 // environment variable is read.
@@ -54,7 +54,7 @@ func installLaunch(t *testing.T, env map[string]string) *launchFakes {
 		}
 		return []launch.Model{{}, {ID: "opus"}, {ID: "sonnet"}}
 	}
-	launchDir = func() (string, error) { return launchWD, nil }
+	launchDir = func() (string, error) { return fakeWorkDir, nil }
 	launchDefaultBranch = func(string) string { return "trunk" }
 	envGet = func(k string) string { return f.env[k] }
 	launcher.Run = func(dir string, stdin []byte, name string, args ...string) ([]byte, error) {
@@ -296,7 +296,7 @@ func TestEnterRunsLauncherOnceAndClosesOnSuccess(t *testing.T) {
 		t.Fatalf("launcher ran %d times; want once", len(f.reqs))
 	}
 	r := f.reqs[0]
-	if r.Target != launch.TargetTmux || r.Agent.ID != "devin" || r.Model != "swe" || r.Dir != launchWD || r.Issue != 42 ||
+	if r.Target != launch.TargetTmux || r.Agent.ID != "devin" || r.Model != "swe" || r.Dir != fakeWorkDir || r.Issue != 42 ||
 		r.Context != launch.BuildContext(issue42()) || r.RetryID != "" {
 		t.Errorf("request = %+v", r)
 	}
@@ -578,5 +578,210 @@ func TestLaunchPrefsLoadProblemGoesToTheBanner(t *testing.T) {
 	}
 	if p, banner := loadLaunchPrefs(); p == nil || !strings.Contains(banner, "launch preferences") {
 		t.Errorf("broken file: prefs=%v banner=%q", p, banner)
+	}
+}
+
+// launchMsgs runs cmd and the batches in it, and returns the messages without giving them to the model,
+// so a test can deliver them in the order it wants.
+func launchMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if b, ok := msg.(tea.BatchMsg); ok {
+		var out []tea.Msg
+		for _, c := range b {
+			out = append(out, launchMsgs(c)...)
+		}
+		return out
+	}
+	if msg == nil {
+		return nil
+	}
+	return []tea.Msg{msg}
+}
+
+// baseMsgs picks the base answers out of msgs.
+func baseMsgs(msgs []tea.Msg) []launchBaseMsg {
+	var out []launchBaseMsg
+	for _, msg := range msgs {
+		if b, ok := msg.(launchBaseMsg); ok {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// update gives m one message and returns the model and the command, unrun.
+func update(m model, msg tea.Msg) (model, tea.Cmd) {
+	next, cmd := m.Update(msg)
+	return next.(model), cmd
+}
+
+func TestLaunchEnterWaitsForTheOrcaBase(t *testing.T) {
+	f := installLaunch(t, map[string]string{"ORCA_WORKTREE_ID": "x"})
+	m, cmd := update(issueOnScreen(t), k("a"))
+	bases := baseMsgs(launchMsgs(cmd))
+	if len(bases) != 1 {
+		t.Fatalf("opening an Orca dialog asked for the base %d times; want once", len(bases))
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "finding base… → issue-42-fix-login-crash") {
+		t.Errorf("the summary does not say the base is being found:\n%s", v)
+	}
+	m, cmd = update(m, k("enter"))
+	if v := ansi.Strip(m.View()); cmd != nil || len(f.reqs) != 0 || !strings.Contains(v, "still finding the base branch…") || strings.Contains(v, "base is required") {
+		t.Errorf("enter before the base: cmd=%v launches=%d\n%s", cmd != nil, len(f.reqs), v)
+	}
+	m, _ = update(m, k("e"))
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "finding base…") {
+		t.Errorf("the Base row does not say the base is being found:\n%s", v)
+	}
+	m, _ = update(m, bases[0])
+	if m.launchDlg.in.Base != "origin/trunk" || m.launchDlg.baseLoading() {
+		t.Errorf("after the answer: base=%q loading=%v", m.launchDlg.in.Base, m.launchDlg.baseLoading())
+	}
+	m = pressLaunch(m, "enter")
+	if len(f.reqs) != 1 || f.reqs[0].Base != "origin/trunk" {
+		t.Errorf("enter after the answer: %+v", f.reqs)
+	}
+}
+
+func TestLaunchSwitchingToOrcaLoadsTheBaseOnce(t *testing.T) {
+	installLaunch(t, tmuxEnv)
+	m, cmd := update(issueOnScreen(t), k("a"))
+	if n := len(baseMsgs(launchMsgs(cmd))); n != 0 {
+		t.Fatalf("a tmux dialog asked for an Orca base %d times", n)
+	}
+	m = pressLaunch(m, "e")
+	m, cmd = update(m, k("right")) // tmux -> orca
+	if m.launchDlg.in.Target != launch.TargetOrca {
+		t.Fatalf("target = %s; want orca", m.launchDlg.in.Target)
+	}
+	bases := baseMsgs(launchMsgs(cmd))
+	if len(bases) != 1 {
+		t.Fatalf("switching to orca asked for the base %d times; want once", len(bases))
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "finding base…") {
+		t.Errorf("no finding base… while it loads:\n%s", v)
+	}
+	// away and back while the answer is still on its way: not asked again
+	for _, key := range []string{"right", "left"} {
+		var c tea.Cmd
+		if m, c = update(m, k(key)); len(baseMsgs(launchMsgs(c))) != 0 {
+			t.Errorf("%s asked for the base again while it was loading", key)
+		}
+	}
+	m, _ = update(m, bases[0])
+	if m.launchDlg.in.Base != "origin/trunk" {
+		t.Errorf("base = %q; want origin/trunk", m.launchDlg.in.Base)
+	}
+	// and not after it arrived either
+	for _, key := range []string{"right", "left", "left", "right"} {
+		var c tea.Cmd
+		if m, c = update(m, k(key)); len(baseMsgs(launchMsgs(c))) != 0 {
+			t.Errorf("%s asked for the base again after it was loaded", key)
+		}
+	}
+	if m.launchDlg.in.Target != launch.TargetOrca || m.launchDlg.in.Base != "origin/trunk" {
+		t.Errorf("target=%s base=%q", m.launchDlg.in.Target, m.launchDlg.in.Base)
+	}
+}
+
+func TestLaunchTypedBaseIsNotOverwrittenByALateAnswer(t *testing.T) {
+	installLaunch(t, map[string]string{"ORCA_WORKTREE_ID": "x"})
+	m, cmd := update(issueOnScreen(t), k("a"))
+	bases := baseMsgs(launchMsgs(cmd))
+	m = pressLaunch(m, "e", "tab", "tab", "tab", "u", "p", "/", "x") // Base
+	m, _ = update(m, bases[0])
+	if got := m.launchDlg.in.Base; got != "up/x" {
+		t.Errorf("typed base = %q after the answer; want up/x", got)
+	}
+
+	// typed and then cleared again still counts as typed: the answer does not fill it, and enter
+	// now says the base is required
+	m, cmd = update(issueOnScreen(t), k("a"))
+	bases = baseMsgs(launchMsgs(cmd))
+	m = pressLaunch(m, "e", "tab", "tab", "tab", "x", "backspace")
+	m, _ = update(m, bases[0])
+	if m.launchDlg.in.Base != "" || m.launchDlg.baseLoading() {
+		t.Errorf("cleared base = %q loading=%v after the answer", m.launchDlg.in.Base, m.launchDlg.baseLoading())
+	}
+	if m, _ = update(m, k("enter")); !strings.Contains(ansi.Strip(m.View()), "base is required") {
+		t.Errorf("enter with a cleared base:\n%s", ansi.Strip(m.View()))
+	}
+
+	// a base for another dialog is dropped and the current one keeps waiting
+	m, cmd = update(issueOnScreen(t), k("a"))
+	bases = baseMsgs(launchMsgs(cmd))
+	stale := bases[0]
+	stale.seq--
+	if m, _ = update(m, stale); m.launchDlg.in.Base != "" || !m.launchDlg.baseLoading() {
+		t.Errorf("stale answer used: base=%q loading=%v", m.launchDlg.in.Base, m.launchDlg.baseLoading())
+	}
+}
+
+func TestRememberLaunchSkipsUnchangedAndReadOnlySettings(t *testing.T) {
+	f := installLaunch(t, tmuxEnv)
+	f.results = []launch.Result{{Where: "tmux pane"}}
+	// unchanged: the default agent is not written, so no settings file appears
+	m := issueOnScreen(t)
+	path := m.settings.Path()
+	m = pressLaunch(m, "a", "enter")
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("an unchanged agent was written to the settings (%v)", err)
+	}
+	if st := ansi.Strip(m.status); !strings.Contains(st, "launched: tmux pane") || strings.Contains(st, "not remembered") {
+		t.Errorf("status = %q", st)
+	}
+
+	// read-only settings: no write and no note on every launch (the banner already says so)
+	bad := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(bad, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ro, _ := settings.Load(bad, func(string) string { return "" }, "")
+	if ro.ReadOnly() == nil {
+		t.Fatal("the store is not read-only; the test proves nothing")
+	}
+	m = issueOnScreen(t)
+	m.settings = ro
+	m = pressLaunch(m, "a", "e", "tab", "right", "enter") // devin: a change that cannot be saved
+	if st := ansi.Strip(m.status); !strings.Contains(st, "launched: tmux pane") || strings.Contains(st, "not remembered") {
+		t.Errorf("read-only status = %q; want no note", st)
+	}
+	if b, _ := os.ReadFile(bad); string(b) != "{broken" {
+		t.Error("the read-only settings file was written")
+	}
+}
+
+func TestLaunchOnAFailedIssueShowsTheError(t *testing.T) {
+	installLaunch(t, tmuxEnv)
+	m := issueOnScreen(t)
+	m = m.withScreenData(viewIssue, issueState{})
+	m.err = errors.New("HTTP 404: issue not found")
+	if m = pressLaunch(m, "a"); m.launchDlg != nil || !strings.Contains(ansi.Strip(m.status), "HTTP 404: issue not found") {
+		t.Errorf("dlg=%v status=%q; want the fetch error", m.launchDlg != nil, ansi.Strip(m.status))
+	}
+}
+
+func TestLaunchOnlyTheLatestListFetchOpensTheDialog(t *testing.T) {
+	installLaunch(t, tmuxEnv)
+	installIssues(t, issue42())
+	m := issuesLoaded(t)
+	s, p, _ := launchStores(t)
+	m.settings, m.launchPrefs, m.curRepo = s, p, acme
+	m, first := update(m, k("a"))
+	m, second := update(m, k("a")) // pressed again before the first answer
+	firstMsgs, secondMsgs := launchMsgs(first), launchMsgs(second)
+	m, _ = update(m, secondMsgs[0])
+	if m.launchDlg == nil {
+		t.Fatal("the latest answer opened no dialog")
+	}
+	m = pressLaunch(m, "esc")
+	if m, _ = update(m, firstMsgs[0]); m.launchDlg != nil {
+		t.Error("an earlier answer reopened the dialog the user cancelled")
+	}
+	if m, _ = update(m, secondMsgs[0]); m.launchDlg != nil {
+		t.Error("an answer that was already used reopened the dialog")
 	}
 }

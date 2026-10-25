@@ -34,6 +34,7 @@ var (
 
 // launchIssueMsg carries the issue fetched for a launch from the list.
 type launchIssueMsg struct {
+	seq int    // the latest a press (model.launchSeq); an answer for an earlier one is dropped
 	id  string // m.itemID of the row a was pressed on; an answer for another row is dropped
 	d   ghcli.IssueDetail
 	err error
@@ -94,10 +95,11 @@ func (m model) launchFromList(number string) (model, tea.Cmd) {
 		return m, nil
 	}
 	m.status = styDim.Render("loading the issue…")
-	tg, id := m.target, m.itemID(number)
+	m.launchSeq++
+	tg, id, seq := m.target, m.itemID(number), m.launchSeq
 	return m, func() tea.Msg {
 		d, err := fetchIssue(tg, number)
-		return launchIssueMsg{id: id, d: d, err: err}
+		return launchIssueMsg{seq: seq, id: id, d: d, err: err}
 	}
 }
 
@@ -108,6 +110,9 @@ func (m model) launchFromIssue(d ghcli.IssueDetail) (model, tea.Cmd) {
 	case why != "":
 		m.status = why
 		return m, nil
+	case d.State == "" && m.err != nil:
+		m.status = styErr.Render("✗ " + m.err.Error()) // the issue could not be loaded
+		return m, nil
 	case d.State == "":
 		m.status = styDim.Render("still loading the issue")
 		return m, nil
@@ -115,11 +120,11 @@ func (m model) launchFromIssue(d ghcli.IssueDetail) (model, tea.Cmd) {
 	return m.openLaunch(d, t)
 }
 
-// launchIssueLoaded opens the dialog for the fetched issue, if the list still stands on its row and
-// nothing else is open.
+// launchIssueLoaded opens the dialog for the fetched issue, if it answers the latest a press, the
+// list still stands on its row and nothing else is open.
 func (m model) launchIssueLoaded(msg launchIssueMsg) (model, tea.Cmd) {
 	r, ok := m.selected()
-	if m.view != viewIssues || !ok || m.itemID(r.id) != msg.id || m.mode != modeNormal ||
+	if msg.seq != m.launchSeq || m.view != viewIssues || !ok || m.itemID(r.id) != msg.id || m.mode != modeNormal ||
 		m.dlg != nil || m.picker != nil || m.form != nil || m.launchDlg != nil || m.helpOpen {
 		return m, nil
 	}
@@ -158,19 +163,26 @@ func (m model) openLaunch(d ghcli.IssueDetail, t launch.Target) (model, tea.Cmd)
 		ContextLen: utf8.RuneCountInString(launch.BuildContext(d)),
 	})
 	m.launchSeq++
-	m.launchDlg, m.launchWD, m.status = &dlg, dir, ""
 	cmds := []tea.Cmd{launchModelsCmd(m.launchSeq, agent)}
 	if t == launch.TargetOrca {
-		seq, run, branch := m.launchSeq, launcher.Run, launchDefaultBranch
-		cmds = append(cmds, func() tea.Msg {
-			base, ok := launch.OrcaDefaultBase(run, dir)
-			if !ok {
-				base = "origin/" + branch(dir)
-			}
-			return launchBaseMsg{seq: seq, base: base}
-		})
+		dlg = dlg.withBaseLoading()
+		cmds = append(cmds, launchBaseCmd(m.launchSeq, dir))
 	}
+	m.launchDlg, m.launchWD, m.status = &dlg, dir, ""
 	return m, tea.Batch(cmds...)
+}
+
+// launchBaseCmd looks up the default Orca base in the background: Orca's base ref for the repo,
+// else origin/<default branch>.
+func launchBaseCmd(seq int, dir string) tea.Cmd {
+	run, branch := launcher.Run, launchDefaultBranch
+	return func() tea.Msg {
+		base, ok := launch.OrcaDefaultBase(run, dir)
+		if !ok {
+			base = "origin/" + branch(dir)
+		}
+		return launchBaseMsg{seq: seq, base: base}
+	}
 }
 
 // launchModelsCmd lists the models of an agent in the background (Devin's come from a command).
@@ -195,6 +207,14 @@ func (m model) launchKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		d.in.Model = m.launchPrefs.Model(d.in.Agent)
 		m.launchDlg = &d
 		return m, launchModelsCmd(m.launchSeq, d.in.Agent)
+	case actTargetChanged:
+		var cmd tea.Cmd
+		if d.in.Target == launch.TargetOrca && !d.baseAsked {
+			d = d.withBaseLoading()
+			cmd = launchBaseCmd(m.launchSeq, m.launchWD)
+		}
+		m.launchDlg = &d
+		return m, cmd
 	case actSubmit:
 		req := d.request()
 		req.Context = launch.BuildContext(d.in.Issue)
@@ -258,11 +278,14 @@ func (m model) launchDone(msg launchDoneMsg) model {
 }
 
 // rememberLaunch keeps the agent in the settings and its model in the launch prefs. A failure to
-// save is only a note: the launch itself worked.
+// save is only a note: the launch itself worked. Settings that cannot be saved (the banner already
+// says so) are left alone, as is an agent that is already the setting.
 func (m model) rememberLaunch(agent, model string) string {
 	var notes []string
-	if _, err := m.cfg().Set("launch_agent", agent); err != nil {
-		notes = append(notes, "agent not remembered: "+err.Error())
+	if s := m.cfg(); s.ReadOnly() == nil && s.String("launch_agent") != agent {
+		if _, err := s.Set("launch_agent", agent); err != nil {
+			notes = append(notes, "agent not remembered: "+err.Error())
+		}
 	}
 	m.launchPrefs.SetModel(agent, model)
 	if err := m.launchPrefs.Save(); err != nil {
