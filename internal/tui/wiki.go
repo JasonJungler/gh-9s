@@ -17,6 +17,7 @@ import (
 var (
 	fetchWikiList  = func(tg ghcli.RepoRef) (ghcli.WikiList, error) { return ghcli.ListWiki(tg) }
 	fetchWikiPage  = func(tg ghcli.RepoRef, file string) (ghcli.WikiContent, error) { return ghcli.ReadWiki(tg, file) }
+	keepWikiText   = ghcli.KeepWikiText
 	saveWikiPage   = ghcli.SaveWikiPage
 	createWikiPage = ghcli.CreateWikiPage
 	deleteWikiPage = ghcli.DeleteWikiPage
@@ -262,10 +263,14 @@ func (m model) wikiEdited(msg editedMsg) (model, tea.Cmd) {
 	if e.kind == "save" && sameText(msg.text, e.orig) {
 		return end(styDim.Render("no changes to save"))
 	}
+	text := msg.text
+	if strings.Contains(e.orig, "\r\n") { // a page that uses CRLF keeps it, whatever the editor wrote
+		text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\n", "\r\n")
+	}
 	e2 := *e
-	e2.text = msg.text
+	e2.text = text
 	m.wikiEdit = &e2
-	add, del := ghcli.WikiLineChange(e.orig, msg.text)
+	add, del := ghcli.WikiLineChange(e.orig, text)
 	head := fmt.Sprintf("Save %s to %s wiki  (+%d −%d lines)", e.title, displayRef(e.target), add, del)
 	msgText := "Update " + e.title
 	if e.kind == "create" {
@@ -279,8 +284,17 @@ func (m model) wikiEdited(msg editedMsg) (model, tea.Cmd) {
 
 func wikiSaveAnswered(m model, r dialogResultMsg) (model, tea.Cmd) {
 	e := m.wikiEdit
-	if !r.ok || e == nil || (e.kind != "save" && e.kind != "create") {
+	if e == nil || (e.kind != "save" && e.kind != "create") {
 		m.wikiEdit, m.wikiBusy = nil, false
+		return m, nil
+	}
+	if !r.ok { // the text was written; esc must not throw it away
+		m.wikiEdit, m.wikiBusy = nil, false
+		if p := keepWikiText(e.target, e.file, e.text); p != "" {
+			m.status = styDim.Render("not saved; your text is kept in " + p)
+		} else {
+			m.status = styErr.Render("not saved, and your text could not be kept either")
+		}
 		return m, nil
 	}
 	m.wikiEdit = nil // busy stays until the answer comes back
@@ -384,6 +398,10 @@ func wikiDeleteAnswered(m model, r dialogResultMsg) (model, tea.Cmd) {
 func (m model) wikiDone(msg wikiDoneMsg) (model, tea.Cmd) {
 	m.wikiBusy = false
 	if msg.err != nil {
+		if m.dlg != nil { // do not take over a question the user is answering: the whole message goes on the status line
+			m.status = styErr.Render("✗ wiki: " + oneLineErr(msg.err))
+			return m, nil
+		}
 		m.status = styErr.Render("✗ " + firstSentence(msg.err.Error()))
 		return m.withDialog(newConfirmDialog("wiki.failed", "The wiki was not changed", strings.Join(wrap(msg.err.Error(), max(min(m.width-6, 76), 20)), "\n "))), nil
 	}
@@ -402,6 +420,8 @@ func (m model) wikiDone(msg wikiDoneMsg) (model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+func oneLineErr(err error) string { return strings.Join(strings.Fields(err.Error()), " ") }
 
 func firstSentence(s string) string {
 	if i := strings.IndexAny(s, ";\n"); i > 0 {
@@ -507,7 +527,7 @@ func wikiPageDoc(tg ghcli.RepoRef, st wikiPageState, width int) wikiDoc {
 	}
 	var doc detailDoc
 	addWrapped(&doc, c.Page.Title, width, bold)
-	doc.add(ui.Dim.Render(c.Page.File + " · " + displayRef(tg) + " wiki"))
+	doc.add(ui.Dim.Render(ghcli.CleanText(c.Page.File) + " · " + displayRef(tg) + " wiki"))
 	text := ghcli.CleanText(c.Text)
 	doc.add("")
 	if c.Plain {

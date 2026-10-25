@@ -44,6 +44,9 @@ Markdown pages are drawn like issue text. Pages in the other formats GitHub know
 - If someone else changed the same page on GitHub while you were editing, nothing is saved. Your text is written to a file under the cache directory (`gh-9s/wiki/lost/...`), the box that tells you says where, and the page is read again.
 - If someone changed a different page, your change goes on top of theirs.
 - If GitHub refuses the push (for example you cannot write to the wiki), the same happens: the error is shown in full together with the file that holds your text.
+- If you press `esc` on the commit-message question, nothing is saved but your text is kept in a file there too, and the status line says where.
+- Whatever the reason a save fails (GitHub unreachable, the page changed, a refused push), your text is kept in a file first.
+- A page that uses CRLF line endings keeps them, whatever your editor writes.
 - Your text is never taken from the cache copy: the editor works on a temporary file, so `R` or leaving the screen cannot lose it.
 
 Only one wiki change can be under way at a time; `e`, `n`, `x` and `R` say so while one is.

@@ -127,7 +127,7 @@ func newWikiGit(ctx context.Context, dir string, args ...string) *exec.Cmd {
 		dir = os.TempDir()
 	}
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_ASKPASS=", "LC_ALL=C")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_LITERAL_PATHSPECS=1", "GCM_INTERACTIVE=never", "GIT_ASKPASS=", "LC_ALL=C")
 	return cmd
 }
 
@@ -136,10 +136,16 @@ func wikiGitCmd(dir string, args ...string) *exec.Cmd {
 }
 
 // wikiGit runs git in dir and returns stdout; the error carries git's own words.
-var wikiGit = func(dir string, args ...string) ([]byte, error) {
+func wikiGit(dir string, args ...string) ([]byte, error) { return wikiGitInput(dir, "", args...) }
+
+// wikiGitInput is wikiGit with text on stdin.
+func wikiGitInput(dir, input string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), wikiTimeout)
 	defer cancel()
 	cmd := newWikiGit(ctx, dir, args...)
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -265,7 +271,7 @@ var wikiExts = map[string]bool{
 
 // wikiFileExt tells whether file is a page file (a top-level file in a known format, not special or hidden).
 func wikiFileExt(file string) (ext string, markdown, ok bool) {
-	if file == "" || strings.ContainsAny(file, "/\\\x00") || strings.HasPrefix(file, ".") || strings.HasPrefix(file, "_") || strings.HasPrefix(file, "-") {
+	if file == "" || strings.ContainsAny(file, "/\\\x00") || hasControl(file) || strings.HasPrefix(file, ".") || strings.HasPrefix(file, "_") || strings.HasPrefix(file, "-") {
 		return "", false, false
 	}
 	ext = strings.ToLower(filepath.Ext(file))
@@ -274,6 +280,15 @@ func wikiFileExt(file string) (ext string, markdown, ok bool) {
 		return "", false, false
 	}
 	return ext, md, true
+}
+
+func hasControl(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return true
+		}
+	}
+	return false
 }
 
 // WikiTitle is a page's title: its file name without the format, dashes turned into spaces.
@@ -475,7 +490,7 @@ func readWikiLocked(tg RepoRef, file string) (WikiContent, error) {
 		_, md, _ := wikiFileExt(file)
 		return WikiContent{Page: WikiPage{Title: WikiTitle(file), File: file, Blob: e.blob, Plain: !md}, Text: string(out), Plain: !md, Pages: pages}, nil
 	}
-	return WikiContent{}, fmt.Errorf("no page %s in the wiki", file)
+	return WikiContent{}, fmt.Errorf("no page %q in the wiki", file)
 }
 
 // WikiLineChange counts the lines of next that old does not have (added) and the lines of old that next does not

@@ -559,3 +559,121 @@ func TestWikiReadFileHoldsNoWrites(t *testing.T) {
 		}
 	}
 }
+
+// plumb adds a file to the test remote's work tree commit without touching the work tree (so symlinks and odd
+// names can be stored on any file system).
+func (r *wikiRemote) plumb(mode, name, content, msg string) {
+	r.t.Helper()
+	gitIn(r.t, r.work, "fetch", "-q", "origin")
+	gitIn(r.t, r.work, "reset", "-q", "--hard", "@{upstream}")
+	cmd := exec.Command("git", "hash-object", "-w", "--stdin")
+	cmd.Dir = r.work
+	cmd.Stdin = strings.NewReader(content)
+	out, err := cmd.Output()
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	gitIn(r.t, r.work, "update-index", "--add", "--cacheinfo", mode+","+strings.TrimSpace(string(out))+","+name)
+	gitIn(r.t, r.work, "commit", "-q", "-m", msg)
+	gitIn(r.t, r.work, "push", "-q", "origin", "HEAD")
+}
+
+func TestDeletingAPageNamedLikeAGlobDeletesOnlyThatPage(t *testing.T) {
+	r := newWikiRemote(t, "main", map[string]string{"Home.md": "h\n", "Other.md": "o\n"})
+	r.plumb("100644", "*.md", "star\n", "odd name")
+	c, err := ReadWiki(wikiAcme, "*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteWikiPage(wikiAcme, "*.md", c.Page.Blob, "Delete *"); err != nil {
+		t.Fatal(err)
+	}
+	if r.show("main", "Home.md") != "h" || r.show("main", "Other.md") != "o" {
+		t.Error("deleting one page took others with it")
+	}
+	r.plumb("100644", ":!Home.md", "magic\n", "odd name 2")
+	c, _ = ReadWiki(wikiAcme, ":!Home.md")
+	if err := SaveWikiPage(wikiAcme, ":!Home.md", c.Page.Blob, "changed\n", "m"); err != nil || r.show("main", "Home.md") != "h" || r.show("main", ":!Home.md") != "changed" {
+		t.Errorf("saving a page named like a pathspec: %v", err)
+	}
+}
+
+func TestSaveNeverWritesThroughASymlinkOfAnotherCase(t *testing.T) {
+	r := newWikiRemote(t, "main", map[string]string{"Home.md": "h\n"})
+	r.plumb("100644", "Foo.md", "foo\n", "foo")
+	r.plumb("120000", "foo.md", "../outside.txt", "link that collides with Foo.md on a case-insensitive disk")
+	outside := filepath.Join(filepath.Dir(wikiDir(wikiAcme)), "outside.txt")
+	_ = os.MkdirAll(filepath.Dir(outside), 0o755)
+	if err := os.WriteFile(outside, []byte("precious\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := ReadWiki(wikiAcme, "Foo.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = SaveWikiPage(wikiAcme, "Foo.md", c.Page.Blob, "mine\n", "m") // may succeed or refuse; it must not escape
+	if b, _ := os.ReadFile(outside); string(b) != "precious\n" {
+		t.Fatalf("a file outside the clone was overwritten: %q", b)
+	}
+	if err := CreateWikiPage(wikiAcme, "New-one.md", "x\n", "m"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(outside); string(b) != "precious\n" {
+		t.Fatalf("a file outside the clone was overwritten by a new page: %q", b)
+	}
+}
+
+func TestTextIsKeptWhateverTheFailure(t *testing.T) {
+	r := newWikiRemote(t, "main", map[string]string{"Home.md": "old\n"})
+	c, _ := ReadWiki(wikiAcme, "Home.md")
+	good := wikiURL
+	wikiURL = func(host, owner, name string) string { return filepath.Join(t.TempDir(), "gone.git") } // GitHub unreachable
+	err := SaveWikiPage(wikiAcme, "Home.md", c.Page.Blob, "my long edit\n", "m")
+	if err == nil || !strings.Contains(err.Error(), "saved in ") {
+		t.Fatalf("offline save: %v", err)
+	}
+	if b, _ := os.ReadFile(recoveryPathIn(t, err)); string(b) != "my long edit\n" {
+		t.Errorf("kept %q", b)
+	}
+	wikiURL = good
+	err = CreateWikiPage(wikiAcme, "Big.md", strings.Repeat("x", WikiMaxBytes+1), "m")
+	if err == nil || !strings.Contains(err.Error(), "saved in ") {
+		t.Errorf("too big: %v", err)
+	}
+	// nothing worth keeping: no changes, or an emptied page
+	if err := SaveWikiPage(wikiAcme, "Home.md", c.Page.Blob, "old\n", "m"); err == nil || strings.Contains(err.Error(), "saved in ") {
+		t.Errorf("no-change error should not leave a file: %v", err)
+	}
+	_ = r
+}
+
+func TestRecoveryFilesOfTheSameSecondDoNotOverwriteEachOther(t *testing.T) {
+	newWikiRemote(t, "main", nil)
+	a, b := wikiRecover(wikiAcme, "Home.md", "one"), wikiRecover(wikiAcme, "Home.md", "two")
+	if a == "" || a == b {
+		t.Fatalf("%q %q", a, b)
+	}
+	if x, _ := os.ReadFile(a); string(x) != "one" {
+		t.Errorf("first text lost: %q", x)
+	}
+}
+
+func TestKeepWikiText(t *testing.T) {
+	newWikiRemote(t, "main", nil)
+	p := KeepWikiText(wikiAcme, "Home.md", "unsent")
+	if b, _ := os.ReadFile(p); p == "" || string(b) != "unsent" {
+		t.Errorf("%q %q", p, b)
+	}
+}
+
+func TestFileNamesWithControlCharactersAreNotPages(t *testing.T) {
+	r := newWikiRemote(t, "main", map[string]string{"Home.md": "h\n"})
+	r.plumb("100644", "bad\x1b]0;x\x07.md", "evil\n", "odd")
+	l, err := ListWiki(wikiAcme)
+	if err != nil || len(l.Pages) != 1 {
+		t.Fatalf("%+v %v", l.Pages, err)
+	}
+	if _, err := ReadWiki(wikiAcme, "bad\x1b]0;x\x07.md"); err == nil || strings.ContainsRune(err.Error(), 0x1b) {
+		t.Errorf("err %q", err)
+	}
+}

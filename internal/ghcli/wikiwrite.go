@@ -19,11 +19,43 @@ func wikiRecover(tg RepoRef, file, text string) string {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return ""
 	}
-	p := filepath.Join(dir, file+"."+time.Now().Format("20060102-150405"))
-	if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+	f, err := os.CreateTemp(dir, file+"."+time.Now().Format("20060102-150405")+".*")
+	if err != nil {
 		return ""
 	}
-	return p
+	defer f.Close()
+	if _, err := f.WriteString(text); err != nil {
+		return ""
+	}
+	return f.Name()
+}
+
+// KeepWikiText saves text the user wrote but did not send, and returns where it is ("" if that failed).
+func KeepWikiText(tg RepoRef, file, text string) string { return wikiRecover(tg, file, text) }
+
+var errNoChanges = errors.New("no changes to save")
+
+// keepOnFailure adds, to an error that ended a save or a new page, where the user's text went. It is
+// deferred, so that every way of failing after the editor has closed keeps the text.
+func keepOnFailure(errp *error, tg RepoRef, file, text string) {
+	err := *errp
+	if err == nil || errors.Is(err, errNoChanges) || strings.TrimSpace(text) == "" {
+		return
+	}
+	*errp = fmt.Errorf("%s; %s", err, lostNote(wikiRecover(tg, file, text)))
+}
+
+// stage puts text into the next commit without touching the working tree: it is stored as an object and the
+// index is pointed at it, so no path on disk is ever written (a symbolic link or a name that collides on a
+// case-insensitive disk cannot redirect it).
+func stage(dir, file, text string) error {
+	out, err := wikiGitInput(dir, text, "hash-object", "-w", "--stdin")
+	if err != nil {
+		return err
+	}
+	oid := strings.TrimSpace(string(out))
+	_, err = wikiGit(dir, "update-index", "--add", "--cacheinfo", "100644,"+oid+","+file)
+	return err
 }
 
 // lostNote words where the text went (or, if even that failed, says so).
@@ -114,16 +146,17 @@ func checkWikiText(text string) error {
 }
 
 // SaveWikiPage replaces a page's text. baseBlob is the version the user started from: if the page on GitHub is
-// no longer that, nothing is saved and the user's text is kept in a file.
-func SaveWikiPage(tg RepoRef, file, baseBlob, text, message string) error {
+// no longer that, nothing is saved. Whatever the reason a save does not happen, the user's text is kept in a file.
+func SaveWikiPage(tg RepoRef, file, baseBlob, text, message string) (err error) {
 	if _, _, ok := wikiFileExt(file); !ok {
 		return fmt.Errorf("%q is not a page", file)
 	}
-	if err := checkWikiText(text); err != nil {
-		return err
-	}
 	if strings.TrimSpace(text) == "" {
 		return errors.New("a page cannot be emptied here; use x to delete it")
+	}
+	defer keepOnFailure(&err, tg, file, text)
+	if err = checkWikiText(text); err != nil {
+		return err
 	}
 	wikiMu.Lock()
 	defer wikiMu.Unlock()
@@ -134,37 +167,32 @@ func SaveWikiPage(tg RepoRef, file, baseBlob, text, message string) error {
 	e, ok := findEntry(es, file)
 	switch {
 	case !ok:
-		return fmt.Errorf("%s is no longer in the wiki; %s", WikiTitle(file), lostNote(wikiRecover(tg, file, text)))
+		return fmt.Errorf("%s is no longer in the wiki", WikiTitle(file))
 	case e.link:
 		return errors.New("this page is a symbolic link; gh-9s does not write through those")
 	case e.blob != baseBlob:
-		return fmt.Errorf("%s changed on GitHub since you opened it, so nothing was saved; %s", WikiTitle(file), lostNote(wikiRecover(tg, file, text)))
+		return fmt.Errorf("%s changed on GitHub since you opened it, so nothing was saved", WikiTitle(file))
 	}
-	if cur, err := wikiGit(dir, "cat-file", "blob", e.blob); err == nil && string(cur) == text {
-		return errors.New("no changes to save")
+	if cur, cerr := wikiGit(dir, "cat-file", "blob", e.blob); cerr == nil && string(cur) == text {
+		return errNoChanges
 	}
-	if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0o644); err != nil {
-		return err
+	if err = stage(dir, file, text); err != nil {
+		return fmt.Errorf("%s", firstLine(CleanText(err.Error())))
 	}
-	if _, err := wikiGit(dir, "add", "--", file); err != nil {
-		return fmt.Errorf("%s; %s", firstLine(CleanText(err.Error())), lostNote(wikiRecover(tg, file, text)))
-	}
-	if err := wikiPublish(dir, branch, tg, message); err != nil {
-		return fmt.Errorf("%s; %s", err, lostNote(wikiRecover(tg, file, text)))
-	}
-	return nil
+	return wikiPublish(dir, branch, tg, message)
 }
 
 // CreateWikiPage adds a page that does not exist yet (no page with the same title, whatever the case or format).
-func CreateWikiPage(tg RepoRef, file, text, message string) error {
+func CreateWikiPage(tg RepoRef, file, text, message string) (err error) {
 	if _, _, ok := wikiFileExt(file); !ok || strings.ContainsAny(file, "/\\") {
 		return fmt.Errorf("%q is not a page file name", file)
 	}
-	if err := checkWikiText(text); err != nil {
-		return err
-	}
 	if strings.TrimSpace(text) == "" {
 		return errors.New("nothing was written, so no page was created")
+	}
+	defer keepOnFailure(&err, tg, file, text)
+	if err = checkWikiText(text); err != nil {
+		return err
 	}
 	wikiMu.Lock()
 	defer wikiMu.Unlock()
@@ -175,19 +203,13 @@ func CreateWikiPage(tg RepoRef, file, text, message string) error {
 	stem := strings.ToLower(strings.TrimSuffix(file, filepath.Ext(file)))
 	for _, e := range es {
 		if strings.ToLower(strings.TrimSuffix(e.file, filepath.Ext(e.file))) == stem {
-			return fmt.Errorf("a page called %q already exists; %s", WikiTitle(e.file), lostNote(wikiRecover(tg, file, text)))
+			return fmt.Errorf("a page called %q already exists", WikiTitle(e.file))
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0o644); err != nil {
-		return err
+	if err = stage(dir, file, text); err != nil {
+		return fmt.Errorf("%s", firstLine(CleanText(err.Error())))
 	}
-	if _, err := wikiGit(dir, "add", "--", file); err != nil {
-		return fmt.Errorf("%s; %s", firstLine(CleanText(err.Error())), lostNote(wikiRecover(tg, file, text)))
-	}
-	if err := wikiPublish(dir, branch, tg, message); err != nil {
-		return fmt.Errorf("%s; %s", err, lostNote(wikiRecover(tg, file, text)))
-	}
-	return nil
+	return wikiPublish(dir, branch, tg, message)
 }
 
 // DeleteWikiPage removes a page. baseBlob is the version the user was looking at: a page that changed since is
@@ -209,7 +231,7 @@ func DeleteWikiPage(tg RepoRef, file, baseBlob, message string) error {
 	case e.blob != baseBlob:
 		return fmt.Errorf("%s changed on GitHub since you looked at it, so it was not deleted; press R and look again", WikiTitle(file))
 	}
-	if _, err := wikiGit(dir, "rm", "--quiet", "--", file); err != nil {
+	if _, err := wikiGit(dir, "rm", "--cached", "--quiet", "--", file); err != nil {
 		return errors.New(firstLine(CleanText(err.Error())))
 	}
 	return wikiPublish(dir, branch, tg, message)

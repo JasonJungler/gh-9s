@@ -28,6 +28,7 @@ type wikiFakes struct {
 	err       error
 	editorSaw []string // what the editor was opened on
 	editorOut string   // what the editor returns
+	kept      []string // text set aside because it was not sent
 }
 
 func wikiPages() []ghcli.WikiPage {
@@ -50,7 +51,11 @@ func installWiki(t *testing.T) *wikiFakes {
 		},
 		editorOut: "# Welcome\n\nEdited.\n",
 	}
-	oL, oP, oS, oC, oD, oE := fetchWikiList, fetchWikiPage, saveWikiPage, createWikiPage, deleteWikiPage, editorCmd
+	oL, oP, oS, oC, oD, oE, oK := fetchWikiList, fetchWikiPage, saveWikiPage, createWikiPage, deleteWikiPage, editorCmd, keepWikiText
+	keepWikiText = func(tg ghcli.RepoRef, file, text string) string {
+		f.kept = append(f.kept, text)
+		return "/cache/lost/" + file
+	}
 	fetchWikiList = func(tg ghcli.RepoRef) (ghcli.WikiList, error) {
 		f.listReads++
 		return f.list, nil
@@ -81,7 +86,7 @@ func installWiki(t *testing.T) *wikiFakes {
 		return func() tea.Msg { return editedMsg{text: f.editorOut} }
 	}
 	t.Cleanup(func() {
-		fetchWikiList, fetchWikiPage, saveWikiPage, createWikiPage, deleteWikiPage, editorCmd = oL, oP, oS, oC, oD, oE
+		fetchWikiList, fetchWikiPage, saveWikiPage, createWikiPage, deleteWikiPage, editorCmd, keepWikiText = oL, oP, oS, oC, oD, oE, oK
 	})
 	return f
 }
@@ -662,5 +667,67 @@ func TestRefreshOnTheListIsRefusedWhileAChangeIsUnderWay(t *testing.T) {
 	m = keyAll(m, "R")
 	if f.listReads != n || !strings.Contains(wikiStatus(m), "still in progress") {
 		t.Errorf("reads %d->%d status %q", n, f.listReads, wikiStatus(m))
+	}
+}
+
+func TestEscOnTheMessageKeepsTheEditedTextAndSaysWhere(t *testing.T) {
+	f := installWiki(t)
+	m := wikiPageModel(t, "Home.md")
+	m = keyAll(m, "e")
+	m, _ = answer(m, "wiki.save", false, "")
+	if len(f.kept) != 1 || f.kept[0] != f.editorOut || len(f.saves) != 0 {
+		t.Fatalf("kept %q saves %v", f.kept, f.saves)
+	}
+	if s := wikiStatus(m); !strings.Contains(s, "not saved") || !strings.Contains(s, "/cache/lost/Home.md") {
+		t.Errorf("status %q", s)
+	}
+}
+
+func TestFailureDoesNotReplaceAQuestionTheUserIsAnswering(t *testing.T) {
+	f := installWiki(t)
+	m := wikiPageModel(t, "Home.md")
+	m = keyAll(m, "e")
+	f.err = errors.New("GitHub did not accept the change; your text is saved in /cache/lost/Home.md.1")
+	m, cmd := answer(m, "wiki.save", true, "Update Home")
+	m = m.withDialog(newTextDialog("pr.comment", "Comment on acme/api#1", "Your comment"))
+	m = runCmd(m, cmd)
+	if m.dlg == nil || m.dlg.id != "pr.comment" {
+		t.Fatalf("the open question was replaced: %+v", m.dlg)
+	}
+	if !strings.Contains(wikiStatus(m), "/cache/lost/Home.md.1") {
+		t.Errorf("the saved-text path must still reach the user: %q", wikiStatus(m))
+	}
+}
+
+func TestCRLFPageStaysCRLFWhenTheEditorWritesLF(t *testing.T) {
+	f := installWiki(t)
+	f.texts["Home.md"] = "one\r\ntwo\r\nthree\r\n"
+	f.editorOut = "one\nTWO\nthree\n"
+	m := wikiPageModel(t, "Home.md")
+	m = keyAll(m, "e")
+	title := m.dlg.title
+	m, cmd := answer(m, "wiki.save", true, "m")
+	runCmd(m, cmd)
+	if len(f.saves) != 1 || f.saves[0].text != "one\r\nTWO\r\nthree\r\n" {
+		t.Fatalf("saved %v", f.saves)
+	}
+	if !strings.Contains(title, "+1 −1") {
+		t.Errorf("title %q", title)
+	}
+}
+
+func TestPageHeaderIsCleanedToo(t *testing.T) {
+	f := installWiki(t)
+	old := fetchWikiPage
+	fetchWikiPage = func(tg ghcli.RepoRef, file string) (ghcli.WikiContent, error) {
+		c, err := old(tg, file)
+		c.Page.File = "bad\x1b]0;pwned\x07.md"
+		return c, err
+	}
+	t.Cleanup(func() { fetchWikiPage = old })
+	_ = f
+	m := wikiPageModel(t, "Home.md")
+	if raw := m.View(); strings.Contains(raw, "pwned") || strings.Contains(raw, "\x1b]0") {
+		t.Errorf("an escape in a file name reached the terminal: %q", raw)
 	}
 }
