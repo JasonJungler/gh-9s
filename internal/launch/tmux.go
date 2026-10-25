@@ -18,7 +18,7 @@ var readyPollInterval = 500 * time.Millisecond
 // it.
 var settleTimeout = 3 * time.Second
 
-// bracketedPasteTimeout caps how long paste-only waits for the agent to turn on bracketed paste, and
+// bracketedPasteTimeout caps how long paste waits for the agent to turn on bracketed paste, and
 // bracketedPastePollInterval is how often the pane is asked. They are variables so tests can shorten them.
 var (
 	bracketedPasteTimeout      = 5 * time.Second
@@ -245,7 +245,7 @@ func (t *tmuxSpace) waitBracketedPaste(pane string) error {
 			return nil
 		}
 		if !time.Now().Add(bracketedPastePollInterval).Before(deadline) {
-			return errors.New("the agent has not turned on bracketed paste; nothing was pasted, so the text was not placed")
+			return errors.New("the agent has not turned on bracketed paste; nothing was pasted or sent, so the text did not reach it")
 		}
 		time.Sleep(bracketedPastePollInterval)
 	}
@@ -254,17 +254,16 @@ func (t *tmuxSpace) waitBracketedPaste(pane string) error {
 // paste sends text to the pane through a named tmux buffer, then presses Enter when submit is set. The text
 // never goes through the shell.
 //
-// Without submit the text should stay in the agent's input box, which is only safe as a bracketed paste:
-// `paste-buffer -p` wraps the text in the paste markers only if the program in the pane turned bracketed paste
-// on. If it did not, tmux sends each LF as CR and no markers, and the first line would submit the prompt. So
-// paste-only first waits for #{bracket_paste_flag} to be 1 and, if it never is, pastes nothing (this check
-// comes before load-buffer, so no buffer is left behind). Whether Claude Code and Devin turn bracketed paste
-// on under tmux is not verified here; Claude Code is expected to. Submit mode does not check the flag.
+// Both modes need a bracketed paste: `paste-buffer -p` wraps the text in the paste markers only if the program
+// in the pane turned bracketed paste on. If it did not, tmux sends each LF as CR and no markers. Without
+// submit the first line would then submit the prompt anyway; with submit the first line would submit it and
+// the remaining lines would arrive as separate messages or keystrokes, followed by one more Enter. So paste
+// first waits for #{bracket_paste_flag} to be 1 and, if it never is, pastes nothing and presses nothing (this
+// check comes before load-buffer, so no buffer is left behind). Whether Claude Code and Devin turn bracketed
+// paste on under tmux is not verified here; Claude Code is expected to.
 func (t *tmuxSpace) paste(pane, text string, submit bool) error {
-	if !submit {
-		if err := t.waitBracketedPaste(pane); err != nil {
-			return err
-		}
+	if err := t.waitBracketedPaste(pane); err != nil {
+		return err
 	}
 	buf := "gh9s-" + strings.TrimPrefix(pane, "%")
 	if _, err := t.tmux([]byte(text), "load-buffer", "-b", buf, "-"); err != nil {
