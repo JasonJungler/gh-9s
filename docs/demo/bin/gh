@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""A pretend `gh` for recording the demo GIFs: answers from fixtures in ../fixtures.py and never touches the network.
+Calls it does not know are written to $GH_FAKE_LOG (if set) and answered with an empty list or object.
+Project changes are kept in $GH_FAKE_STATE so the board moves when a card is moved."""
+import json, os, sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import fixtures as fx
+
+args = sys.argv[1:]
+
+
+def log(msg):
+    p = os.environ.get("GH_FAKE_LOG")
+    if p:
+        with open(p, "a") as f:
+            f.write(msg + "\n")
+
+
+def out(v):
+    sys.stdout.write(v if isinstance(v, str) else json.dumps(v))
+    sys.exit(0)
+
+
+def flag(name, default=None):
+    for i, a in enumerate(args):
+        if a == name and i + 1 < len(args):
+            return args[i + 1]
+        if a.startswith(name + "="):
+            return a.split("=", 1)[1]
+    return default
+
+
+STATE = os.environ.get("GH_FAKE_STATE", "/tmp/gh-fake-state.json")
+
+
+def state():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except Exception:
+        return {"status": {}, "gone": [], "next": 100, "drafts": []}
+
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f)
+
+
+def graphql():
+    query = ""
+    for a in args:
+        if a.startswith("query="):
+            query = a[6:]
+    vars_ = {}
+    if "--input" in args:
+        body = json.loads(sys.stdin.read() or "{}")
+        query, vars_ = body.get("query", ""), body.get("variables", {})
+    log("graphql " + query[:90].replace("\n", " "))
+    if query.strip() == "{viewer{login}}":
+        out({"data": {"viewer": {"login": fx.ME}}})
+    if "projectsV2(first:50)" in query:
+        out(fx.project_list())
+    if "projectV2(number" in query and "items(first" in query:
+        out(fx.project_page(state()))
+    if "mutation" in query:
+        s = state()
+        if "updateProjectV2ItemFieldValue" in query and "option" in vars_:
+            s["status"][vars_["item"]] = fx.status_name(vars_["option"])
+            save(s)
+            out({"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": vars_["item"]}}}})
+        if "deleteProjectV2Item" in query:
+            s["gone"].append(vars_["item"])
+            save(s)
+            out({"data": {"deleteProjectV2Item": {"deletedItemId": vars_["item"]}}})
+        if "addProjectV2DraftIssue" in query:
+            s["next"] += 1
+            iid = "PVTI_new%d" % s["next"]
+            s["drafts"].append({"id": iid, "title": vars_["title"]})
+            save(s)
+            out({"data": {"addProjectV2DraftIssue": {"projectItem": {"id": iid}}}})
+        save(s)
+        out({"data": {"ok": {}}})
+    if "reviewThreads" in query:
+        out(fx.review_threads())
+    out({"data": {}})
+
+
+log("gh " + " ".join(args))
+cmd = args[:2]
+if args[:1] == ["api"] and "graphql" in args:
+    graphql()
+if cmd == ["repo", "view"]:
+    out({"url": "https://github.com/acme/app"} if "url" in (flag("--json") or "") else {"nameWithOwner": "acme/app"})
+if cmd == ["run", "list"]:
+    w = flag("-w")
+    if w:  # a workflow file name or id: ci.yml -> CI
+        name = {"ci.yml": "CI", "release.yml": "Release", "docs.yml": "Docs", "1": "CI", "2": "Release", "3": "Docs"}.get(w, w)
+        out([r for r in fx.RUNS if r["workflowName"] == name][: int(flag("-L", "50"))])
+    out(fx.RUNS)
+if cmd == ["workflow", "list"]:
+    out(fx.WORKFLOWS)
+if cmd == ["pr", "list"]:
+    if "statusCheckRollup" in (flag("--json") or ""):
+        out(fx.PR_CHECKS)
+    out(fx.PR_LIST)
+if cmd == ["issue", "list"]:
+    out(fx.ISSUE_LIST)
+if cmd == ["issue", "view"]:
+    out(fx.issue(args[2]))
+if cmd == ["pr", "view"]:
+    if "--jq" in args:
+        out("9b83f10c2a")
+    out(fx.pr(args[2]))
+if cmd == ["pr", "diff"]:
+    out(fx.DIFF)
+if cmd == ["label", "list"]:
+    out([{"name": n} for n in fx.LABELS])
+if cmd[:1] == ["api"]:
+    out("[[]]" if "--slurp" in args else "[]")
+if cmd[0] in ("issue", "pr") and cmd[1] in ("comment", "close", "reopen", "edit", "review", "merge"):
+    out("")
+out("[]" if "list" in args else "{}")

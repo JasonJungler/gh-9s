@@ -7,6 +7,8 @@ A [k9s](https://k9scli.io)-style terminal UI for GitHub, as a `gh` extension.
 - **Issues:** list and filter, read, comment, close and reopen, manage labels and assignees.
 - **Repos:** an interactive picker to move between any repo you can reach.
 
+![gh-9s: issues, an issue, pull requests](docs/demo/overview.gif)
+
 ## Install / develop
 
 ```sh
@@ -102,6 +104,8 @@ The `:` command bar, `/` filter, log search and alias entry open in a box under 
 
 ## Reviewing and merging
 
+![A pull request and its diff](docs/demo/pulls.gif)
+
 Every dialog names the repo and number it acts on (`acme/api#482`). Approving, requesting changes and closing an issue ask for confirmation first; request changes also needs a reason. Long text can be written in your `$EDITOR` with `ctrl+e`.
 
 **Merge** (`m` on a PR) reads the PR again, then judges it by GitHub's own merge state, not rules of its own:
@@ -116,6 +120,8 @@ Every dialog names the repo and number it acts on (`acme/api#482`). Approving, r
 `t` opens a form built from the workflow's declared `workflow_dispatch` inputs: text fields, dropdowns (`←/→`), booleans (`space`), and a branch picker. Required inputs block submission. After you submit, gh-9s finds the run that was created and opens its graph. If it cannot identify the run within 30s it says so and leaves you on the list; the workflow has still been dispatched.
 
 ## Project boards
+
+![A Project board: move a card, undo, mark two cards and move both](docs/demo/board.gif)
 
 Pin a GitHub Project (v2) in `:fav` → Projects (`a`, then `OWNER/NUMBER`) and press `enter` to see its board: one tab per Status column in the Project's order (`All` first, `No status` when some card has none), up to 2000 cards (read 100 at a time; if a later page fails the cards read so far are kept and a note says so), with `enter` opening an issue or PR in its own repo (Enterprise hosts too), `o` the browser, `/` filter, `R` refresh. The Project's saved views show as a second row (`]` / `[` switch): each view's filter (`assignee:@me`, `label:`, `status:`, `is:open|pr|issue|draft|merged`, `repo:`, `no:`, words, `-` to exclude) and first sort (Title, Status, Assignees, Labels, Updated) are applied to the loaded cards; anything else is named in a note instead of guessed, and a roadmap view is listed by the first date field it shows (the API does not say which one the view really uses; cards without a date last) with that date in the last column — no bars. `b` switches to a real board: every Status as a column side by side (`h`/`l` change column, `j`/`k` change card, 24 columns wide at least, needs a terminal of 60 columns and 8 lines of room, otherwise the list is shown; the preview pane is not shown there). The preview pane works on the cards. Changing a Project, always after a question that says exactly what will change: `s` picks a new Status for the card (`H` / `L` in the columns move it to the previous / next column), `a` changes the assignees of an issue or PR card (in the card's own repo), `n` adds an issue or PR (`OWNER/REPO#N` or its address on the Project's host; it gets the Status of the column or tab you are in). `space` marks cards (`●`, at most 50): `s`, `a` (adding people, cards of one repo), `x` and `X` then act on all of them after one question that names the first three, one after the other, stopping at the first failure; `esc` clears the marks. `ctrl+up` / `ctrl+down` (or `alt+up` / `alt+down` where the system keeps the ctrl arrows) move a card one place in its list or column (not in a view with its own sort). `u` takes back the last Status or field change, added card or new draft of this session — not removals, archives, assignee, reorder or bulk changes (it says so instead) — and says "changed since" instead if someone else changed the card meanwhile. Nothing is changed before you confirm, one change runs at a time, and the board is read again afterwards. `x` removes the card from the Project (an issue or PR stays where it is; a draft is gone for good, and the question says so), `X` archives it (archived cards are not shown here; un-archive them in the browser), `N` creates a draft card (with the Status of the column you are in), `e` edits a draft's title and text, `v` changes another field of the card: single select and iteration from a list, text, number (`1.5`) and date (`YYYY-MM-DD`) typed, `-` clears. On an issue or pull request (its screen, or the issue and PR lists) `M` lists your Projects and your organisations' with the ones the item is in ticked: tick or untick, confirm the change in words, and it is added to or taken out of those Projects (a newly added card has no Status; set it from the board). Reading a Project needs the `read:project` permission, changing one the `project` permission: `gh auth refresh -s project` (add `--hostname HOST` for Enterprise).
 
