@@ -269,7 +269,7 @@ func TestHerdrReadyIsANoOp(t *testing.T) {
 
 func TestHerdrPasteUsesAgentPrompt(t *testing.T) {
 	rec := &recorder{}
-	text := "請解決這個 issue\n\n# Title (#1)\n'quoted' $(x) `y`; \"z\"\n"
+	text := "Please solve this issue\n\n# Title (#1)\n'quoted' $(x) `y`; \"z\"\n"
 	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", text, true); err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestHerdrEveryLaterCommandNamesThePane(t *testing.T) {
 // arrives as a bare LF, which an agent could take for Enter. So paste-only wraps the text itself.
 func TestHerdrPasteOnlyWrapsInBracketedPasteAndNeverSubmits(t *testing.T) {
 	rec := &recorder{}
-	text := "請解決這個 issue\n\n# Title (#1)\n'quoted' $(x) `y`; \"z\"\n"
+	text := "Please solve this issue\n\n# Title (#1)\n'quoted' $(x) `y`; \"z\"\n"
 	if err := newHerdr(rec.run, herdrEnv).paste("w1:p2", text, false); err != nil {
 		t.Fatal(err)
 	}

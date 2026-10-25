@@ -20,7 +20,7 @@ agent, and gives it the issue as context.
   at launch (Claude: its `--model`). Leaving it on "default" passes no model flag, so the agent
   uses its own default.
 - The context handed over is identical for every agent and every environment:
-  `請解決這個 issue` (a fixed sentence, in Chinese as the user wrote it), then the issue's title,
+  `Please solve this issue` (a fixed sentence; the user first wrote it in Chinese and then asked for English), then the issue's title,
   body and **all** comments. "Solve an issue" and "implement a requirement" are not different
   modes.
 - In Orca the launch creates a new workspace (worktree) on a chosen base branch, after a
@@ -150,7 +150,7 @@ be verified there; mark it unverified in code until it has run once.
 ## Context text
 
 ```
-請解決這個 issue
+Please solve this issue
 
 # <title> (#<N>)
 <url>

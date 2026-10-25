@@ -19,7 +19,7 @@ const maxBranchLen = 50
 // end of a bracketed paste) into the agent's terminal.
 func BuildContext(d ghcli.IssueDetail) string {
 	var b strings.Builder
-	b.WriteString("請解決這個 issue\n\n")
+	b.WriteString("Please solve this issue\n\n")
 	fmt.Fprintf(&b, "# %s (#%d)\n%s\n\n", d.Title, d.Number, d.URL)
 	if strings.TrimSpace(d.Body) == "" {
 		b.WriteString("(no description)\n")

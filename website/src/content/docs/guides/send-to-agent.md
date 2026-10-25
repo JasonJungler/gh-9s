@@ -136,7 +136,7 @@ Because Orca starts the agent and sends the text in separate calls, the launch t
 The same text for every agent and every environment:
 
 ```
-請解決這個 issue
+Please solve this issue
 
 # <title> (#<number>)
 <url>

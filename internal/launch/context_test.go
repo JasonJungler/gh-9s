@@ -12,7 +12,7 @@ func TestBuildContext(t *testing.T) {
 		Number: 42, Title: "Fix login", URL: "https://x/42", Body: "It crashes.",
 		Comments: []ghcli.Comment{{Author: "ann", Body: "Seen too"}, {Author: "", Body: "me3"}},
 	}
-	want := "請解決這個 issue\n\n# Fix login (#42)\nhttps://x/42\n\nIt crashes.\n\n## Comments\n### ann (1/2)\nSeen too\n\n### ghost (2/2)\nme3\n"
+	want := "Please solve this issue\n\n# Fix login (#42)\nhttps://x/42\n\nIt crashes.\n\n## Comments\n### ann (1/2)\nSeen too\n\n### ghost (2/2)\nme3\n"
 	if got := BuildContext(d); got != want {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
