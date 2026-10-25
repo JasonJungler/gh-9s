@@ -25,10 +25,11 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// safeModelPattern is every model name that may be typed into a pane: letters, digits and . _ : / @ + [ ] -
-// (so "sonnet[1m]", "claude-opus-4-5", "anthropic/claude-sonnet-4.5" and the like). Nothing a shell treats
-// specially except [ ], which stay literal inside the quotes.
-var safeModelPattern = regexp.MustCompile(`^[A-Za-z0-9._:/@+\[\]-]+$`)
+// safeModelPattern is every model name that may be typed into a pane: it starts with a letter or digit (so it
+// can never read as an option) and goes on with letters, digits and . _ : / @ + [ ] - (so "sonnet[1m]",
+// "claude-opus-4-5", "anthropic/claude-sonnet-4.5" and the like). Nothing a shell treats specially except
+// [ ], which stay literal inside the quotes.
+var safeModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]*$`)
 
 // startCommand is the shell command line that starts agent a, selecting model
 // when it is not empty.
@@ -146,6 +147,18 @@ func (t *tmuxSpace) settle(pane string) (string, error) {
 	}
 }
 
+// check validates what will be typed into the pane. runSequence calls it before open, so a rejected model
+// leaves no empty pane or window behind; start calls it again as the last guard before anything is typed.
+func (t *tmuxSpace) check(r Request) error {
+	if hasControl(r.Model) || hasControl(r.Agent.TmuxCommand) {
+		return errors.New("model or command contains a control character")
+	}
+	if r.Model != "" && !safeModelPattern.MatchString(r.Model) {
+		return fmt.Errorf("model %q must start with a letter or digit and have only letters, digits and . _ : / @ + [ ] -, so it cannot be typed into a shell safely", r.Model)
+	}
+	return nil
+}
+
 // start records how often the ready marker is already on screen (the shell's
 // prompt may contain it), then types the start command into the pane. The
 // command is typed into whatever shell the pane runs, which may not be POSIX
@@ -153,11 +166,8 @@ func (t *tmuxSpace) settle(pane string) (string, error) {
 // before anything is typed; startCommand's quoting is a second layer. An empty
 // model passes no flag.
 func (t *tmuxSpace) start(pane string, r Request) error {
-	if hasControl(r.Model) || hasControl(r.Agent.TmuxCommand) {
-		return errors.New("model or command contains a control character")
-	}
-	if r.Model != "" && !safeModelPattern.MatchString(r.Model) {
-		return fmt.Errorf("model %q has characters other than letters, digits and . _ : / @ + [ ] -, so it cannot be typed into a shell safely", r.Model)
+	if err := t.check(r); err != nil {
+		return err
 	}
 	base := 0
 	if r.Agent.ReadyMarker != "" {

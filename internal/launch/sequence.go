@@ -53,10 +53,16 @@ type space interface {
 }
 
 // runSequence opens a pane, starts the agent, waits for it to be ready and
-// pastes r.Context. It stops at the first failure and returns a *StepError.
+// pastes r.Context. A space that can check the request first does so before
+// anything is opened. It stops at the first failure and returns a *StepError.
 // If the agent is not ready in time nothing is pasted and the pane is left
 // open.
 func runSequence(sp space, r Request, timeout time.Duration) error {
+	if c, ok := sp.(interface{ check(Request) error }); ok {
+		if err := c.check(r); err != nil {
+			return &StepError{StepStart, err} // before open: nothing is left behind
+		}
+	}
 	pane, err := sp.open(r)
 	if err != nil {
 		return &StepError{StepOpen, err}

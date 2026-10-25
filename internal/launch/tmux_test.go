@@ -325,16 +325,26 @@ func TestTmuxStartRejectsModelsOutsideTheSafeSet(t *testing.T) {
 			t.Errorf("model %q: %d tmux calls before rejecting; nothing may be typed", model, len(rec.calls))
 		}
 	}
-	// through the sequence the failure is a start step error
-	rec := &recorder{reply: paneReply}
-	err := runSequence(newTmux(rec.run, noEnv), Request{Target: TargetTmux, Agent: claude, Place: PlacePane, Split: SplitHorizontal, Model: `a\'; rm -rf ~ #`, Context: "c"}, time.Millisecond)
-	var se *StepError
-	if !errors.As(err, &se) || se.Step != StepStart {
-		t.Errorf("err = %v, want StepStart", err)
+	// through the sequence the failure is a start step error, and no pane or window is opened for it
+	for _, place := range []Place{PlacePane, PlaceWindow} {
+		rec := &recorder{reply: paneReply}
+		err := runSequence(newTmux(rec.run, noEnv), Request{Target: TargetTmux, Agent: claude, Place: place, Split: SplitHorizontal, Model: `a b`, Context: "c"}, time.Millisecond)
+		var se *StepError
+		if !errors.As(err, &se) || se.Step != StepStart {
+			t.Errorf("err = %v, want StepStart", err)
+		}
+		if len(rec.calls) != 0 {
+			t.Errorf("place %v: %d tmux calls for a rejected model; nothing may be opened", place, len(rec.calls))
+		}
 	}
-	for _, c := range rec.calls {
-		if len(c.args) > 0 && c.args[0] == "send-keys" {
-			t.Errorf("typed into the pane: %s", c.line())
+}
+
+func TestTmuxModelMustStartWithLetterOrDigit(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	for _, model := range []string{"-", "--help", "-x", "-model", "[1m]", ".x", "_x", ":x", "/x", "@x", "+x"} {
+		rec := &recorder{}
+		if err := newTmux(rec.run, noEnv).start("%7", Request{Agent: claude, Model: model}); err == nil || len(rec.calls) != 0 {
+			t.Errorf("model %q: err = %v, calls = %d; want a rejection before anything is typed", model, err, len(rec.calls))
 		}
 	}
 }
@@ -379,8 +389,8 @@ func TestTmuxStartRejectsControlCharacters(t *testing.T) {
 	if !errors.As(err, &se) || se.Step != StepStart {
 		t.Errorf("err = %v, want StepStart", err)
 	}
-	if rec.count("send-keys") != 0 {
-		t.Error("send-keys ran for a rejected model")
+	if len(rec.calls) != 0 {
+		t.Errorf("%d tmux calls for a rejected model; nothing may be opened", len(rec.calls))
 	}
 }
 
