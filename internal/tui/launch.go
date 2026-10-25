@@ -151,17 +151,19 @@ func (m model) openLaunch(d ghcli.IssueDetail, t launch.Target) (model, tea.Cmd)
 	}
 	cfg := m.cfg()
 	agent := cfg.String("launch_agent")
+	text := launch.BuildContext(d)
 	dlg := newLaunchDialog(launchInput{
-		Issue:      d,
-		Target:     t,
-		AutoTarget: cfg.String("launch_target") == "auto",
-		Agent:      agent,
-		Model:      m.launchPrefs.Model(agent),
-		Models:     []launch.Model{{}},
-		Name:       launch.BranchName(d.Number, d.Title),
-		Place:      launch.Place(cfg.String("launch_tmux_place")),
-		Split:      launch.Split(cfg.String("launch_split")),
-		ContextLen: utf8.RuneCountInString(launch.BuildContext(d)),
+		Issue:        d,
+		Target:       t,
+		AutoTarget:   cfg.String("launch_target") == "auto",
+		Agent:        agent,
+		Model:        m.launchPrefs.Model(agent),
+		Models:       []launch.Model{{}},
+		Name:         launch.BranchName(d.Number, d.Title),
+		Place:        launch.Place(cfg.String("launch_tmux_place")),
+		Split:        launch.Split(cfg.String("launch_split")),
+		ContextLen:   utf8.RuneCountInString(text),
+		ContextBytes: len(text),
 	})
 	m.launchSeq++
 	cmds := []tea.Cmd{launchModelsCmd(m.launchSeq, agent)}

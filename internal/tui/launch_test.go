@@ -152,6 +152,9 @@ func TestAKeyOnDetailOpensDialog(t *testing.T) {
 	if got := m.launchDlg.in.ContextLen; got != len([]rune(launch.BuildContext(issue42()))) {
 		t.Errorf("ContextLen = %d; want the rune count of the context", got)
 	}
+	if got := m.launchDlg.in.ContextBytes; got != len(launch.BuildContext(issue42())) {
+		t.Errorf("ContextBytes = %d; want the byte size of the context", got)
+	}
 	if len(f.reqs) != 0 {
 		t.Error("opening the dialog launched something")
 	}

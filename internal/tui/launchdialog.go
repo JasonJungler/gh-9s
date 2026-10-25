@@ -25,6 +25,9 @@ type launchInput struct {
 	Place      launch.Place
 	Split      launch.Split
 	ContextLen int // size of the text that will be sent, in characters (runes)
+	// ContextBytes is the same size in bytes. Orca and herdr take the text as a program argument, which the
+	// platform limits in bytes (launch.ArgvLimit), so a text of few characters can still be too big.
+	ContextBytes int
 }
 
 // launchAct tells the caller what a key did.
@@ -399,6 +402,13 @@ func (d launchDialog) summary() string {
 	s := strings.Join(parts, " · ")
 	if d.in.ContextLen > launch.WarnChars {
 		s += fmt.Sprintf(" · ⚠ large issue, %d characters", d.in.ContextLen)
+	}
+	if lim := launch.ArgvLimit(); d.in.Target != launch.TargetTmux && d.in.ContextBytes*10 >= lim*9 {
+		if d.in.ContextBytes > lim {
+			s += fmt.Sprintf(" · ⚠ %d bytes is over the %d-byte limit, the launch will be refused", d.in.ContextBytes, lim)
+		} else {
+			s += fmt.Sprintf(" · ⚠ %d bytes is near the %d-byte limit", d.in.ContextBytes, lim)
+		}
 	}
 	return s
 }

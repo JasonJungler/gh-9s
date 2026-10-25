@@ -26,6 +26,10 @@ func argvCeiling(goos string) int {
 	return 30000
 }
 
+// ArgvLimit is argvCeiling for the platform gh-9s runs on: the most bytes of
+// issue text an Orca or herdr launch can carry.
+func ArgvLimit() int { return argvCeiling(goos) }
+
 // readyTimeout is how long a tmux agent gets to become ready. A variable so
 // tests can shorten it.
 var readyTimeout = 30 * time.Second

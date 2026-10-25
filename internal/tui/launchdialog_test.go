@@ -247,6 +247,45 @@ func TestWarnsAbove100000(t *testing.T) {
 	}
 }
 
+func TestWarnsWhenTheByteSizeNearsThePlatformCeiling(t *testing.T) {
+	lim := launch.ArgvLimit()
+	for _, tc := range []struct {
+		name   string
+		target launch.Target
+		bytes  int
+		want   string // "" means no byte warning
+	}{
+		{"orca over", launch.TargetOrca, lim + 1, "over"},
+		{"herdr over", launch.TargetHerdr, lim + 1, "over"},
+		{"orca near", launch.TargetOrca, lim - 1, "near"},
+		{"orca small", launch.TargetOrca, lim / 2, ""},
+		{"tmux is not limited", launch.TargetTmux, lim + 1, ""},
+	} {
+		in := orcaInput()
+		in.Target = tc.target
+		in.ContextLen = 500 // few characters, many bytes: only the byte count can warn
+		in.ContextBytes = tc.bytes
+		s := newLaunchDialog(in).summary()
+		if tc.want == "" {
+			if strings.Contains(s, "⚠") {
+				t.Errorf("%s: warns: %q", tc.name, s)
+			}
+			continue
+		}
+		if !strings.Contains(s, "⚠") || !strings.Contains(s, fmt.Sprint(tc.bytes)+" bytes") || !strings.Contains(s, fmt.Sprint(lim)) || !strings.Contains(s, tc.want) {
+			t.Errorf("%s: summary %q lacks a %q byte warning with %d and %d", tc.name, s, tc.want, tc.bytes, lim)
+		}
+	}
+	// switching Where to tmux in the form drops the byte warning
+	in := orcaInput()
+	in.ContextBytes = lim + 1
+	d := newLaunchDialog(in)
+	d.in.Target = launch.TargetTmux
+	if s := d.summary(); strings.Contains(s, "bytes") {
+		t.Errorf("tmux summary mentions the byte limit: %q", s)
+	}
+}
+
 func TestEnterIgnoredWhileRunning(t *testing.T) {
 	d := newLaunchDialog(orcaInput())
 	d, act := d.update(k("enter"))

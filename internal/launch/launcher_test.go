@@ -207,6 +207,15 @@ func TestArgvCeiling(t *testing.T) {
 	}
 }
 
+func TestArgvLimitIsThisPlatformsCeiling(t *testing.T) {
+	for _, name := range []string{"linux", "darwin", "plan9"} {
+		withGOOS(t, name)
+		if got := ArgvLimit(); got != argvCeiling(name) {
+			t.Errorf("ArgvLimit() on %s = %d, want %d", name, got, argvCeiling(name))
+		}
+	}
+}
+
 func withGOOS(t *testing.T, name string) {
 	old := goos
 	goos = name
