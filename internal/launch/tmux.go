@@ -72,20 +72,37 @@ func (t *tmuxSpace) tmux(stdin []byte, args ...string) ([]byte, error) {
 	return t.run("", stdin, "tmux", args...)
 }
 
+// sessionIDPattern matches the session id tmux prints for #{session_id}.
+var sessionIDPattern = regexp.MustCompile(`^\$[0-9]+$`)
+
+// open creates the pane or window. With $TMUX_PANE set, a split targets that
+// pane and a new window goes into that pane's session (new-window cannot take
+// a pane as its target, only a session or window).
 func (t *tmuxSpace) open(r Request) (string, error) {
+	tmuxPane := t.getenv("TMUX_PANE")
 	var args []string
 	if r.Place == PlaceWindow {
-		args = []string{"new-window"}
+		args = []string{"new-window", "-P", "-F", "#{pane_id}"}
+		if tmuxPane != "" {
+			b, err := t.tmux(nil, "display-message", "-p", "-t", tmuxPane, "#{session_id}")
+			if err != nil {
+				return "", err
+			}
+			session := strings.TrimSpace(string(b))
+			if !sessionIDPattern.MatchString(session) {
+				return "", fmt.Errorf("tmux printed %q instead of a session id", session)
+			}
+			args = append(args, "-t", session)
+		}
 	} else {
 		flag := "-h"
 		if r.Split == SplitVertical {
 			flag = "-v"
 		}
-		args = []string{"split-window", flag}
-	}
-	args = append(args, "-P", "-F", "#{pane_id}")
-	if p := t.getenv("TMUX_PANE"); p != "" {
-		args = append(args, "-t", p)
+		args = []string{"split-window", flag, "-P", "-F", "#{pane_id}"}
+		if tmuxPane != "" {
+			args = append(args, "-t", tmuxPane)
+		}
 	}
 	args = append(args, "-c", r.Dir)
 	out, err := t.tmux(nil, args...)
@@ -100,8 +117,9 @@ func (t *tmuxSpace) open(r Request) (string, error) {
 }
 
 // settle waits until the pane shows some text that is the same on two
-// consecutive checks (the new shell has drawn its prompt), or settleTimeout
-// passes, and returns that screen. A baseline taken before the shell has drawn
+// consecutive checks (the new shell has drawn its prompt) and returns that
+// screen. If that does not happen within settleTimeout it fails, so nothing is
+// typed into a pane whose state is unknown. A baseline taken before the shell has drawn
 // its prompt would let the prompt itself look like a new marker.
 func (t *tmuxSpace) settle(pane string) (string, error) {
 	deadline := time.Now().Add(settleTimeout)
@@ -117,7 +135,7 @@ func (t *tmuxSpace) settle(pane string) (string, error) {
 		}
 		prev = out
 		if !time.Now().Add(readyPollInterval).Before(deadline) {
-			return out, nil
+			return "", fmt.Errorf("pane did not settle within %s", settleTimeout)
 		}
 		time.Sleep(readyPollInterval)
 	}
