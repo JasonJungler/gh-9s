@@ -870,10 +870,12 @@ func TestLaunchSubmitOffPastesOnly(t *testing.T) {
 		t.Fatalf("requests = %+v; want one with PasteOnly", f.reqs)
 	}
 	st := ansi.Strip(m.status)
-	for _, want := range []string{"launched: tmux pane", "in the agent's input", "press Enter", "a note"} {
-		if !strings.Contains(st, want) {
-			t.Errorf("status = %q; want it to contain %q", st, want)
-		}
+	// short enough to fit an 80-column terminal together with the location, and before the note
+	if want := "✓ launched: tmux pane · paste only: press Enter in the agent · a note"; st != want {
+		t.Errorf("status = %q; want %q", st, want)
+	}
+	if w := ansi.StringWidth(strings.SplitN(st, " · a note", 2)[0]); w > 64 {
+		t.Errorf("the hint makes the status %d columns wide before any note", w)
 	}
 	if m.launchDlg != nil {
 		t.Error("the dialog stayed open after a success")

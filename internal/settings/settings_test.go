@@ -392,3 +392,18 @@ func TestLaunchSubmitSettingDefaultsToOn(t *testing.T) {
 		t.Errorf("off: err = %v, value = %v", err, s.Bool("launch_submit"))
 	}
 }
+
+// A description is one line in the settings list; launch_submit's was far longer than the others, and the
+// detail belongs in the docs.
+func TestLaunchSubmitDescIsAsShortAsTheOthers(t *testing.T) {
+	d, _ := Lookup("launch_submit")
+	longest := 0
+	for _, o := range Registry {
+		if o.Key != "launch_submit" {
+			longest = max(longest, len(o.Desc))
+		}
+	}
+	if len(d.Desc) > longest {
+		t.Errorf("launch_submit Desc is %d bytes, longer than any other (%d): %q", len(d.Desc), longest, d.Desc)
+	}
+}

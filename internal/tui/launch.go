@@ -272,7 +272,7 @@ func (m model) launchDone(msg launchDoneMsg) model {
 	}
 	status := styOK.Render("✓ launched: " + strings.TrimSpace(msg.res.Where+" "+msg.res.Branch))
 	if msg.pasteOnly {
-		status += styDim.Render(" · the text is in the agent's input, press Enter there to send it")
+		status += styDim.Render(" · paste only: press Enter in the agent")
 	}
 	if msg.res.Note != "" {
 		status += styDim.Render(" · " + msg.res.Note)
