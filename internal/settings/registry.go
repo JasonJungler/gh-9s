@@ -49,6 +49,8 @@ var Registry = []Def{
 		Kind: Enum, Default: "horizontal", Options: []string{"horizontal", "vertical"}},
 	{Key: "launch_submit", Label: "Launch submit", Desc: "on: send the issue to the agent at once; off: only put it in the agent's input box, you press Enter",
 		Kind: Bool, Default: true},
+	{Key: "launch_orca_nested", Label: "Launch Orca nested", Desc: "make the Orca workspace a child of the current one; off: independent",
+		Kind: Bool, Default: false},
 }
 
 // Lookup finds a setting by key.

@@ -61,6 +61,36 @@ func TestSummaryOrca(t *testing.T) {
 	}
 }
 
+func TestSummaryShowsNestedOnlyForOrca(t *testing.T) {
+	in := orcaInput()
+	in.Nested = true
+	if got, want := newLaunchDialog(in).summary(), "orca ◆ new workspace · claude · default model · origin/main → issue-42-fix-login · child of current"; got != want {
+		t.Errorf("nested summary = %q, want %q", got, want)
+	}
+	in.PasteOnly = true
+	if got := newLaunchDialog(in).summary(); !strings.HasSuffix(got, "issue-42-fix-login · child of current · paste only") {
+		t.Errorf("summary = %q, want child of current before paste only", got)
+	}
+	in = tmuxInput()
+	in.Nested = true
+	if got := newLaunchDialog(in).summary(); strings.Contains(got, "child") {
+		t.Errorf("tmux summary = %q mentions a parent, which only Orca has", got)
+	}
+	if got := newLaunchDialog(orcaInput()).summary(); strings.Contains(got, "child") {
+		t.Errorf("independent summary = %q mentions a parent", got)
+	}
+}
+
+func TestRequestCarriesNested(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		in := orcaInput()
+		in.Nested = nested
+		if got := newLaunchDialog(in).request().Nested; got != nested {
+			t.Errorf("Nested = %v, want %v", got, nested)
+		}
+	}
+}
+
 func TestSummaryTmuxPaneAndWindow(t *testing.T) {
 	in := tmuxInput()
 	if got, want := newLaunchDialog(in).summary(), "tmux ◆ new pane (right) · claude · opus"; got != want {

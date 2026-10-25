@@ -174,6 +174,7 @@ func (m model) openLaunch(d ghcli.IssueDetail, t launch.Target) (model, tea.Cmd)
 		Place:        launch.Place(cfg.String("launch_tmux_place")),
 		Split:        launch.Split(cfg.String("launch_split")),
 		PasteOnly:    !cfg.Bool("launch_submit"),
+		Nested:       cfg.Bool("launch_orca_nested"),
 		ContextLen:   utf8.RuneCountInString(text),
 		ContextBytes: len(text),
 	})
