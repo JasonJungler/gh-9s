@@ -106,10 +106,16 @@ func (o orcaBackend) launch(r Request) (Result, error) {
 	return o.launchOneCall(r)
 }
 
+// orcaCreateArgs is the start of every `orca worktree create`. Without --no-parent Orca makes the
+// workspace a child of the one the command runs in, which gh-9s only wants when r.Nested says so.
+// launchOneCall builds the retry from it too, so a retry has the same --no-parent as the original.
 func orcaCreateArgs(r Request) []string {
 	args := []string{"worktree", "create", "--name", r.Name, "--base-branch", r.Base}
 	if r.Issue > 0 {
 		args = append(args, "--issue", fmt.Sprint(r.Issue))
+	}
+	if !r.Nested {
+		args = append(args, "--no-parent")
 	}
 	return args
 }

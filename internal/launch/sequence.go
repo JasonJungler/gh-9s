@@ -19,6 +19,11 @@ type Request struct {
 	// presses Enter in the agent. The zero value submits, as launches always have.
 	PasteOnly bool
 
+	// Nested makes an Orca workspace a child of the one gh-9s runs in (Orca's inferred parent). The zero
+	// value makes it independent, with --no-parent. A retry must carry the same value as the launch it
+	// repeats, because Orca asks for the exact same command.
+	Nested bool
+
 	// RetryID is the operation id of an Orca launch whose reply was lost (see
 	// LostReplyError). When set, the same launch is asked again with it
 	// instead of starting a new one.
