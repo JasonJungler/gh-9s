@@ -18,7 +18,7 @@ import (
 // aliases may not shadow them.
 var ReservedCommands = []string{
 	"runs", "run", "r", "workflows", "workflow", "wf", "w", "pulls", "pull",
-	"prs", "pr", "cpr", "checks", "fav", "favs", "favorites", "issues", "issue", "is", "inbox", "in", "settings", "set", "repo", "q", "quit", "exit",
+	"prs", "pr", "cpr", "checks", "fav", "favs", "favorites", "issues", "issue", "is", "discussions", "discussion", "disc", "wiki", "inbox", "in", "settings", "set", "repo", "q", "quit", "exit",
 }
 
 // IsReserved says whether a name is a built-in command (ignoring case).

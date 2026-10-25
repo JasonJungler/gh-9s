@@ -620,3 +620,47 @@ func TestHelpAndFootersMentionTheWikiKeys(t *testing.T) {
 		t.Errorf("help:\n%s", s)
 	}
 }
+
+func TestListStandsOnThePageOnlyOnceAfterComingBack(t *testing.T) {
+	installWiki(t)
+	m := wikiPageModel(t, "notes.txt")
+	m = keyAll(m, "esc")
+	if m.wikiPageUnderCursor() != "notes.txt" {
+		t.Fatalf("on %q", m.wikiPageUnderCursor())
+	}
+	m = keyAll(m, "k", "R") // the user moves, then refreshes: the cursor must not jump back
+	if m.wikiPageUnderCursor() != "Color-schemes.md" {
+		t.Errorf("after k and R the list stands on %q", m.wikiPageUnderCursor())
+	}
+}
+
+func TestEndOfAChangeInAnotherRepoNeitherRefetchesNorLeavesThePage(t *testing.T) {
+	f := installWiki(t)
+	m := wikiPageModel(t, "Home.md")
+	n := len(f.reads)
+	next, cmd := m.Update(wikiDoneMsg{target: ghcli.RepoRef{Owner: "other", Name: "repo"}, file: "Home.md", text: "deleted Home from the wiki", deleted: true})
+	got := next.(model)
+	if cmd != nil || got.view != viewWikiPage || len(f.reads) != n || !strings.Contains(wikiStatus(got), "deleted Home") {
+		t.Errorf("view %v cmd %v reads %d status %q", got.view, cmd != nil, len(f.reads), wikiStatus(got))
+	}
+}
+
+func TestPlainPageTextIsCleanedToo(t *testing.T) {
+	f := installWiki(t)
+	f.texts["notes.txt"] = "plain \x1b]0;pwned\x07 \x1b[31mred\x1b[0m text\n"
+	m := wikiPageModel(t, "notes.txt")
+	if raw := m.View(); strings.Contains(raw, "pwned") || strings.Contains(raw, "\x1b]0") || strings.Contains(raw, "\x07") {
+		t.Errorf("an escape from the page reached the terminal: %q", raw)
+	}
+}
+
+func TestRefreshOnTheListIsRefusedWhileAChangeIsUnderWay(t *testing.T) {
+	f := installWiki(t)
+	m := wikiListModel(t)
+	m.wikiBusy = true
+	n := f.listReads
+	m = keyAll(m, "R")
+	if f.listReads != n || !strings.Contains(wikiStatus(m), "still in progress") {
+		t.Errorf("reads %d->%d status %q", n, f.listReads, wikiStatus(m))
+	}
+}
