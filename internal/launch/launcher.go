@@ -3,9 +3,28 @@ package launch
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 )
+
+// goos is the platform the ceiling is taken from. A variable so tests can try
+// every platform.
+var goos = runtime.GOOS
+
+// argvCeiling is the most bytes of issue text one program argument can carry
+// on goos: Linux allows 131071 bytes in a single argument, macOS allows 524288
+// bytes for all arguments together, and any other platform gets a cautious
+// 30000. orca and herdr take the text as an argument; tmux gets it on stdin.
+func argvCeiling(goos string) int {
+	switch goos {
+	case "linux":
+		return 131071
+	case "darwin":
+		return 524288
+	}
+	return 30000
+}
 
 // readyTimeout is how long a tmux agent gets to become ready. A variable so
 // tests can shorten it.
@@ -27,12 +46,21 @@ type Launcher struct {
 	Fetch func(dir, base string) (string, error)
 }
 
-// Do launches r. For Orca it fetches the base first and creates nothing if
-// that fails. A failure is a *StepError naming the stage; whatever was already
+// Do launches r. The text size and (for Orca) the arguments are checked before
+// anything runs. For Orca it then fetches the base and creates nothing if that
+// fails. A failure is a *StepError naming the stage; whatever was already
 // created is left in place and nothing is retried.
 func (l Launcher) Do(r Request) (Result, error) {
+	if r.Target == TargetOrca || r.Target == TargetHerdr {
+		if max := argvCeiling(goos); len(r.Context) > max {
+			return Result{}, &StepError{StepCreate, fmt.Errorf("issue text is %d bytes; this platform can pass at most %d bytes to %s; trim the issue and try again", len(r.Context), max, r.Target)}
+		}
+	}
 	switch r.Target {
 	case TargetOrca:
+		if err := (orcaBackend{}).check(r); err != nil {
+			return Result{}, &StepError{StepCreate, err}
+		}
 		if l.Fetch == nil {
 			return Result{}, &StepError{StepFetch, errors.New("no way to fetch the base was configured")}
 		}

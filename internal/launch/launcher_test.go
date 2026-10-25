@@ -2,6 +2,7 @@ package launch
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -45,15 +46,7 @@ func TestLauncherFetchBeforeCreate(t *testing.T) {
 func TestLauncherFetchNoteJoinsOrcaNote(t *testing.T) {
 	r := orcaReq()
 	r.Context = strings.Repeat("a", orcaPromptMax+1)
-	rec := &recorder{reply: func(c call) ([]byte, error) {
-		switch c.args[0] {
-		case "worktree":
-			return []byte(orcaCreateBareOut), nil
-		case "agent":
-			return []byte(orcaAgentLaunchOut), nil
-		}
-		return []byte(orcaSendWarnOut), nil
-	}}
+	rec := &recorder{reply: fallbackReply(orcaSendWarnOut)}
 	l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(string, string) (string, error) { return "fetched", nil }}
 	res, err := l.Do(r)
 	if err != nil {
@@ -176,7 +169,12 @@ func TestLauncherPicksBackendByTarget(t *testing.T) {
 		readyTimeout = time.Millisecond
 		defer func() { readyTimeout = old }()
 		rec := &recorder{reply: paneReply}
-		Launcher{Run: rec.run, Getenv: noEnv, Fetch: fetch}.Do(Request{Target: TargetTmux, Agent: claude, Place: PlacePane, Split: SplitHorizontal, Dir: "/work", Context: "c"})
+		// The fake tmux never shows the agent, so the launch stops at readiness.
+		_, err := Launcher{Run: rec.run, Getenv: noEnv, Fetch: fetch}.Do(Request{Target: TargetTmux, Agent: claude, Place: PlacePane, Split: SplitHorizontal, Dir: "/work", Context: "c"})
+		var se *StepError
+		if !errors.As(err, &se) || se.Step == StepPaste {
+			t.Errorf("err = %v, want a step error before the paste", err)
+		}
 		if len(rec.calls) == 0 {
 			t.Fatal("no calls")
 		}
@@ -198,5 +196,105 @@ func TestLauncherPicksBackendByTarget(t *testing.T) {
 func TestLauncherTmuxReadyTimeoutIs30Seconds(t *testing.T) {
 	if readyTimeout != 30*time.Second {
 		t.Errorf("readyTimeout = %v, want 30s", readyTimeout)
+	}
+}
+
+func TestArgvCeiling(t *testing.T) {
+	for goos, want := range map[string]int{"linux": 131071, "darwin": 524288, "windows": 30000, "freebsd": 30000, "": 30000} {
+		if got := argvCeiling(goos); got != want {
+			t.Errorf("argvCeiling(%q) = %d, want %d", goos, got, want)
+		}
+	}
+}
+
+func withGOOS(t *testing.T, name string) {
+	old := goos
+	goos = name
+	t.Cleanup(func() { goos = old })
+}
+
+func TestLauncherRefusesTextOverTheCeilingBeforeAnyCall(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	for _, name := range []string{"linux", "darwin", "plan9"} {
+		max := argvCeiling(name)
+		for _, target := range []Target{TargetOrca, TargetHerdr} {
+			t.Run(name+"/"+string(target), func(t *testing.T) {
+				withGOOS(t, name)
+				rec := &recorder{reply: func(c call) ([]byte, error) {
+					if target == TargetHerdr {
+						return herdrReply(c)
+					}
+					if c.args[0] == "worktree" && strings.Contains(strings.Join(c.args, " "), "--prompt") {
+						return []byte(orcaCreateAgentOut), nil
+					}
+					return fallbackReply(orcaSendOkOut)(c)
+				}}
+				fetched := 0
+				l := Launcher{Run: rec.run, Getenv: herdrEnv, Fetch: func(string, string) (string, error) { fetched++; return "", nil }}
+				r := orcaReq()
+				r.Target = target
+				r.Agent = claude
+				r.Place = PlaceWindow
+				r.Context = strings.Repeat("a", max+1)
+				_, err := l.Do(r)
+				var se *StepError
+				if !errors.As(err, &se) || se.Step != StepCreate {
+					t.Fatalf("err = %v, want a create step error", err)
+				}
+				for _, want := range []string{fmt.Sprint(max + 1), fmt.Sprint(max), string(target), "trim the issue"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("err = %q does not mention %q", err, want)
+					}
+				}
+				if fetched != 0 || len(rec.calls) != 0 {
+					t.Errorf("fetched %d times, %d calls: the refusal must come first", fetched, len(rec.calls))
+				}
+
+				// Exactly at the ceiling is not refused for the ceiling.
+				r.Context = strings.Repeat("a", max)
+				if _, err := l.Do(r); err != nil {
+					t.Errorf("a context of exactly %d bytes: %v", max, err)
+				}
+			})
+		}
+	}
+}
+
+func TestLauncherCeilingDoesNotLimitTmux(t *testing.T) {
+	withGOOS(t, "plan9")
+	old := readyTimeout
+	readyTimeout = time.Millisecond
+	defer func() { readyTimeout = old }()
+	rec := &recorder{reply: paneReply}
+	claude, _ := LookupAgent("claude")
+	_, err := Launcher{Run: rec.run, Getenv: noEnv, Fetch: failFetch(t)}.Do(Request{Target: TargetTmux, Agent: claude, Place: PlaceWindow, Dir: "/work", Context: strings.Repeat("a", 1000000)})
+	var se *StepError
+	if errors.As(err, &se) && se.Step == StepCreate {
+		t.Errorf("tmux was refused for size: %v", err)
+	}
+	if len(rec.calls) == 0 {
+		t.Error("tmux was never called")
+	}
+}
+
+func TestLauncherChecksOrcaArgumentsBeforeFetch(t *testing.T) {
+	for _, mod := range []func(r *Request){
+		func(r *Request) { r.Name = "--evil" },
+		func(r *Request) { r.Base = "-x" },
+		func(r *Request) { r.Model = "a\nb" },
+	} {
+		rec := &recorder{}
+		fetched := 0
+		l := Launcher{Run: rec.run, Getenv: noEnv, Fetch: func(string, string) (string, error) { fetched++; return "", nil }}
+		r := orcaReq()
+		mod(&r)
+		_, err := l.Do(r)
+		var se *StepError
+		if !errors.As(err, &se) || se.Step != StepCreate {
+			t.Errorf("err = %v, want a create step error", err)
+		}
+		if fetched != 0 || len(rec.calls) != 0 {
+			t.Errorf("fetched %d times, %d calls: a bad argument must cost nothing", fetched, len(rec.calls))
+		}
 	}
 }

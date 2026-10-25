@@ -113,6 +113,36 @@ const orcaLostOut = `{
 }
 `
 
+// orcaWaitOkOut is a satisfied `terminal wait` reply. It is hand-written from
+// Orca's CLI source (result.wait.satisfied); only the timeout and stale-handle
+// failures below were recorded from the real tool.
+const orcaWaitOkOut = `{"id":"x","ok":true,"result":{"wait":{"satisfied":true,"status":"idle"}}}`
+
+// orcaWaitTimeoutOut was recorded from `orca terminal wait --terminal <busy>
+// --for tui-idle --timeout-ms 1500 --json` (exit 1).
+const orcaWaitTimeoutOut = `{
+  "id": "211876a2-efb6-46ab-9240-a424d4a7dabe",
+  "ok": false,
+  "error": {"code": "timeout", "message": "timeout"},
+  "_meta": {"runtimeId": "5c7d077f-2355-4f7a-b684-82f931b9c7f0"}
+}
+`
+
+// fallbackReply answers the four calls of the large-context fallback.
+func fallbackReply(send string) func(c call) ([]byte, error) {
+	return func(c call) ([]byte, error) {
+		switch {
+		case c.args[0] == "worktree":
+			return []byte(orcaCreateBareOut), nil
+		case c.args[0] == "agent":
+			return []byte(orcaAgentLaunchOut), nil
+		case c.args[0] == "terminal" && c.args[1] == "wait":
+			return []byte(orcaWaitOkOut), nil
+		}
+		return []byte(send), nil
+	}
+}
+
 func orcaReq() Request {
 	claude, _ := LookupAgent("claude")
 	return Request{
@@ -180,25 +210,17 @@ func TestOrcaReadsBranchFromResult(t *testing.T) {
 func TestOrcaLargeContextFallsBack(t *testing.T) {
 	r := orcaReq()
 	r.Model = "opus"
-	r.Context = strings.Repeat("字", orcaPromptMax/3+1) // more than orcaPromptMax bytes
+	r.Context = strings.Repeat("字", orcaPromptMax/3+1) // 131073 bytes, more than orcaPromptMax
 	if len(r.Context) <= orcaPromptMax {
 		t.Fatalf("test context is %d bytes", len(r.Context))
 	}
-	rec := &recorder{reply: func(c call) ([]byte, error) {
-		switch c.args[0] {
-		case "worktree":
-			return []byte(orcaCreateBareOut), nil
-		case "agent":
-			return []byte(orcaAgentLaunchOut), nil
-		}
-		return []byte(orcaSendWarnOut), nil
-	}}
+	rec := &recorder{reply: fallbackReply(orcaSendWarnOut)}
 	res, err := (orcaBackend{run: rec.run}).launch(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rec.calls) != 3 {
-		t.Fatalf("calls = %d, want 3: %+v", len(rec.calls), rec.calls)
+	if len(rec.calls) != 4 {
+		t.Fatalf("calls = %d, want 4 (create, launch, wait, send): %+v", len(rec.calls), rec.calls)
 	}
 	create := []string{"worktree", "create", "--name", "issue-42", "--base-branch", "origin/main", "--issue", "42", "--json"}
 	if !equalArgs(rec.calls[0].args, create) {
@@ -208,9 +230,13 @@ func TestOrcaLargeContextFallsBack(t *testing.T) {
 	if !equalArgs(rec.calls[1].args, launch) {
 		t.Errorf("launch = %q, want %q", rec.calls[1].args, launch)
 	}
+	wait := []string{"terminal", "wait", "--terminal", orcaTerm2, "--for", "tui-idle", "--timeout-ms", "30000", "--json"}
+	if !equalArgs(rec.calls[2].args, wait) {
+		t.Errorf("wait = %q, want %q (before the send)", rec.calls[2].args, wait)
+	}
 	send := []string{"terminal", "send", "--terminal", orcaTerm2, "--text", r.Context, "--enter", "--json"}
-	if !equalArgs(rec.calls[2].args, send) {
-		t.Errorf("send args differ from the expected terminal send (text length %d)", len(rec.calls[2].args[4]))
+	if !equalArgs(rec.calls[3].args, send) {
+		t.Errorf("send args differ from the expected terminal send (text length %d)", len(rec.calls[3].args[4]))
 	}
 	for _, c := range rec.calls {
 		if c.dir != "/work" {
@@ -225,30 +251,37 @@ func TestOrcaLargeContextFallsBack(t *testing.T) {
 	}
 }
 
-func TestOrcaContextAtTheLimitUsesPrompt(t *testing.T) {
-	r := orcaReq()
-	r.Context = strings.Repeat("a", orcaPromptMax)
-	rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
-	if _, err := (orcaBackend{run: rec.run}).launch(r); err != nil {
-		t.Fatal(err)
+func TestOrcaPromptBoundary(t *testing.T) {
+	if orcaPromptMax != 131071 {
+		t.Fatalf("orcaPromptMax = %d, want 131071", orcaPromptMax)
 	}
-	if len(rec.calls) != 1 || !strings.Contains(strings.Join(rec.calls[0].args, " "), "--prompt") {
-		t.Errorf("a context of exactly orcaPromptMax bytes should go in --prompt: %d calls", len(rec.calls))
+	for _, tc := range []struct {
+		size  int
+		calls int
+		flag  bool
+	}{{orcaPromptMax, 1, true}, {orcaPromptMax + 1, 4, false}} {
+		r := orcaReq()
+		r.Context = strings.Repeat("a", tc.size)
+		rec := &recorder{reply: func(c call) ([]byte, error) {
+			if c.args[0] == "worktree" && c.args[2] != "" && strings.Contains(strings.Join(c.args, " "), "--prompt") {
+				return []byte(orcaCreateAgentOut), nil
+			}
+			return fallbackReply(orcaSendOkOut)(c)
+		}}
+		if _, err := (orcaBackend{run: rec.run}).launch(r); err != nil {
+			t.Fatal(err)
+		}
+		hasPrompt := strings.Contains(strings.Join(rec.calls[0].args, " "), "--prompt")
+		if len(rec.calls) != tc.calls || hasPrompt != tc.flag {
+			t.Errorf("%d bytes: %d calls, --prompt = %v; want %d calls, --prompt = %v", tc.size, len(rec.calls), hasPrompt, tc.calls, tc.flag)
+		}
 	}
 }
 
 func TestOrcaFallbackSendWithoutWarningHasNoNote(t *testing.T) {
 	r := orcaReq()
 	r.Context = strings.Repeat("a", orcaPromptMax+1)
-	rec := &recorder{reply: func(c call) ([]byte, error) {
-		switch c.args[0] {
-		case "worktree":
-			return []byte(orcaCreateBareOut), nil
-		case "agent":
-			return []byte(orcaAgentLaunchOut), nil
-		}
-		return []byte(orcaSendOkOut), nil
-	}}
+	rec := &recorder{reply: fallbackReply(orcaSendOkOut)}
 	res, err := (orcaBackend{run: rec.run}).launch(r)
 	if err != nil || res.Note != "" {
 		t.Errorf("res = %+v, err = %v", res, err)
@@ -258,6 +291,18 @@ func TestOrcaFallbackSendWithoutWarningHasNoNote(t *testing.T) {
 func TestOrcaFallbackStepFailures(t *testing.T) {
 	big := orcaReq()
 	big.Context = strings.Repeat("a", orcaPromptMax+1)
+	// upto answers well for the first n calls, then runs bad.
+	upto := func(n int, bad func(c call) ([]byte, error)) func(c call) ([]byte, error) {
+		i := 0
+		return func(c call) ([]byte, error) {
+			i++
+			if i > n {
+				return bad(c)
+			}
+			return fallbackReply(orcaSendOkOut)(c)
+		}
+	}
+	fail := func(c call) ([]byte, error) { return []byte(orcaFailOut), errors.New("exit status 1") }
 	cases := []struct {
 		name  string
 		reply func(c call) ([]byte, error)
@@ -265,38 +310,25 @@ func TestOrcaFallbackStepFailures(t *testing.T) {
 		calls int
 		want  string
 	}{
-		{"create fails", func(c call) ([]byte, error) { return []byte(orcaFailOut), errors.New("exit status 1") },
-			StepCreate, 1, "repo_not_found"},
-		{"agent launch fails", func(c call) ([]byte, error) {
-			if c.args[0] == "worktree" {
-				return []byte(orcaCreateBareOut), nil
-			}
-			return []byte(orcaFailOut), errors.New("exit status 1")
-		}, StepStart, 2, "was created"},
-		{"agent started as a chat", func(c call) ([]byte, error) {
-			if c.args[0] == "worktree" {
-				return []byte(orcaCreateBareOut), nil
-			}
+		{"create fails", upto(0, fail), StepCreate, 1, "repo_not_found"},
+		{"agent launch fails", upto(1, fail), StepStart, 2, "was created"},
+		{"agent started as a chat", upto(1, func(c call) ([]byte, error) {
 			return []byte(`{"ok":true,"result":{"outcome":{"kind":"chat"}}}`), nil
-		}, StepStart, 2, "chat"},
-		{"send fails", func(c call) ([]byte, error) {
-			switch c.args[0] {
-			case "worktree":
-				return []byte(orcaCreateBareOut), nil
-			case "agent":
-				return []byte(orcaAgentLaunchOut), nil
-			}
-			return nil, errors.New("terminal gone")
-		}, StepPaste, 3, "context was not sent"},
-		{"send not accepted", func(c call) ([]byte, error) {
-			switch c.args[0] {
-			case "worktree":
-				return []byte(orcaCreateBareOut), nil
-			case "agent":
-				return []byte(orcaAgentLaunchOut), nil
-			}
+		}), StepStart, 2, "chat"},
+		{"wait times out", upto(2, func(c call) ([]byte, error) {
+			return []byte(orcaWaitTimeoutOut), errors.New("exit status 1")
+		}), StepReady, 3, "timeout"},
+		{"wait not satisfied", upto(2, func(c call) ([]byte, error) {
+			return []byte(`{"ok":true,"result":{"wait":{"satisfied":false,"status":"blocked"}}}`), errors.New("exit status 1")
+		}), StepReady, 3, "did not become ready"},
+		{"wait exits 0 but not satisfied", upto(2, func(c call) ([]byte, error) {
+			return []byte(`{"ok":true,"result":{"wait":{"satisfied":false}}}`), nil
+		}), StepReady, 3, "did not become ready"},
+		{"send fails", upto(3, func(c call) ([]byte, error) { return nil, errors.New("terminal gone") }),
+			StepPaste, 4, "context was not sent"},
+		{"send not accepted", upto(3, func(c call) ([]byte, error) {
 			return []byte(`{"ok":true,"result":{"send":{"accepted":false}}}`), nil
-		}, StepPaste, 3, "did not accept"},
+		}), StepPaste, 4, "did not accept"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -312,7 +344,48 @@ func TestOrcaFallbackStepFailures(t *testing.T) {
 			if len(rec.calls) != tc.calls {
 				t.Errorf("calls = %d, want %d (nothing retried, nothing after the failure)", len(rec.calls), tc.calls)
 			}
+			if tc.step == StepReady {
+				for _, c := range rec.calls {
+					if len(c.args) > 1 && c.args[1] == "send" {
+						t.Errorf("the context was sent although the agent never became ready: %s", c.line()[:40])
+					}
+				}
+			}
 		})
+	}
+}
+
+// A lost reply from the fallback's agent launch must not offer a retry, since
+// the fallback always refuses a RetryID.
+func TestOrcaFallbackLostLaunchReplyIsNotRetryable(t *testing.T) {
+	big := orcaReq()
+	big.Context = strings.Repeat("a", orcaPromptMax+1)
+	rec := &recorder{reply: func(c call) ([]byte, error) {
+		if c.args[0] == "worktree" {
+			return []byte(orcaCreateBareOut), nil
+		}
+		return []byte(orcaLostOut), errors.New("exit status 1")
+	}}
+	_, err := (orcaBackend{run: rec.run}).launch(big)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepStart {
+		t.Fatalf("err = %v, want a start step error", err)
+	}
+	var lost *LostReplyError
+	if errors.As(err, &lost) {
+		t.Errorf("a LostReplyError is reachable, so a caller would offer a retry that is always refused: %v", err)
+	}
+	text := err.Error()
+	if strings.Contains(text, "--retry-launch") || strings.Contains(text, orcaOp) {
+		t.Errorf("message offers a retry: %q", text)
+	}
+	for _, want := range []string{"issue-42", "/Users/me/orca/workspaces/gh-9s/issue-42", "not confirmed", "by hand"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("message %q does not mention %q", text, want)
+		}
+	}
+	if len(rec.calls) != 2 {
+		t.Errorf("calls = %d, want 2", len(rec.calls))
 	}
 }
 
@@ -364,13 +437,20 @@ func TestOrcaLostReplyOffersRetry(t *testing.T) {
 	}
 }
 
-func TestOrcaLostReplyIdFromErrorText(t *testing.T) {
-	// Human-mode text (no JSON on stdout): the id is found in the error text,
-	// but only when the code says the outcome is unknown.
+func TestOrcaUnknownOutcomeWithoutAValidIDIsNotRetryable(t *testing.T) {
+	for _, data := range []string{`{}`, `{"operationId":"abc"}`, `{"operationId":"--json"}`, `null`} {
+		out := `{"ok":false,"error":{"code":"agent_session_operation_unknown","message":"unknown","data":` + data + `}}`
+		var lost *LostReplyError
+		err := orcaFailure([]byte(out), errors.New("exit status 1"))
+		if errors.As(err, &lost) {
+			t.Errorf("data %s: must not offer a retry: %v", data, err)
+		}
+	}
+	// An id only in free text (no JSON on stdout) is not trusted either.
 	err := orcaFailure(nil, errors.New("Orca could not confirm the launch outcome\nNext step: ... --retry-launch "+orcaOp))
 	var lost *LostReplyError
 	if errors.As(err, &lost) {
-		t.Errorf("an id in free text without the unknown-outcome code must not make a lost reply: %v", err)
+		t.Errorf("an id in free text must not make a lost reply: %v", err)
 	}
 }
 
@@ -416,7 +496,7 @@ func TestOrcaRejectsOptionLookingAndControlArguments(t *testing.T) {
 		{"model starts with dash", func(r *Request) { r.Model = "--effort" }},
 		{"model with control char", func(r *Request) { r.Model = "op\x00us" }},
 		{"agent without orca id", func(r *Request) { r.Agent.OrcaID = "" }},
-		{"context starts with dash", func(r *Request) { r.Context = "--json" }},
+		{"context starts with dash", func(r *Request) {}}, // the loop sets the context
 	}
 	for _, tc := range cases {
 		for _, size := range []int{10, orcaPromptMax + 1} {
@@ -425,7 +505,7 @@ func TestOrcaRejectsOptionLookingAndControlArguments(t *testing.T) {
 				r.Context = strings.Repeat("a", size)
 				tc.mod(&r)
 				if tc.name == "context starts with dash" {
-					r.Context = "-" + r.Context
+					r.Context = "-" + strings.Repeat("a", size-1)
 				}
 				rec := &recorder{reply: func(c call) ([]byte, error) { return []byte(orcaCreateAgentOut), nil }}
 				_, err := (orcaBackend{run: rec.run}).launch(r)
@@ -522,6 +602,8 @@ func repoShowWithBase(base string) string {
 	return strings.Replace(orcaRepoShowOut, `"kind": "git",`, `"kind": "git", "worktreeBaseRef": "`+base+`",`, 1)
 }
 
+// orcaWorktreeShowOut is a minimal hand-written reply, not recorded from Orca
+// (the real one has many more fields; only worktree.repoId is read).
 const orcaWorktreeShowOut = `{"id":"x","ok":true,"result":{"worktree":{"id":"` + orcaWorktreeID + `","repoId":"42a91ff8-9692-4cc1-965e-16e8ba8703b3"}}}`
 
 func TestOrcaDefaultBase(t *testing.T) {

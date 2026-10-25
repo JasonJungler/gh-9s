@@ -10,13 +10,13 @@ import (
 )
 
 // orcaPromptMax is the largest Context, in bytes, sent through `orca worktree
-// create --prompt`. Spiked with Orca 1.4.238 and Claude Code: a 150 000 byte
-// multi-line prompt (CJK, emoji, quotes, backslashes) was accepted by the CLI
-// and reached the agent byte-for-byte (the session transcript held it
-// unchanged), so the limit is the 128 KiB cap, not something Orca imposed.
-// Longer text goes through the worktree create, agent launch, terminal send
-// fallback.
-const orcaPromptMax = 131072
+// create --prompt`; longer text goes through the worktree create, agent launch,
+// terminal send fallback. It is the largest single argument a Linux process can
+// take (131072 bytes including the closing NUL). Spiked with Orca 1.4.238 and
+// Claude Code on macOS: a 150 000 byte multi-line prompt (CJK, emoji, quotes,
+// backslashes) was accepted by the CLI and reached the agent byte-for-byte, so
+// Orca itself imposes no smaller limit.
+const orcaPromptMax = 131071
 
 // orcaWorktreeIDPattern is the shape of an Orca worktree id: the repo's uuid,
 // "::", then the worktree's absolute path.
@@ -28,11 +28,9 @@ var orcaRepoIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}
 // orcaTerminalPattern is the shape of a terminal handle: "term_" and a uuid.
 var orcaTerminalPattern = regexp.MustCompile(`^term_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-// orcaOperationPattern is the shape of a launch operation id: 13 digits of
+// orcaOperationExact is the shape of a launch operation id: 13 digits of
 // milliseconds, "-", 32 hex digits. Orca's own CLI refuses --retry-launch
 // values that do not match.
-var orcaOperationPattern = regexp.MustCompile(`[0-9]{13}-[0-9a-f]{32}`)
-
 var orcaOperationExact = regexp.MustCompile(`^[0-9]{13}-[0-9a-f]{32}$`)
 
 // LostReplyError means Orca could not confirm whether a launch happened. The
@@ -135,8 +133,26 @@ func (o orcaBackend) launchOneCall(r Request) (Result, error) {
 	return Result{Where: wt.where(), Branch: wt.Branch}, nil
 }
 
+// orcaWaitTimeout is how long the fallback waits for the new agent to be idle
+// (ready for input), in milliseconds.
+const orcaWaitTimeout = "30000"
+
+// plainFailure is orcaFailure without the retry offer: in the fallback no
+// --retry-launch can be honoured, so the caller must never see a
+// *LostReplyError.
+func plainFailure(out []byte, err error) error {
+	err = orcaFailure(out, err)
+	var lost *LostReplyError
+	if errors.As(err, &lost) {
+		return errors.New(lost.Cause)
+	}
+	return err
+}
+
 // launchLarge is the fallback for a context too long for --prompt: create the
-// workspace, launch the agent in it, then send the text to its terminal.
+// workspace, launch the agent in it, wait until the agent is idle, then send
+// the text to its terminal. A retry id is never offered here: the workspace
+// exists after the first step, and asking again would make a second one.
 func (o orcaBackend) launchLarge(r Request) (Result, error) {
 	if r.RetryID != "" {
 		return Result{}, &StepError{StepCreate, errors.New("a retry id only applies to a launch that sends the prompt in one call, and this context is too long for that")}
@@ -144,13 +160,14 @@ func (o orcaBackend) launchLarge(r Request) (Result, error) {
 	args := append(orcaCreateArgs(r), "--json")
 	out, err := o.run(r.Dir, nil, "orca", args...)
 	if err != nil {
-		return Result{}, &StepError{StepCreate, orcaFailure(out, err)}
+		return Result{}, &StepError{StepCreate, plainFailure(out, err)}
 	}
 	wt, _, err := parseOrcaCreate(out)
 	if err != nil {
 		return Result{}, &StepError{StepCreate, err}
 	}
 	res := Result{Where: wt.where(), Branch: wt.Branch}
+	made := fmt.Sprintf("workspace %s (%s) was created", wt.where(), wt.Path)
 
 	args = []string{"agent", "launch", "--agent", r.Agent.OrcaID, "--worktree", "id:" + wt.ID}
 	if r.Model != "" {
@@ -158,17 +175,29 @@ func (o orcaBackend) launchLarge(r Request) (Result, error) {
 	}
 	args = append(args, "--json")
 	out, err = o.run(r.Dir, nil, "orca", args...)
-	if err != nil {
-		return Result{}, &StepError{StepStart, fmt.Errorf("workspace %s was created but the agent did not start (do not launch again from scratch, it would make a second workspace): %w", wt.where(), orcaFailure(out, err))}
+	var handle string
+	if err == nil {
+		handle, err = parseOrcaAgentLaunch(out)
+	} else {
+		err = plainFailure(out, err)
 	}
-	handle, err := parseOrcaAgentLaunch(out)
 	if err != nil {
-		return Result{}, &StepError{StepStart, fmt.Errorf("workspace %s was created: %w", wt.where(), err)}
+		return Result{}, &StepError{StepStart, fmt.Errorf("%s but the agent was not confirmed started: %w. Start the agent from Orca by hand", made, err)}
+	}
+
+	out, err = o.run(r.Dir, nil, "orca", "terminal", "wait", "--terminal", handle, "--for", "tui-idle", "--timeout-ms", orcaWaitTimeout, "--json")
+	if err == nil {
+		err = parseOrcaWait(out)
+	} else {
+		err = plainFailure(out, err)
+	}
+	if err != nil {
+		return Result{}, &StepError{StepReady, fmt.Errorf("%s but the agent did not become ready, so the context was not sent: %w", made, err)}
 	}
 
 	out, err = o.run(r.Dir, nil, "orca", "terminal", "send", "--terminal", handle, "--text", r.Context, "--enter", "--json")
 	if err != nil {
-		return Result{}, &StepError{StepPaste, fmt.Errorf("the agent is running in %s but the context was not sent: %w", wt.where(), orcaFailure(out, err))}
+		return Result{}, &StepError{StepPaste, fmt.Errorf("the agent is running in %s but the context was not sent: %w", wt.where(), plainFailure(out, err))}
 	}
 	warn, err := parseOrcaSend(out)
 	if err != nil {
@@ -176,6 +205,34 @@ func (o orcaBackend) launchLarge(r Request) (Result, error) {
 	}
 	res.Note = warn
 	return res, nil
+}
+
+// parseOrcaWait checks the reply of `orca terminal wait --for tui-idle --json`.
+//
+// Observed with Orca 1.4.238, read-only, on terminals that were busy: after
+// the timeout it exits 1 and prints on stdout
+//
+//	{"id":"...","ok":false,"error":{"code":"timeout","message":"timeout"},"_meta":{...}}
+//
+// and for a handle that does not exist (term_0000...) code
+// "terminal_handle_stale". A satisfied wait was not seen; from Orca's CLI
+// source (cli/handlers/terminal.js) it prints ok:true with result.wait.satisfied
+// true, and a wait that is not satisfied also exits 1. So success needs both
+// ok and wait.satisfied.
+func parseOrcaWait(out []byte) error {
+	var env orcaEnvelope
+	if err := json.Unmarshal(out, &env); err != nil || !env.OK {
+		return fmt.Errorf("orca printed %s instead of a satisfied wait", orcaQuote(out))
+	}
+	var res struct {
+		Wait struct {
+			Satisfied bool `json:"satisfied"`
+		} `json:"wait"`
+	}
+	if err := json.Unmarshal(env.Result, &res); err != nil || !res.Wait.Satisfied {
+		return fmt.Errorf("orca printed %s instead of a satisfied wait", orcaQuote(out))
+	}
+	return nil
 }
 
 // orcaEnvelope is the wrapper around every `orca ... --json` reply.
@@ -237,9 +294,6 @@ func orcaFailure(out []byte, err error) error {
 		if json.Unmarshal(env.Error.Data, &data) == nil && orcaOperationExact.MatchString(data.OperationID) {
 			id = data.OperationID
 		}
-	}
-	if id == "" && env.Error != nil && env.Error.Code == "agent_session_operation_unknown" {
-		id = orcaOperationPattern.FindString(err.Error())
 	}
 	if id != "" {
 		return &LostReplyError{OperationID: id, Cause: msg}
