@@ -25,6 +25,11 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// safeModelPattern is every model name that may be typed into a pane: letters, digits and . _ : / @ + [ ] -
+// (so "sonnet[1m]", "claude-opus-4-5", "anthropic/claude-sonnet-4.5" and the like). Nothing a shell treats
+// specially except [ ], which stay literal inside the quotes.
+var safeModelPattern = regexp.MustCompile(`^[A-Za-z0-9._:/@+\[\]-]+$`)
+
 // startCommand is the shell command line that starts agent a, selecting model
 // when it is not empty.
 func startCommand(a Agent, model string) string {
@@ -143,11 +148,16 @@ func (t *tmuxSpace) settle(pane string) (string, error) {
 
 // start records how often the ready marker is already on screen (the shell's
 // prompt may contain it), then types the start command into the pane. The
-// command is quoted by startCommand, so nothing in the model name is run by
-// the shell.
+// command is typed into whatever shell the pane runs, which may not be POSIX
+// (fish and nu quote differently), so the model must match safeModelPattern
+// before anything is typed; startCommand's quoting is a second layer. An empty
+// model passes no flag.
 func (t *tmuxSpace) start(pane string, r Request) error {
 	if hasControl(r.Model) || hasControl(r.Agent.TmuxCommand) {
 		return errors.New("model or command contains a control character")
+	}
+	if r.Model != "" && !safeModelPattern.MatchString(r.Model) {
+		return fmt.Errorf("model %q has characters other than letters, digits and . _ : / @ + [ ] -, so it cannot be typed into a shell safely", r.Model)
 	}
 	base := 0
 	if r.Agent.ReadyMarker != "" {

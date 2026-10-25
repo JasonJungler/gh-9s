@@ -310,6 +310,51 @@ func TestTmuxStartTypesQuotedCommand(t *testing.T) {
 	}
 }
 
+func TestTmuxStartRejectsModelsOutsideTheSafeSet(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	for _, model := range []string{
+		`a\'; rm -rf ~ #`, `trailing\`, `x'y`, `a b`, `a"b`, "a$(id)", "a`id`", "a;b", "a|b", "a&b", "a<b", "a>b", "a*b",
+		"a!b", "a#b", "a~b", "a{b}", "a(b)", "a?b", "ä", "モデル", "a\\",
+	} {
+		rec := &recorder{}
+		err := newTmux(rec.run, noEnv).start("%7", Request{Agent: claude, Model: model})
+		if err == nil || !strings.Contains(err.Error(), "model") {
+			t.Errorf("model %q accepted: %v", model, err)
+		}
+		if len(rec.calls) != 0 {
+			t.Errorf("model %q: %d tmux calls before rejecting; nothing may be typed", model, len(rec.calls))
+		}
+	}
+	// through the sequence the failure is a start step error
+	rec := &recorder{reply: paneReply}
+	err := runSequence(newTmux(rec.run, noEnv), Request{Target: TargetTmux, Agent: claude, Place: PlacePane, Split: SplitHorizontal, Model: `a\'; rm -rf ~ #`, Context: "c"}, time.Millisecond)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != StepStart {
+		t.Errorf("err = %v, want StepStart", err)
+	}
+	for _, c := range rec.calls {
+		if len(c.args) > 0 && c.args[0] == "send-keys" {
+			t.Errorf("typed into the pane: %s", c.line())
+		}
+	}
+}
+
+func TestTmuxStartAcceptsEveryCuratedAndTypicalModel(t *testing.T) {
+	claude, _ := LookupAgent("claude")
+	var names []string
+	for _, m := range claudeModels {
+		names = append(names, m.ID)
+	}
+	names = append(names, devinFallbackModels...)
+	names = append(names, "claude-opus-4-5-20251101", "anthropic/claude-sonnet-4.5", "gpt-5:high", "us.anthropic.claude-sonnet-4-5-v1:0", "model@2025+beta", "sonnet[1m]")
+	for _, model := range names {
+		rec := &recorder{reply: func(call) ([]byte, error) { return []byte("$ "), nil }}
+		if err := newTmux(rec.run, noEnv).start("%7", Request{Agent: claude, Model: model}); err != nil {
+			t.Errorf("model %q rejected: %v", model, err)
+		}
+	}
+}
+
 func TestTmuxStartRejectsControlCharacters(t *testing.T) {
 	claude, _ := LookupAgent("claude")
 	for _, model := range []string{"a\nb", "a\rb", "a\x1bb", "a\x00b", "a\x7fb", "a\tb"} {
