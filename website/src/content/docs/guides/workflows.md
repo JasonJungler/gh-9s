@@ -3,7 +3,7 @@ title: Workflows and favorites
 description: List workflows, trigger them, enable or disable them, and keep favorites with aliases.
 ---
 
-The workflows view (`2` or `:wf`) lists the workflows of the current repository. Favorites are pinned to the top with a ★.
+The workflows view (`4` or `:wf`) lists the workflows of the current repository. Favorites are pinned to the top with a ★.
 
 ## Workflow keys
 

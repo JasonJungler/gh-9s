@@ -7,15 +7,19 @@ gh-9s runs inside any git repository with a GitHub remote. Every view shows data
 
 ## Views
 
-Five views are one key away from anywhere:
+Seven views are one key away from anywhere:
 
 | Key | Command | View |
 |---|---|---|
-| `1` | `:runs` (also `:run`, `:r`) | Workflow runs. Refreshes every 5 s. |
-| `2` | `:wf` (also `:workflows`, `:w`) | Workflows. Favorites are pinned on top with a ★. |
-| `3` | `:pr` (also `:pulls`, `:prs`) | Open pull requests. `*` marks the current branch. |
-| `4` | `:issues` (also `:is`) | Issues. |
+| `1` | `:pr` (also `:pulls`, `:prs`) | Open pull requests. `*` marks the current branch. |
+| `2` | `:issues` (also `:is`) | Issues. |
+| `3` | `:runs` (also `:run`, `:r`) | Workflow runs. Refreshes every 5 s. |
+| `4` | `:wf` (also `:workflows`, `:w`) | Workflows. Favorites are pinned on top with a ★. |
+| `5` | `:discussions` (also `:disc`) | Discussions. |
+| `6` | `:wiki` | Wiki pages. |
 | `0` | `:inbox` (also `:in`) | Your inbox across repositories and hosts. |
+
+`gh 9s` starts on the pull requests view. Change that with the `start_view` [setting](/gh-9s/guides/settings/). Outside a git repository with a GitHub remote there is no repo to show, so it starts on the inbox instead, with a note that `:repo OWNER/REPO` picks one.
 
 `P` (or `:cpr`, `:checks`) opens the PR of the current branch, and `:fav` opens your favorites.
 

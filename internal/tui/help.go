@@ -92,7 +92,7 @@ func (m model) helpGroups() []helpGroup {
 	if m.previewShown() {
 		gs = append(gs, helpGroup{"Preview pane", []helpKey{{"J K", "scroll the pane"}, {"p", "hide / show it for this run"}}})
 	}
-	gs = append(gs, helpGroup{"Everywhere", []helpKey{{"1 2 3 4 5 0", "runs / workflows / pulls / issues / discussions / inbox"}, {":", "command bar (runs, pulls, issues, discussions, inbox, repo, set, settings, fav, cpr, icons, quit)"},
+	gs = append(gs, helpGroup{"Everywhere", []helpKey{{"1 2 3 4 5 6 0", "pulls / issues / runs / workflows / discussions / wiki / inbox"}, {":", "command bar (pulls, issues, runs, discussions, wiki, inbox, repo, set, settings, fav, cpr, icons, quit)"},
 		{"/", "filter the list"}, {"P", "the PR of the current branch"}, {"R", "refresh"}, {"esc", "back"}, {"?", "this help"}, {"q ctrl+c", "quit"}}})
 	return gs
 }

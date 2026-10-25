@@ -102,6 +102,7 @@ type model struct {
 	mi                            int
 	follow                        bool
 
+	startPending     bool                      // still on the start view, whose repo has not been looked up yet
 	note             string                    // explanation tied to the current view (cleared when the view changes)
 	banner           string                    // sticky startup problem, always shown
 	runMeta          ghcli.RunMeta             // the watched run's status and conclusion as last seen
@@ -238,7 +239,7 @@ func Run() error {
 	if rs, err := recent.Load(recent.DefaultPath()); err == nil {
 		m.recents = rs
 	}
-	m = m.startIcons()
+	m = m.startIcons().startOn()
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	if m.cfg().Bool("mouse") {
 		opts = append(opts, tea.WithMouseCellMotion())
@@ -263,6 +264,7 @@ func (m *model) push(v viewKind) tea.Cmd {
 
 func (m *model) switchTo(v viewKind) tea.Cmd {
 	m.view, m.tbl, m.cursor, m.top, m.filter, m.err = v, table{}, 0, 0, "", nil
+	m.startPending = false
 	m.logs, m.follow = nil, false
 	if v != viewLogs {
 		m.logJump = false

@@ -3,7 +3,7 @@ title: Issues
 description: List, filter, read, comment on, close and label issues.
 ---
 
-The issue view (`4` or `:issues`) lists issues in the current repository. Press `enter` to open one.
+The issue view (`2` or `:issues`) lists issues in the current repository. Press `enter` to open one.
 
 ## List
 

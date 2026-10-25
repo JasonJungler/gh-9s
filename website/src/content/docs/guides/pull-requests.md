@@ -3,7 +3,7 @@ title: Pull requests
 description: List, filter, inspect, check, review and merge pull requests.
 ---
 
-The pull request view (`3` or `:pr`) lists open pull requests in the current repository. Press `enter` to open one.
+The pull request view (`1` or `:pr`) lists open pull requests in the current repository. Press `enter` to open one.
 
 ## List
 

@@ -37,6 +37,8 @@ var Registry = []Def{
 		Kind: Int, Default: 120, Min: 80, Max: 400},
 	{Key: "mouse", Label: "Mouse wheel", Desc: "scroll with the wheel; while on, select text by holding Option (iTerm2, Terminal.app) or Shift (Windows Terminal, tmux)",
 		Kind: Bool, Default: true},
+	{Key: "start_view", Label: "Start view", Desc: "the view gh 9s opens on; outside a repo it opens the inbox instead",
+		Kind: Enum, Default: "pulls", Options: []string{"pulls", "issues", "runs", "workflows", "discussions", "wiki", "inbox"}},
 	{Key: "delete_branch_after_merge", Label: "Delete branch after merge", Desc: "the answer to \"delete the branch?\" in the merge dialog starts as this",
 		Kind: Bool, Default: false},
 	{Key: "launch_target", Label: "Launch target", Desc: "where to start a coding agent for an issue; auto: the one gh-9s is running inside (orca, herdr or tmux)",

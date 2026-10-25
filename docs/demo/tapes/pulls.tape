@@ -6,7 +6,7 @@ Enter
 Sleep 2s
 
 # a pull request: reviewers, checks, linked issue
-Type "3"
+Type "1"
 Sleep 2500ms
 Enter
 Sleep 3s

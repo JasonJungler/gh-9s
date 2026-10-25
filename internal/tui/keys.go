@@ -123,13 +123,13 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "0":
 		return m.goTop(viewInbox)
 	case "1":
-		return m.goTop(viewRuns)
-	case "2":
-		return m.goTop(viewWorkflows)
-	case "3":
 		return m.goTop(viewPRs)
-	case "4":
+	case "2":
 		return m.goTop(viewIssues)
+	case "3":
+		return m.goTop(viewRuns)
+	case "4":
+		return m.goTop(viewWorkflows)
 	case "5":
 		return m.goTop(viewDiscussions)
 	case "6":
