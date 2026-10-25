@@ -259,8 +259,9 @@ func (t *tmuxSpace) waitBracketedPaste(pane string) error {
 // submit the first line would then submit the prompt anyway; with submit the first line would submit it and
 // the remaining lines would arrive as separate messages or keystrokes, followed by one more Enter. So paste
 // first waits for #{bracket_paste_flag} to be 1 and, if it never is, pastes nothing and presses nothing (this
-// check comes before load-buffer, so no buffer is left behind). Whether Claude Code and Devin turn bracketed
-// paste on under tmux is not verified here; Claude Code is expected to.
+// check comes before load-buffer, so no buffer is left behind). Checked live with Claude Code: the flag was
+// 0 at 0.5 s and 1 from the moment its banner showed (about 1 s), and a pasted multi-line text stayed in its
+// input box unsubmitted. Devin has not been checked.
 func (t *tmuxSpace) paste(pane, text string, submit bool) error {
 	if err := t.waitBracketedPaste(pane); err != nil {
 		return err

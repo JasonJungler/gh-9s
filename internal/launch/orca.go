@@ -160,10 +160,11 @@ func plainFailure(out []byte, err error) error {
 // first step, and asking again would make a second one.
 //
 // With PasteOnly the send has no --enter, so the text waits in the agent's
-// input box. That call has not been run against a real Orca (the unit tests use
-// a fake), and it is unknown whether `orca terminal send --text` delivers
-// multi-line text as a bracketed paste; if it does not, a newline in the text
-// may submit it.
+// input box. Checked live against Orca 1.4.238 with Claude Code: the send writes
+// the raw bytes to the pty (no bracketed paste markers), a multi-line text
+// stayed in Claude's input box and nothing was submitted, because a raw LF does
+// not submit in Claude Code (only CR does; BuildContext strips CR). Another agent
+// might treat a raw LF as Enter; Devin has not been checked.
 func (o orcaBackend) launchLarge(r Request) (Result, error) {
 	if r.RetryID != "" {
 		why := "this context is too long for that"
@@ -444,8 +445,10 @@ func parseOrcaAgentLaunch(out []byte) (string, error) {
 //
 // The agent did answer that prompt, so the warning is not a failure; it is
 // passed on as a note. Without Enter (pasteOnly) no turn is meant to start, so
-// that warning is expected; any warning is then passed on as a plainer note,
-// since what Orca says for a send without Enter has not been observed.
+// that warning is expected; any warning is then passed on as a plainer note.
+// Observed live (Orca 1.4.238): a send without Enter answers
+// {"ok":true,"result":{"send":{"handle":...,"accepted":true,"bytesWritten":N}}}
+// with no warnings and no prompt receipt.
 func parseOrcaSend(out []byte, pasteOnly bool) (string, error) {
 	var env orcaEnvelope
 	if err := json.Unmarshal(out, &env); err != nil || !env.OK {
