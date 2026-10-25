@@ -299,11 +299,11 @@ func (m model) tableBody() string {
 		}
 		if i == m.cursor {
 			if m.paneList {
-				b.WriteString(stySel.Render(padTo(line.String(), m.width)) + "\n")
+				b.WriteString(fluentSel(padTo(line.String(), m.width)) + "\n")
 				lines++
 				continue
 			}
-			b.WriteString(stySel.Render(line.String()) + "\n")
+			b.WriteString(fluentSel(line.String()) + "\n")
 		} else {
 			b.WriteString(line.String() + "\n")
 		}

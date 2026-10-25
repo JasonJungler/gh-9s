@@ -139,9 +139,11 @@ func cardLines(p ghcli.Project, i, w int, selected, marked bool) []string {
 		r.cells[0] = "● " + r.cells[0]
 	}
 	lines := []string{padCell(r.cells[0], w), padCell(tl[0], w), padCell(tl[1], w), padCell(meta, w)}
-	if selected {
-		for k := range lines {
-			lines[k] = ui.Sel.Render(lines[k])
+	for k := range lines {
+		if selected {
+			lines[k] = fluentSel(lines[k])
+		} else {
+			lines[k] = fluentCard(lines[k])
 		}
 	}
 	return lines
