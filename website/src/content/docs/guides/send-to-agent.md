@@ -37,7 +37,7 @@ On the issue list, gh-9s first loads the whole issue (a row only has its number)
 
 ### Editing
 
-`e` turns the line into a form. Use `tab` or `↑` `↓` to move, `←` `→` to choose a value, and type to edit a text field. `enter` launches from the form too. The rows are:
+`e` turns the line into a form. Use `tab` or `↑` `↓` to move, `←` `→` to choose a value, and type to edit a text field. `enter` launches from the form too, except on the Prompt row, where it opens the editor (see [Editing the prompt](#editing-the-prompt)). The rows are:
 
 | Row | Applies to | What it sets |
 |---|---|---|
@@ -48,8 +48,31 @@ On the issue list, gh-9s first loads the whole issue (a row only has its number)
 | Branch | Orca | The workspace name, `issue-<number>-<title words>` to start with |
 | Place | herdr, tmux | `pane` or `window` (a tab, in herdr) |
 | Split | herdr, tmux, for a pane | `horizontal` (new pane on the right) or `vertical` (below) |
+| Prompt | all | A summary of the text the agent will get, such as `title + body + 2 comments · 1840 characters`. `enter` edits it in `$EDITOR`. |
 
 Base and Branch are required in Orca. If one is empty, `enter` says so instead of launching.
+
+### Editing the prompt
+
+The Prompt row is the last row of the form. It shows what will be sent, as a summary, for example `title + body + 2 comments · 1840 characters`. To change the text itself, focus the row and press `enter`. gh-9s opens the **whole prompt** in your editor: the opening sentence, the title, the description and all comments, exactly as [the agent would receive it](#what-the-agent-receives). It uses `$VISUAL`, then `$EDITOR`, then `vi`, the same as writing a comment draft with `ctrl+e`. Save and quit to use the text.
+
+| Key on the Prompt row | Action |
+|---|---|
+| `enter` | Open the prompt in `$VISUAL` / `$EDITOR`. The editor shows the current prompt, so a second edit starts from the first. |
+| `r` | Go back to the generated prompt. |
+
+Once the prompt has been changed, the row reads `edited · N characters` and the one-line summary gets `· prompt edited`. The edited text is used for everything that depends on it: what the agent receives, the `⚠ large issue` character warning, the byte limit warnings for Orca and herdr, and the check that refuses a text too big for the platform ([What Orca does differently](#what-orca-does-differently)).
+
+What happens to the text that comes back from the editor:
+
+- Windows line breaks (`CRLF`) become ordinary line breaks first, so an editor that saves them does not lose your lines.
+- Control characters other than newline and tab are removed, just as they are from the issue text: carriage returns, escape sequences and the end marker of a bracketed paste cannot reach the agent. Invalid UTF-8 becomes the replacement character `�`.
+- Trailing spaces and blank lines at the end are removed.
+- A text that is empty after that is refused with `prompt is empty`, and the previous prompt is kept. Saving without a change, an editor that fails or exits with an error, and a text equal to the generated one also leave the prompt as it was (the last one clears the `edited` mark).
+
+The edit belongs to this one launch. It is not saved in the settings, in the remembered model file or in your drafts; the next time you press `a` the prompt is generated again. Changing Where, Agent, Model, Base, Branch, Place or Split does not discard it. While the editor is open nothing can be launched or cancelled; `esc` works as before once it has closed. Orca also refuses a text that begins with `-`, because Orca could read it as an option.
+
+The opening sentence, `Please solve this issue`, is fixed. There is no setting for it: `:settings` can only hold on/off, choice and number values, not free text. Edit the prompt to change it for one launch.
 
 After a successful launch, gh-9s remembers the agent (in the `launch_agent` setting) and the model you used for it. The next dialog starts from them.
 
@@ -150,6 +173,8 @@ Please solve this issue
 ```
 
 All comments are included, in order. With `launch_submit` off the agent receives the same text; it is only not submitted. A comment from a deleted user shows `ghost`. An issue with no description shows `(no description)`. Labels and assignees are left out, and images stay as links. Control characters are removed so issue text cannot send terminal commands to the agent's terminal.
+
+You can change this text before the launch, see [Editing the prompt](#editing-the-prompt).
 
 Above 100,000 characters the line adds `⚠ large issue, N characters`. In Orca and herdr the byte limit above applies as well. Nothing is cut: an issue is either sent whole or refused.
 
