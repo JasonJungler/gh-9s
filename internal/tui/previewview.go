@@ -71,8 +71,8 @@ func prPreview(d *detailDoc, p ghcli.PRDetail, width int) {
 	}
 	var body detailDoc // the part under the title; beside the sidebar when the pane is wide enough
 	d, whole := &body, d
-	d.add("", "Review: "+orDash(p.ReviewDecision))
-	d.add(fmt.Sprintf("Checks: %s%d %s%d %s%d", icons.Get(icons.CheckPass), p.ChecksPassed, icons.Get(icons.CheckFail), p.ChecksFailed, icons.Get(icons.CheckPending), p.ChecksPending))
+	d.add("", labelValue("Review", orDash(p.ReviewDecision)))
+	d.add(labelValue("Checks", fmt.Sprintf("%s%d %s%d %s%d", icons.Get(icons.CheckPass), p.ChecksPassed, icons.Get(icons.CheckFail), p.ChecksFailed, icons.Get(icons.CheckPending), p.ChecksPending)))
 	for _, n := range p.FailingChecks {
 		d.add(ui.Fail.Render(trunc(" "+icons.Get(icons.CheckFail)+" "+n, mainW)))
 	}

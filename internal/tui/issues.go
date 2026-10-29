@@ -302,10 +302,10 @@ func issueLines(d ghcli.IssueDetail, width int) detailDoc {
 	} else {
 		labels, assignees := "no labels", "unassigned"
 		if len(d.Labels) > 0 {
-			labels = "Labels: " + strings.Join(d.Labels, ", ")
+			labels = labelValue("Labels", strings.Join(d.Labels, ", "))
 		}
 		if len(d.Assignees) > 0 {
-			assignees = "Assignees: " + strings.Join(d.Assignees, ", ")
+			assignees = labelValue("Assignees", strings.Join(d.Assignees, ", "))
 		}
 		out.add(labels + "   " + assignees)
 	}

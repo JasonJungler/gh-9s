@@ -151,10 +151,10 @@ func prDetailLines(d ghcli.PRDetail, width int) detailDoc {
 		state += " (draft)"
 	}
 	out.add(fmt.Sprintf("%s   %s ← %s   %s", d.Author, d.BaseRef, d.HeadRef, state))
-	out.add(fmt.Sprintf("Review: %s   Merge: %s   Checks: %s%d %s%d %s%d   +%d −%d in %d files",
-		orDash(d.ReviewDecision), orDash(d.MergeState),
-		icons.Get(icons.CheckPass), d.ChecksPassed, icons.Get(icons.CheckFail), d.ChecksFailed, icons.Get(icons.CheckPending), d.ChecksPending,
-		d.Additions, d.Deletions, d.ChangedFiles))
+	out.add(labelValue("Review", orDash(d.ReviewDecision)) + "   " +
+		labelValue("Merge", orDash(d.MergeState)) + "   " +
+		labelValue("Checks", fmt.Sprintf("%s%d %s%d %s%d", icons.Get(icons.CheckPass), d.ChecksPassed, icons.Get(icons.CheckFail), d.ChecksFailed, icons.Get(icons.CheckPending), d.ChecksPending)) + "   " +
+		fmt.Sprintf("+%d −%d in %d files", d.Additions, d.Deletions, d.ChangedFiles))
 	split := width >= detailSplitMin
 	mainW := width
 	if split {

@@ -615,7 +615,7 @@ func TestOOpensThePageOrTheWikiInTheBrowser(t *testing.T) {
 func TestHelpAndFootersMentionTheWikiKeys(t *testing.T) {
 	installWiki(t)
 	m := wikiListModel(t)
-	for _, want := range []string{"e edit", "n new page", "x delete"} {
+	for _, want := range []string{"e: edit", "n: new page", "x: delete"} {
 		if !strings.Contains(screenText(m), want) {
 			t.Errorf("list footer lacks %q", want)
 		}

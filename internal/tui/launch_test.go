@@ -141,7 +141,7 @@ func TestAKeyOnDetailOpensDialog(t *testing.T) {
 		t.Fatalf("a opened no dialog; status %q", ansi.Strip(m.status))
 	}
 	v := ansi.Strip(m.View())
-	for _, want := range []string{"Send #42", "Fix login crash", "tmux ◆ new pane (right) · claude · default model", "enter launch"} {
+	for _, want := range []string{"Send #42", "Fix login crash", "tmux ◆ new pane (right) · claude · default model", "enter: launch"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}

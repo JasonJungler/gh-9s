@@ -627,13 +627,21 @@ func (d launchDialog) view(width int) string {
 			keys = "enter edit the prompt in $EDITOR   r restore it   tab/↑↓ move (enter launches from the other rows)   esc cancel"
 		}
 	}
+	hasShortcuts := true
 	if d.editing {
 		keys = "the editor is open"
+		hasShortcuts = false
 	}
 	if d.run {
 		keys = "wait for the launch to finish"
+		hasShortcuts = false
 	}
-	b.WriteString("\n" + styDim.Render(wrapLines(keys, width)) + "\n")
+	if hasShortcuts {
+		keys = shortcutHints(keys)
+	} else {
+		keys = styDim.Render(keys)
+	}
+	b.WriteString("\n" + wrapLines(keys, width) + "\n")
 	return fitLines(b.String(), width)
 }
 

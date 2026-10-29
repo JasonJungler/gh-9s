@@ -276,13 +276,13 @@ func TestPromptRowFitsTheWidth(t *testing.T) {
 func TestHintListsTheKeysOfThePromptRow(t *testing.T) {
 	d := onPrompt(t, newLaunchDialog(promptInput()))
 	v := ansi.Strip(d.view(200))
-	for _, want := range []string{"enter edit the prompt in $EDITOR", "r restore", "esc cancel"} {
+	for _, want := range []string{"enter: edit the prompt in $EDITOR", "r: restore", "esc: cancel"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("hint lacks %q:\n%s", want, v)
 		}
 	}
 	e, _ := launchKeys(newLaunchDialog(promptInput()), "e")
-	if v := ansi.Strip(e.view(200)); !strings.Contains(v, "enter launch") {
+	if v := ansi.Strip(e.view(200)); !strings.Contains(v, "enter: launch") {
 		t.Errorf("the other rows lost the launch hint:\n%s", v)
 	}
 }

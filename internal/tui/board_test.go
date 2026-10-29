@@ -938,7 +938,7 @@ func TestColumnHeaderKeepsTheCountAndTheFooterListsTheKeys(t *testing.T) {
 	if !strings.Contains(out, "(1)") || !strings.Contains(out, "…") {
 		t.Errorf("header:\n%s", out)
 	}
-	if !strings.Contains(out, "j/k card") {
+	if !strings.Contains(out, "j/k: card") {
 		t.Errorf("footer:\n%s", out)
 	}
 }

@@ -107,7 +107,7 @@ func (m model) helpLines(width int) []string {
 		out = append(out, styCols.Render(g.title))
 		for _, r := range g.rows {
 			const keyW = 16
-			k := ansi.Truncate(r.keys, keyW, "…")
+			k := ansi.Truncate(r.keys, keyW-1, "…") + ":"
 			pad := strings.Repeat(" ", max(keyW-ansi.StringWidth(k), 0))
 			lines := wrap(r.what, max(width-keyW-3, 10))
 			for j, l := range lines {
@@ -136,7 +136,7 @@ func (m model) helpView() string {
 	for n := len(lines) - top; n < h; n++ {
 		b.WriteString("\n")
 	}
-	b.WriteString(styDim.Render("j/k scroll  esc or ? close"))
+	b.WriteString(shortcutHints("j/k scroll  esc/? close"))
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6")).Padding(0, 1).Width(m.boxWidth()).Render(b.String()) + "\n"
 }
 

@@ -154,7 +154,7 @@ func (m model) View() string {
 		title += "  loading…"
 	}
 	b.WriteString(styHeader.Render(strings.TrimSpace(title)) + "\n")
-	b.WriteString(styDim.Render("<1>pulls <2>issues <3>runs <4>workflows <5>disc <6>wiki <0>inbox <:fav>favs <:repo>repo <P>current-PR <:>cmd </>filter") + "\n")
+	b.WriteString(functionBar(m.width) + "\n")
 	if m.promptActive() {
 		b.WriteString(m.promptBox() + "\n")
 	}
@@ -367,7 +367,7 @@ func (m model) footer() string {
 	if line == "" && m.banner != "" {
 		line = styErr.Render(m.banner)
 	}
-	return line + "\n" + styDim.Render(keys)
+	return line + "\n" + shortcutHints(keys)
 }
 
 // promptActive reports whether a one-line prompt (command, filter, search, alias, confirm) is open.

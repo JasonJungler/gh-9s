@@ -41,7 +41,7 @@ func TestRegisteredScreenIsFetchedAndApplied(t *testing.T) {
 	next, _ := m.Update(msg)
 	m = next.(model)
 	v := m.View()
-	for _, want := range []string{"FAKE BODY: hello", "x press-me", "<fake>"} {
+	for _, want := range []string{"FAKE BODY: hello", "x: press-me", "<fake>"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("View() lacks %q:\n%s", want, v)
 		}
@@ -113,7 +113,7 @@ func TestFooterHintsAreHumanText(t *testing.T) {
 			}
 		}
 	}
-	if f := (model{view: viewWorkflows}).footer(); !strings.Contains(f, "f favorite ") {
-		t.Errorf("workflows footer should say 'f favorite': %q", f)
+	if f := (model{view: viewWorkflows}).footer(); !strings.Contains(f, "f: favorite ") {
+		t.Errorf("workflows footer should say 'f: favorite': %q", f)
 	}
 }

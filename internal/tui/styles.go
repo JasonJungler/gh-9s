@@ -26,6 +26,7 @@ var (
 	styDim    = ui.Dim
 	styErr    = ui.Err
 	styKey    = ui.Key
+	styNumKey = ui.NumKey
 )
 
 func stateStyle(s state) lipgloss.Style { return ui.StateStyle(s) }

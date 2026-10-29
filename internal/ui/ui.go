@@ -98,6 +98,7 @@ var (
 	Dim    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	Err    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	Key    = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	NumKey = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
 )
 
 // StateStyle colours text by state.

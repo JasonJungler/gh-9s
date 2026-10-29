@@ -85,7 +85,7 @@ func TestHelpExplainsEveryKeyOfTheFooters(t *testing.T) {
 			if len(spec) == 0 {
 				continue
 			}
-			for _, key := range splitKeySpec(spec[0]) {
+			for _, key := range splitKeySpec(strings.TrimSuffix(spec[0], ":")) {
 				key = strings.Replace(key, "ctrl-", "ctrl+", 1)
 				if key == "refresh" || key == "quit" {
 					continue

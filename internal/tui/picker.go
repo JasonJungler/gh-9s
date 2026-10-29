@@ -374,7 +374,7 @@ func (m model) pickerView() string {
 	if len(p.hosts) > 1 {
 		keys = " ↑↓ select   enter switch   ctrl+f pin ★   tab scope   shift+tab host   esc cancel"
 	}
-	b.WriteString("\n" + ui.Dim.Render(keys) + "\n")
+	b.WriteString("\n " + shortcutHints(keys) + "\n")
 	return b.String()
 }
 

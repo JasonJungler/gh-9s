@@ -24,7 +24,7 @@ func init() {
 		apply:  func(m model, msg screenMsg) model { return m },
 		key:    settingsKey,
 		body:   settingsBody,
-		footer: "j/k move  enter or → next value  ← previous  :set key value  esc back",
+		footer: "j/k move  enter/→ next value  ← previous  :set key value  esc back",
 	})
 }
 
